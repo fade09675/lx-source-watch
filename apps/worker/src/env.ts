@@ -16,6 +16,12 @@ export interface Env {
   GH_DISPATCH_TOKEN?: string;
   /** GitHub 仓库，形如 owner/name；缺省用内置值。 */
   GH_REPO?: string;
+  /** 只读统计令牌（复用 CF_API_TOKEN），用于 KV/D1 用量查询。 */
+  CF_ANALYTICS_TOKEN?: string;
+  /** Cloudflare 账号 ID，用于统计查询。 */
+  CF_ACCOUNT_ID?: string;
+  /** D1 数据库 ID，用于过滤统计里的其它数据库。 */
+  D1_ID?: string;
   SITE_NAME?: string;
   PUBLIC_ORIGIN?: string;
   ASSETS?: Fetcher;

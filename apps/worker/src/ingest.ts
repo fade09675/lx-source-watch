@@ -5,6 +5,7 @@ import { SNAPSHOT_KEY, type Env } from './env';
 import { diffEvents } from './events';
 import { verifySignature } from './hmac';
 import { mergeSnapshot } from './merge';
+import { recordKvPut } from './usage';
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 
@@ -70,6 +71,7 @@ export async function handleIngest(c: Ctx): Promise<Response> {
     // 幂等：重复上报只刷新 KV 展示层，不再写明细。
     const prev = await readPrev(env);
     const merged = mergeSnapshot(prev, snapshot);
+    await recordKvPut(env);
     await env.SNAPSHOT.put(SNAPSHOT_KEY, JSON.stringify(merged));
     return Response.json({ ok: true, duplicate: true, runId: snapshot.runId, sources: merged.sources.length });
   }
@@ -93,6 +95,7 @@ export async function handleIngest(c: Ctx): Promise<Response> {
     now,
   });
 
+  await recordKvPut(env);
   await env.SNAPSHOT.put(SNAPSHOT_KEY, JSON.stringify(merged));
 
   return Response.json({

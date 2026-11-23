@@ -26,6 +26,8 @@
   ],
   "vars": {
     "SITE_NAME": "LX 音源监测",
-    "PUBLIC_ORIGIN": "https://dash.dpdns.org"
+    "PUBLIC_ORIGIN": "https://dash.dpdns.org",
+    "CF_ACCOUNT_ID": "8e8c755370e9a2bf44146edf108f3e39",
+    "D1_ID": "480ae090-90e3-4b14-8415-ef7a33d7d0a5"
   }
 }

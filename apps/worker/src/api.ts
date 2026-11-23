@@ -32,6 +32,7 @@ import { filterSnapshot, parseList } from './filter';
 import { handleIngest } from './ingest';
 import { isStale } from './merge';
 import { dispatchProbe, dispatchProxyTest, listProbeRuns } from './dispatch';
+import { getUsage, recordKvPut, refreshUsage } from './usage';
 
 type Ctx = { Bindings: Env };
 
@@ -259,6 +260,7 @@ export function createApi(): Hono<Ctx> {
       );
     }
 
+    await recordKvPut(c.env);
     await c.env.SNAPSHOT.put('run:probe:last', outcome.dispatchedAt, { expirationTtl: 60 });
     return Response.json({ ok: true, dispatchedAt: outcome.dispatchedAt }, { headers: { 'cache-control': CACHE_PRIVATE } });
   });
@@ -273,6 +275,17 @@ export function createApi(): Hono<Ctx> {
     }
     const lastDispatchedAt = await c.env.SNAPSHOT.get('run:probe:last');
     return Response.json({ runs: result.runs, lastDispatchedAt }, { headers: { 'cache-control': CACHE_PRIVATE } });
+  });
+
+  // KV / D1 / Actions 用量。默认 5 分钟内复用缓存，?refresh=1 强制刷新。
+  api.get('/admin/usage', async (c) => {
+    const usage = await getUsage(c.env, { refresh: c.req.query('refresh') === '1' });
+    return Response.json({ usage }, { headers: { 'cache-control': CACHE_PRIVATE } });
+  });
+
+  api.post('/admin/usage/refresh', async (c) => {
+    const usage = await refreshUsage(c.env);
+    return Response.json({ usage }, { headers: { 'cache-control': CACHE_PRIVATE } });
   });
 
   // 网页触发一次代理测活（全部或指定节点）。
@@ -301,6 +314,7 @@ export function createApi(): Hono<Ctx> {
         { status: outcome.status, headers: { 'cache-control': CACHE_PRIVATE } },
       );
     }
+    await recordKvPut(c.env);
     await c.env.SNAPSHOT.put('run:proxy-test:last', outcome.dispatchedAt, { expirationTtl: 60 });
     return Response.json({ ok: true, dispatchedAt: outcome.dispatchedAt }, { headers: { 'cache-control': CACHE_PRIVATE } });
   });

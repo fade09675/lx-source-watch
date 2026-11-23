@@ -48,6 +48,14 @@ jobs:
       - name: 构建前端
         run: pnpm --filter @lx/web build
 
+      # 复用部署令牌（只读统计权限）同步成 Worker 机密，不额外新建令牌。
+      - name: 同步统计令牌
+        working-directory: apps/worker
+        run: printf '%s' "$CLOUDFLARE_API_TOKEN" | pnpm exec wrangler secret put CF_ANALYTICS_TOKEN
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 8e8c755370e9a2bf44146edf108f3e39
+
       - name: 部署
         working-directory: apps/worker
         run: pnpm exec wrangler deploy
