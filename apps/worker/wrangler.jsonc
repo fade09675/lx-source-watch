@@ -3,22 +3,23 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
   "observability": { "enabled": true },
+  "routes": [{ "pattern": "dash.dpdns.org", "custom_domain": true }],
   "kv_namespaces": [
     {
       "binding": "SNAPSHOT",
-      "id": "00000000000000000000000000000000"
+      "id": "b03922f750664b2babae29ee524c7936"
     }
   ],
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "lx-source-watch",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "480ae090-90e3-4b14-8415-ef7a33d7d0a5",
       "migrations_dir": "migrations"
     }
   ],
   "vars": {
     "SITE_NAME": "LX 音源监测",
-    "PUBLIC_ORIGIN": "http://localhost:8787"
+    "PUBLIC_ORIGIN": "https://dash.dpdns.org"
   }
 }
