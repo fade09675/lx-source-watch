@@ -31,6 +31,7 @@ import { ADMIN_PASSWORD_SETTING, SNAPSHOT_KEY } from './env';
 import { filterSnapshot, parseList } from './filter';
 import { handleIngest } from './ingest';
 import { isStale } from './merge';
+import { dispatchProbe, listProbeRuns } from './dispatch';
 
 type Ctx = { Bindings: Env };
 
@@ -218,6 +219,59 @@ export function createApi(): Hono<Ctx> {
     const updated = await setCandidateState(c.env.DB, id, state, new Date().toISOString());
     if (!updated) return c.json({ error: 'not_found', message: `未知候选源：${id}` }, 404);
     return c.json({ ok: true, id, state }, 200, { 'cache-control': CACHE_PRIVATE });
+  });
+
+  // 网页触发一次探测，避免每次都去 GitHub 手动点。
+  api.post('/admin/run/probe', async (c) => {
+    const last = await c.env.SNAPSHOT.get('run:probe:last');
+    if (last) {
+      return Response.json(
+        { error: 'too_frequent', message: '刚刚已经触发过，请等一分钟再试' },
+        { status: 429, headers: { 'retry-after': '60', 'cache-control': CACHE_PRIVATE } },
+      );
+    }
+
+    let body: Record<string, unknown> = {};
+    try {
+      body = await c.req.json<Record<string, unknown>>();
+    } catch {
+      // 允许空请求体，全部使用默认参数。
+    }
+    const limit = typeof body.limit === 'string' ? body.limit.trim() : '';
+    if (limit && !/^[1-9]\d{0,2}$/.test(limit)) {
+      return Response.json(
+        { error: 'bad_request', message: '“最多测几个源”只能是 1 到 999 的数字' },
+        { status: 400, headers: { 'cache-control': CACHE_PRIVATE } },
+      );
+    }
+
+    const outcome = await dispatchProbe(c.env, {
+      only: typeof body.only === 'string' ? body.only : '',
+      limit,
+      deep: body.deep === true,
+      preferMirror: body.preferMirror === true,
+    });
+    if (!outcome.ok) {
+      return Response.json(
+        { error: 'dispatch_failed', message: outcome.message },
+        { status: outcome.status, headers: { 'cache-control': CACHE_PRIVATE } },
+      );
+    }
+
+    await c.env.SNAPSHOT.put('run:probe:last', outcome.dispatchedAt, { expirationTtl: 60 });
+    return Response.json({ ok: true, dispatchedAt: outcome.dispatchedAt }, { headers: { 'cache-control': CACHE_PRIVATE } });
+  });
+
+  api.get('/admin/runs', async (c) => {
+    const result = await listProbeRuns(c.env, 5);
+    if (!result.ok) {
+      return Response.json(
+        { error: 'runs_failed', message: result.message },
+        { status: result.status, headers: { 'cache-control': CACHE_PRIVATE } },
+      );
+    }
+    const lastDispatchedAt = await c.env.SNAPSHOT.get('run:probe:last');
+    return Response.json({ runs: result.runs, lastDispatchedAt }, { headers: { 'cache-control': CACHE_PRIVATE } });
   });
 
   api.get('/status', async (c) => {

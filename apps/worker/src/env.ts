@@ -12,6 +12,10 @@ export interface Env {
   PROXY_ENC_KEY?: string;
   /** Actions 的 cn job 拉取代理池用的 Bearer Token。 */
   RUNNER_TOKEN?: string;
+  /** 网页触发 GitHub Actions 的细粒度令牌（操作：读取和写入）。 */
+  GH_DISPATCH_TOKEN?: string;
+  /** GitHub 仓库，形如 owner/name；缺省用内置值。 */
+  GH_REPO?: string;
   SITE_NAME?: string;
   PUBLIC_ORIGIN?: string;
   ASSETS?: Fetcher;

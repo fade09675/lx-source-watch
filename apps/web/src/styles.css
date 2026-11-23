@@ -1266,3 +1266,55 @@ a:hover {
 
 .file-button { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .file-button input[type='file'] { display: none; }
+
+.run-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.run-form .field.inline {
+  min-width: 170px;
+}
+
+.run-form .check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 10px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.run-form .check input {
+  width: 16px;
+  height: 16px;
+}
+
+.run-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.run-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-2);
+  font-size: 13px;
+}
+
+.run-list a {
+  color: var(--accent);
+  text-decoration: none;
+}

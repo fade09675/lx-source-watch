@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { formatDateTime, formatDuration, type EventItem, type HealthResponse, type RunSummary } from '@lx/shared';
-import { ApiError, api } from '../api';
+import { ApiError, api, type WorkflowRunView } from '../api';
 import { EmptyBox, ErrorBox, Spinner } from '../components/Feedback';
 
 const EVENT_LABEL: Record<EventItem['type'], string> = {
@@ -8,6 +8,24 @@ const EVENT_LABEL: Record<EventItem['type'], string> = {
   degraded: '降级',
   failed: '持续失效',
   new: '新源',
+};
+
+const RUN_STATUS: Record<string, string> = {
+  queued: '排队中',
+  in_progress: '运行中',
+  completed: '已完成',
+  waiting: '等待中',
+  requested: '已请求',
+  pending: '等待中',
+};
+
+const RUN_CONCLUSION: Record<string, string> = {
+  success: '成功',
+  failure: '失败',
+  cancelled: '已取消',
+  skipped: '跳过',
+  timed_out: '超时',
+  action_required: '需处理',
 };
 
 export function AdminPage() {
@@ -19,6 +37,36 @@ export function AdminPage() {
   const [newPassword, setNewPassword] = useState('');
   const [message, setMessage] = useState('');
   const [saving, setSaving] = useState(false);
+  const [ghRuns, setGhRuns] = useState<WorkflowRunView[]>([]);
+  const [lastDispatchedAt, setLastDispatchedAt] = useState<string | null>(null);
+  const [runLimit, setRunLimit] = useState('3');
+  const [preferMirror, setPreferMirror] = useState(true);
+  const [dispatching, setDispatching] = useState(false);
+  const [runMessage, setRunMessage] = useState('');
+
+  async function reloadRuns() {
+    try {
+      const result = await api.workflowRuns();
+      setGhRuns(result.runs);
+      setLastDispatchedAt(result.lastDispatchedAt ?? null);
+    } catch (err) {
+      setRunMessage(err instanceof ApiError ? err.message : '读取运行状态失败');
+    }
+  }
+
+  async function runNow() {
+    setDispatching(true);
+    setRunMessage('');
+    try {
+      const result = await api.runProbe({ limit: runLimit.trim(), preferMirror });
+      setRunMessage(`已触发（${formatDateTime(result.dispatchedAt)}），约 1–2 分钟后可在这里看到状态。`);
+      window.setTimeout(() => void reloadRuns(), 3000);
+    } catch (err) {
+      setRunMessage(err instanceof ApiError ? err.message : '触发失败');
+    } finally {
+      setDispatching(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -35,6 +83,11 @@ export function AdminPage() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    void reloadRuns();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function changePassword(event: FormEvent) {
@@ -85,6 +138,51 @@ export function AdminPage() {
           </div>
         </div>
       )}
+
+      <section>
+        <h2>运行控制</h2>
+        <p className="muted">点一下会在 GitHub 上启动一轮探测，不需要再去网站手动点。触发后约 1–2 分钟出结果。</p>
+        <div className="run-form">
+          <label className="field inline">
+            <span>最多测几个源</span>
+            <input
+              value={runLimit}
+              onChange={(event) => setRunLimit(event.target.value)}
+              placeholder="留空表示全部"
+              inputMode="numeric"
+            />
+          </label>
+          <label className="check">
+            <input type="checkbox" checked={preferMirror} onChange={(event) => setPreferMirror(event.target.checked)} />
+            <span>优先用镜像下载脚本</span>
+          </label>
+          <button type="button" className="primary-button" onClick={() => void runNow()} disabled={dispatching}>
+            {dispatching ? '触发中…' : '立即运行探测'}
+          </button>
+          <button type="button" className="ghost-button" onClick={() => void reloadRuns()}>
+            刷新状态
+          </button>
+        </div>
+        {runMessage && <div className="form-message">{runMessage}</div>}
+        {lastDispatchedAt && <p className="muted">上次网页触发：{formatDateTime(lastDispatchedAt)}</p>}
+        {ghRuns.length > 0 && (
+          <ul className="run-list">
+            {ghRuns.map((run) => (
+              <li key={run.id}>
+                <span className={`pill run-${run.status}`}>{RUN_STATUS[run.status] ?? run.status}</span>
+                <span className="mono muted">{formatDateTime(run.createdAt)}</span>
+                <span>{run.event === 'workflow_dispatch' ? '手动触发' : run.event === 'schedule' ? '定时触发' : run.event}</span>
+                <span className="muted">{run.conclusion ? (RUN_CONCLUSION[run.conclusion] ?? run.conclusion) : '—'}</span>
+                {run.url && (
+                  <a href={run.url} target="_blank" rel="noreferrer">
+                    查看日志
+                  </a>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       <section>
         <h2>运行记录</h2>

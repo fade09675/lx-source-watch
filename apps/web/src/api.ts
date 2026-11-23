@@ -161,6 +161,29 @@ export interface ProxyPatch {
   config?: string;
 }
 
+export interface WorkflowRunView {
+  id: number;
+  name: string;
+  event: string;
+  status: string;
+  conclusion: string | null;
+  createdAt: string;
+  updatedAt: string;
+  url: string;
+}
+
+export interface RunProbeInput {
+  only?: string;
+  limit?: string;
+  deep?: boolean;
+  preferMirror?: boolean;
+}
+
+export interface RunStatusResult {
+  runs: WorkflowRunView[];
+  lastDispatchedAt?: string | null;
+}
+
 export const api = {
   me: () => request<{ ok: boolean; site: string }>('/api/auth/me'),
   login: (password: string) =>
@@ -228,4 +251,11 @@ export const api = {
     ),
   refreshSubscription: (id: string) =>
     request<ProxyImportResult>(`/api/admin/proxies/subscriptions/${encodeURIComponent(id)}/refresh`, { method: 'POST' }),
+
+  runProbe: (input: RunProbeInput = {}) =>
+    request<{ ok: boolean; dispatchedAt: string }>('/api/admin/run/probe', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  workflowRuns: () => request<RunStatusResult>('/api/admin/runs'),
 };
