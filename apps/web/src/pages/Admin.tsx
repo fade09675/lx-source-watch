@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { formatDateTime, formatDuration, type EventItem, type HealthResponse, type RunSummary } from '@lx/shared';
+import { formatDateTime, formatDuration, type EventItem, type HealthResponse, type MirrorTemplate, type RunSummary } from '@lx/shared';
 import { ApiError, api, type WorkflowRunView } from '../api';
 import { EmptyBox, ErrorBox, Spinner } from '../components/Feedback';
 
@@ -8,6 +8,7 @@ const EVENT_LABEL: Record<EventItem['type'], string> = {
   degraded: '降级',
   failed: '持续失效',
   new: '新源',
+  updated: '版本更新',
 };
 
 const RUN_STATUS: Record<string, string> = {
@@ -43,6 +44,10 @@ export function AdminPage() {
   const [preferMirror, setPreferMirror] = useState(true);
   const [dispatching, setDispatching] = useState(false);
   const [runMessage, setRunMessage] = useState('');
+  const [mirrorTemplates, setMirrorTemplates] = useState<MirrorTemplate[] | null>(null);
+  const [mirrorCustom, setMirrorCustom] = useState(false);
+  const [mirrorMessage, setMirrorMessage] = useState('');
+  const [savingMirrors, setSavingMirrors] = useState(false);
 
   async function reloadRuns() {
     try {
@@ -51,6 +56,67 @@ export function AdminPage() {
       setLastDispatchedAt(result.lastDispatchedAt ?? null);
     } catch (err) {
       setRunMessage(err instanceof ApiError ? err.message : '读取运行状态失败');
+    }
+  }
+
+  async function loadMirrors() {
+    try {
+      const config = await api.mirrors();
+      setMirrorTemplates(config.templates);
+      setMirrorCustom(config.custom);
+    } catch (err) {
+      setMirrorMessage(err instanceof ApiError ? err.message : '读取镜像模板失败');
+    }
+  }
+
+  function updateMirror(id: string, patch: Partial<MirrorTemplate>) {
+    setMirrorTemplates((list) => list?.map((item) => (item.id === id ? { ...item, ...patch } : item)) ?? null);
+  }
+
+  function addMirror() {
+    setMirrorTemplates((list) => [
+      ...(list ?? []),
+      {
+        id: `custom-${Date.now().toString(36)}`,
+        name: '新镜像',
+        template: 'https://example.com/{url}',
+        enabled: true,
+      },
+    ]);
+  }
+
+  function removeMirror(id: string) {
+    setMirrorTemplates((list) => list?.filter((item) => item.id !== id) ?? null);
+  }
+
+  async function saveMirrorConfig() {
+    if (!mirrorTemplates) return;
+    setSavingMirrors(true);
+    setMirrorMessage('');
+    try {
+      const config = await api.saveMirrors(mirrorTemplates);
+      setMirrorTemplates(config.templates);
+      setMirrorCustom(config.custom);
+      setMirrorMessage('已保存。下一轮探测会使用新模板。');
+    } catch (err) {
+      setMirrorMessage(err instanceof ApiError ? err.message : '保存失败');
+    } finally {
+      setSavingMirrors(false);
+    }
+  }
+
+  async function resetMirrorConfig() {
+    setSavingMirrors(true);
+    setMirrorMessage('');
+    try {
+      const config = await api.resetMirrors();
+      setMirrorTemplates(config.templates);
+      setMirrorCustom(config.custom);
+      setMirrorMessage('已恢复内置 8 条模板。');
+    } catch (err) {
+      setMirrorMessage(err instanceof ApiError ? err.message : '恢复失败');
+    } finally {
+      setSavingMirrors(false);
     }
   }
 
@@ -87,6 +153,11 @@ export function AdminPage() {
 
   useEffect(() => {
     void reloadRuns();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    void loadMirrors();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -181,6 +252,61 @@ export function AdminPage() {
               </li>
             ))}
           </ul>
+        )}
+      </section>
+
+      <section>
+        <h2>加速镜像</h2>
+        <p className="muted">
+          探测时会把主地址和这些镜像逐个下载，按文件指纹判断版本。公共镜像会失效，失效后在这里替换即可，下一轮探测自动生效。
+          模板里可用 <code>{'{url}'}</code> 表示完整原始地址，或用 <code>{'{owner}/{repo}/{branch}/{path}'}</code> 拼路径。
+        </p>
+        {!mirrorTemplates ? (
+          <Spinner />
+        ) : (
+          <>
+            <div className="mirror-list">
+              {mirrorTemplates.map((mirror) => (
+                <div className="mirror-row" key={mirror.id}>
+                  <input
+                    aria-label="镜像名称"
+                    value={mirror.name}
+                    onChange={(event) => updateMirror(mirror.id, { name: event.target.value })}
+                  />
+                  <input
+                    aria-label="镜像模板"
+                    className="mono"
+                    value={mirror.template}
+                    onChange={(event) => updateMirror(mirror.id, { template: event.target.value })}
+                  />
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={mirror.enabled}
+                      onChange={(event) => updateMirror(mirror.id, { enabled: event.target.checked })}
+                    />
+                    <span>启用</span>
+                  </label>
+                  <button type="button" className="ghost-button danger" onClick={() => removeMirror(mirror.id)}>
+                    删除
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="run-form">
+              <button type="button" className="ghost-button" onClick={addMirror}>
+                添加一条
+              </button>
+              <button type="button" className="primary-button" onClick={() => void saveMirrorConfig()} disabled={savingMirrors}>
+                {savingMirrors ? '保存中…' : '保存模板'}
+              </button>
+              <button type="button" className="ghost-button" onClick={() => void resetMirrorConfig()} disabled={savingMirrors}>
+                恢复默认 8 条
+              </button>
+              <span className="muted">{mirrorCustom ? '当前使用自定义模板' : '当前使用内置默认模板'}</span>
+            </div>
+            {mirrorMessage && <div className="form-message">{mirrorMessage}</div>}
+          </>
         )}
       </section>
 

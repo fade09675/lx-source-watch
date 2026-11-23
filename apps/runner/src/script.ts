@@ -28,8 +28,8 @@ function looksLikeHtml(code: string, contentType: string): boolean {
   return head.startsWith('<!doctype') || head.startsWith('<html');
 }
 
-async function fetchText(url: string, opts: LoadScriptOptions): Promise<LoadedScript> {
-  const res = await httpRequest(url, {
+/** 下载单个接入点并做大小/HTML/空内容检查（不初始化脚本）。 */
+export async function fetchScriptText(url: string, opts: LoadScriptOptions): Promise<LoadedScript> {  const res = await httpRequest(url, {
     headers: {
       accept: 'application/javascript, text/javascript, */*;q=0.8',
     },
@@ -63,6 +63,22 @@ async function fetchText(url: string, opts: LoadScriptOptions): Promise<LoadedSc
   };
 }
 
+/** 读取仓库内脚本（repo 来源的本地主地址）。 */
+export async function readRepoScript(src: ResolvedSource): Promise<LoadedScript> {
+  if (!src.localPath) throw new Error('内部错误：repo 来源缺少本地路径');
+  const code = (await readFile(src.localPath, 'utf8')).replace(/^\uFEFF/, '');
+  const bytes = Buffer.byteLength(code);
+  if (bytes > MAX_SCRIPT_BYTES) throw new Error(`脚本超过 ${MAX_SCRIPT_BYTES / 1024}KB 上限`);
+  if (code.trim().length < 50) throw new Error('脚本内容为空或过短');
+  return {
+    code,
+    bytes,
+    sha: sha256Hex(code).slice(0, 16),
+    fromMirror: false,
+    url: src.resolvedUrl,
+  };
+}
+
 /**
  * 加载音源脚本：仓库内文件直接读磁盘；远程脚本按原地址 → 镜像 顺序回退。
  * 只做大小/HTML/空内容检查，语法错误留给沙箱初始化阶段。
@@ -72,18 +88,7 @@ export async function loadScript(
   opts: LoadScriptOptions = {},
 ): Promise<LoadedScript> {
   if (src.storage === 'repo') {
-    if (!src.localPath) throw new Error('内部错误：repo 来源缺少本地路径');
-    const code = (await readFile(src.localPath, 'utf8')).replace(/^\uFEFF/, '');
-    const bytes = Buffer.byteLength(code);
-    if (bytes > MAX_SCRIPT_BYTES) throw new Error(`脚本超过 ${MAX_SCRIPT_BYTES / 1024}KB 上限`);
-    if (code.trim().length < 50) throw new Error('脚本内容为空或过短');
-    return {
-      code,
-      bytes,
-      sha: sha256Hex(code).slice(0, 16),
-      fromMirror: false,
-      url: src.resolvedUrl,
-    };
+    return readRepoScript(src);
   }
 
   const errors: string[] = [];
@@ -97,7 +102,7 @@ export async function loadScript(
 
   for (const attempt of attempts) {
     try {
-      const loaded = await fetchText(attempt.url, opts);
+      const loaded = await fetchScriptText(attempt.url, opts);
       return { ...loaded, fromMirror: attempt.mirror };
     } catch (e) {
       errors.push(`${attempt.mirror ? '镜像' : '主地址'}：${(e as Error).message}`);

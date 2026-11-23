@@ -29,6 +29,7 @@ export function makeSource(over: Partial<SourceResult> & { id: string }): Source
     url: over.url ?? `https://example.com/${over.id}.js`,
     category: over.category ?? '在线',
     storage: over.storage ?? 'remote',
+    endpoints: over.endpoints ?? [],
     status: over.status ?? derivedStatus,
     initOk: over.initOk ?? true,
     stats,

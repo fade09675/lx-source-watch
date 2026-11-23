@@ -3,6 +3,7 @@ import type {
   Candidate,
   EventItem,
   HealthResponse,
+  MirrorTemplate,
   RunSummary,
   SourceDetailResponse,
   StatusEnvelope,
@@ -195,6 +196,11 @@ export interface RunStatusResult {
   lastDispatchedAt?: string | null;
 }
 
+export interface MirrorConfigView {
+  templates: MirrorTemplate[];
+  custom: boolean;
+}
+
 export const api = {
   me: () => request<{ ok: boolean; site: string }>('/api/auth/me'),
   login: (password: string) =>
@@ -274,4 +280,12 @@ export const api = {
       body: JSON.stringify(input),
     }),
   workflowRuns: () => request<RunStatusResult>('/api/admin/runs'),
+
+  mirrors: () => request<MirrorConfigView>('/api/admin/mirrors'),
+  saveMirrors: (templates: MirrorTemplate[]) =>
+    request<MirrorConfigView>('/api/admin/mirrors', {
+      method: 'PUT',
+      body: JSON.stringify({ templates }),
+    }),
+  resetMirrors: () => request<MirrorConfigView>('/api/admin/mirrors/reset', { method: 'POST' }),
 };

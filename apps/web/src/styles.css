@@ -1318,3 +1318,52 @@ a:hover {
   color: var(--accent);
   text-decoration: none;
 }
+
+.mirror-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.mirror-row {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.mirror-row input:not([type='checkbox']) {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+}
+
+.mirror-row input:not([type='checkbox']):focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.mirror-row .check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.mirror-row .check input {
+  width: 15px;
+  height: 15px;
+}
+
+@media (max-width: 760px) {
+  .mirror-row {
+    grid-template-columns: 1fr;
+  }
+}

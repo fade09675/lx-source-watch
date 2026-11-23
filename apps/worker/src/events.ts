@@ -53,6 +53,13 @@ export function diffEvents(ctx: EventContext): EventItem[] {
       continue;
     }
 
+    // 版本变化单独记一条；没有 @version 的源退化为比较脚本内容指纹。
+    if (before.version && source.version && before.version !== source.version) {
+      push('updated', `源更新 ${before.version} → ${source.version}`);
+    } else if (!source.version && before.scriptSha && source.scriptSha && before.scriptSha !== source.scriptSha) {
+      push('updated', `脚本内容变化 ${before.scriptSha.slice(0, 8)} → ${source.scriptSha.slice(0, 8)}`);
+    }
+
     const wasOk = before.stats.ok;
     const nowOk = source.stats.ok;
     const degraded =

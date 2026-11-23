@@ -123,6 +123,8 @@ probe:
   --stream-timeout <ms>     拉流超时，默认 12000
   --proxy <url>             出口代理（http/socks）
   --prefer-mirror           下载脚本时先走镜像（国内网络建议开启）
+  --config-url <url>        镜像模板接口（默认读 LX_CONFIG_URL，Actions 用 dash.dpdns.org）
+  --mirror-timeout <ms>     镜像下载超时，默认 8000
 
 discover:
   --config <path>           发现配置，默认 sources/discovery.json
@@ -185,6 +187,8 @@ async function cmdProbe(args: Args): Promise<void> {
     streamTimeoutMs: num(args, 'stream-timeout', 12_000),
     proxy: parseProxy(str(args, 'proxy') ?? process.env.LX_PROXY_URL),
     preferMirror: bool(args, 'prefer-mirror') || process.env.LX_PREFER_MIRROR === '1',
+    configUrl: str(args, 'config-url') ?? process.env.LX_CONFIG_URL,
+    mirrorTimeoutMs: num(args, 'mirror-timeout', 8_000),
   });
 }
 

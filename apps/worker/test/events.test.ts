@@ -31,6 +31,16 @@ function unavailable(id: string) {
   return makeSource({ id, platforms: [makePlatform({ key: 'wy', ok: false })], status: 'unavailable' });
 }
 
+function versioned(id: string, version: string | undefined, sha: string) {
+  return makeSource({
+    id,
+    version,
+    scriptSha: sha,
+    platforms: [makePlatform({ key: 'wy', ok: true })],
+    status: 'available',
+  });
+}
+
 describe('unavailableStreak', () => {
   it('只统计连续的 unavailable', () => {
     expect(unavailableStreak(['unavailable', 'unavailable', 'partial'], 'unavailable')).toBe(3);
@@ -72,5 +82,32 @@ describe('diffEvents', () => {
 
     const fourth = diffEvents(ctx(prev, incoming, { a: ['unavailable', 'unavailable', 'unavailable'] }));
     expect(fourth.map((event) => event.type)).not.toContain('failed');
+  });
+
+  it('版本变化产生 updated，消息带新旧版本', () => {
+    const prev = makeSnapshot([versioned('a', '1.0.0', 'sha-old')]);
+    const incoming = makeSnapshot([versioned('a', '1.1.0', 'sha-new')], { runId: 'run-2' });
+    const events = diffEvents(ctx(prev, incoming));
+    const updated = events.find((event) => event.type === 'updated');
+    expect(updated).toBeTruthy();
+    expect(updated?.message).toContain('1.0.0');
+    expect(updated?.message).toContain('1.1.0');
+  });
+
+  it('无版本号时按 sha 前 8 位判断更新', () => {
+    const prev = makeSnapshot([versioned('a', undefined, 'sha-old-1111')]);
+    const incoming = makeSnapshot([versioned('a', undefined, 'sha-new-2222')], { runId: 'run-2' });
+    const events = diffEvents(ctx(prev, incoming));
+    const updated = events.find((event) => event.type === 'updated');
+    expect(updated).toBeTruthy();
+    expect(updated?.message).toContain('sha-old');
+    expect(updated?.message).toContain('sha-new');
+  });
+
+  it('版本与 sha 都没变时不产生 updated', () => {
+    const prev = makeSnapshot([versioned('a', '1.0.0', 'sha-same')]);
+    const incoming = makeSnapshot([versioned('a', '1.0.0', 'sha-same')], { runId: 'run-2' });
+    const events = diffEvents(ctx(prev, incoming));
+    expect(events.map((event) => event.type)).not.toContain('updated');
   });
 });

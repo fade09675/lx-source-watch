@@ -6,6 +6,7 @@ import {
   SnapshotSchema,
   nextCheckAt,
   summarizeSources,
+  type EndpointResult,
   type Snapshot,
   type SourceResult,
   type Summary,
@@ -14,8 +15,10 @@ import { parseScriptMeta } from '../lx/meta.js';
 import { log } from '../logger.js';
 import type { ProxyConfig } from '../net/http.js';
 import { loadRegistry, type ResolvedSource } from '../registry.js';
-import { loadScript, type LoadedScript } from '../script.js';
+import { loadMirrorTemplates } from '../mirrors.js';
+import type { LoadedScript } from '../script.js';
 import { errorMessage, mapLimit, nowIso, randomId } from '../util.js';
+import { checkEndpoints, chooseEndpoint, describeEndpointFailure, toEndpointResults } from './endpoints.js';
 import { failedSourceResult, probeSource } from './source.js';
 import type { ProbeMode, UrlRecord } from './platform.js';
 
@@ -38,6 +41,9 @@ export interface ProbeOptions {
   proxy?: ProxyConfig;
   allowPrivate?: boolean;
   preferMirror?: boolean;
+  /** 公开的镜像模板接口；缺省时 Actions 走 dash.dpdns.org。 */
+  configUrl?: string;
+  mirrorTimeoutMs?: number;
   repoRoot?: string;
   rawBase?: string;
   repoVars?: { version?: string; author?: string; description?: string; expire?: string };
@@ -68,11 +74,13 @@ async function readSnapshot(path: string): Promise<Snapshot | undefined> {
  */
 export async function runProbe(opts: ProbeOptions): Promise<ProbeOutput> {
   const started = Date.now();
+  const mirrorTemplates = await loadMirrorTemplates({ configUrl: opts.configUrl });
   const sources = await loadRegistry(opts.registryPath, {
     only: opts.only,
     limit: opts.limit,
     repoRoot: opts.repoRoot,
     rawBase: opts.rawBase,
+    mirrorTemplates,
   });
   const partial = Boolean(opts.only?.length || opts.limit);
   log.step(
@@ -87,12 +95,26 @@ export async function runProbe(opts: ProbeOptions): Promise<ProbeOutput> {
     const seq = ++index;
     const t0 = Date.now();
     let script: LoadedScript | undefined;
+    let endpoints: EndpointResult[] = [];
     try {
-      script = await loadScript(src, {
+      const checks = await checkEndpoints(src, {
         proxy: opts.proxy,
         allowPrivate: opts.allowPrivate,
-        preferMirror: opts.preferMirror,
+        timeoutMs: opts.requestTimeoutMs ?? 30_000,
+        mirrorTimeoutMs: opts.mirrorTimeoutMs ?? 8_000,
       });
+      endpoints = toEndpointResults(checks);
+      const chosen = chooseEndpoint(checks);
+      if (!chosen?.check.code) throw new Error(describeEndpointFailure(checks));
+      if (chosen.warning) log.warn(`[${seq}/${sources.length}] ${src.id}：${chosen.warning}`);
+
+      script = {
+        code: chosen.check.code,
+        bytes: chosen.check.bytes ?? Buffer.byteLength(chosen.check.code),
+        sha: chosen.check.sha ?? '',
+        fromMirror: chosen.check.role === 'candidate',
+        url: chosen.check.url,
+      };
       const meta = parseScriptMeta(script.code, `${src.id}.js`);
       const outcome = await probeSource(src, script, {
         mode: opts.mode,
@@ -111,17 +133,26 @@ export async function runProbe(opts: ProbeOptions): Promise<ProbeOutput> {
           }
         },
       });
+      outcome.result.endpoints = endpoints;
+      outcome.result.version = meta.version?.slice(0, 40);
+      outcome.result.author = meta.author?.slice(0, 80);
+      outcome.result.description = meta.description?.slice(0, 500);
       const r = outcome.result;
       log.info(
-        `${r.initOk ? '✓' : '×'} [${seq}/${sources.length}] ${src.id} ${r.stats.ok}/${r.stats.tested} (${Date.now() - t0}ms)${r.initError ? ` init: ${r.initError}` : ''}`,
+        `${r.initOk ? '✓' : '×'} [${seq}/${sources.length}] ${src.id} ${r.stats.ok}/${r.stats.tested} (${Date.now() - t0}ms)${r.initError ? ` init: ${r.initError}` : ''} · 接入点 ${endpoints.filter((e) => e.ok).length}/${endpoints.length}`,
       );
       return outcome;
     } catch (e) {
       const meta = script ? parseScriptMeta(script.code, `${src.id}.js`) : undefined;
       const message = errorMessage(e);
       log.warn(`× [${seq}/${sources.length}] ${src.id} 失败：${message}`);
+      const failed = failedSourceResult(src, script, message, t0, meta);
+      failed.endpoints = endpoints;
+      failed.version = meta?.version?.slice(0, 40);
+      failed.author = meta?.author?.slice(0, 80);
+      failed.description = meta?.description?.slice(0, 500);
       return {
-        result: failedSourceResult(src, script, message, t0, meta),
+        result: failed,
         urls: [] as UrlRecord[],
       };
     }

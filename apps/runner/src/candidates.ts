@@ -45,7 +45,9 @@ export async function enrichCandidates(opts: EnrichOptions): Promise<CandidateFi
           category: '候选',
           enabled: true,
           trusted: false,
+          mirrors: [],
           resolvedUrl: candidate.url,
+          endpoints: [{ url: candidate.url, role: 'primary' }],
         },
         { proxy: opts.proxy, timeoutMs: 20_000 },
       );

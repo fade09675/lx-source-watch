@@ -3,6 +3,7 @@ import {
   CandidateSchema,
   type Candidate,
   type DailyRow,
+  type EndpointRow,
   type EventItem,
   type PlatformDailyRow,
   type RunSummary,
@@ -18,6 +19,7 @@ const EVENT_RETENTION_DAYS = 180;
 export interface WriteStats {
   sources: number;
   platforms: number;
+  endpoints: number;
   events: number;
   candidates: number;
 }
@@ -106,16 +108,20 @@ export async function writeSnapshot(db: D1Database, input: {
   );
 
   let platforms = 0;
+  let endpoints = 0;
   for (const source of snapshot.sources) {
+    const endpointsOk = source.endpoints.filter((endpoint) => endpoint.ok).length;
     statements.push(
       db
         .prepare(
-          `INSERT INTO sources (id, title, category, url, mirror, homepage, storage, version, author, description, first_seen_at, last_seen_at, last_status, last_ok, last_tested, streak, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO sources (id, title, category, url, mirror, homepage, storage, version, author, description, script_sha, endpoints_ok, endpoints_total, first_seen_at, last_seen_at, last_status, last_ok, last_tested, streak, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
              title = excluded.title, category = excluded.category, url = excluded.url, mirror = excluded.mirror,
              homepage = excluded.homepage, storage = excluded.storage, version = excluded.version,
-             author = excluded.author, description = excluded.description, last_seen_at = excluded.last_seen_at,
+             author = excluded.author, description = excluded.description, script_sha = excluded.script_sha,
+             endpoints_ok = excluded.endpoints_ok, endpoints_total = excluded.endpoints_total,
+             last_seen_at = excluded.last_seen_at,
              last_status = excluded.last_status, last_ok = excluded.last_ok, last_tested = excluded.last_tested,
              streak = excluded.streak, updated_at = excluded.updated_at`,
         )
@@ -130,6 +136,9 @@ export async function writeSnapshot(db: D1Database, input: {
           source.version ?? null,
           source.author ?? null,
           source.description ?? null,
+          source.scriptSha ?? null,
+          endpointsOk,
+          source.endpoints.length,
           now,
           now,
           source.status,
@@ -139,6 +148,33 @@ export async function writeSnapshot(db: D1Database, input: {
           now,
         ),
     );
+
+    for (const endpoint of source.endpoints) {
+      statements.push(
+        db
+          .prepare(
+            `INSERT INTO source_endpoints (run_id, source_id, url, role, ok, status, sha, version, version_state, bytes, ms, error, checked_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(run_id, source_id, url) DO NOTHING`,
+          )
+          .bind(
+            snapshot.runId,
+            source.id,
+            endpoint.url,
+            endpoint.role,
+            endpoint.ok ? 1 : 0,
+            endpoint.status ?? null,
+            endpoint.sha ?? null,
+            endpoint.version ?? null,
+            endpoint.versionState ?? null,
+            endpoint.bytes ?? null,
+            endpoint.ms,
+            endpoint.error ?? null,
+            endpoint.checkedAt,
+          ),
+      );
+      endpoints += 1;
+    }
 
     statements.push(
       db
@@ -278,7 +314,7 @@ export async function writeSnapshot(db: D1Database, input: {
 
   await maybeCleanup(db, day, now);
 
-  return { sources: snapshot.sources.length, platforms, events: events.length, candidates: candidates.length };
+  return { sources: snapshot.sources.length, platforms, endpoints, events: events.length, candidates: candidates.length };
 }
 
 async function runBatches(db: D1Database, statements: D1PreparedStatement[]): Promise<void> {
@@ -440,8 +476,7 @@ interface CandidateRow {
   lastSeen: string | null;
 }
 
-const CANDIDATE_COLUMNS = `id, repo, path, url, sha, title, version, author, description, platforms, bytes,
-  init_ok AS initOk, init_error AS initError, state, first_seen AS firstSeen, last_seen AS lastSeen`;
+const CANDIDATE_COLUMNS = `id, repo, path, url, sha, title, version, author, description, platforms, bytes,  init_ok AS initOk, init_error AS initError, state, first_seen AS firstSeen, last_seen AS lastSeen`;
 
 export async function getCandidates(
   db: D1Database,
@@ -504,4 +539,58 @@ export async function setCandidateState(db: D1Database, id: string, state: strin
     .bind(state, now, id)
     .run();
   return (result.meta.changes ?? 0) > 0;
+}
+
+interface EndpointDbRow {
+  url: string;
+  role: string;
+  ok: number;
+  status: number | null;
+  sha: string | null;
+  version: string | null;
+  version_state: string | null;
+  bytes: number | null;
+  ms: number;
+  error: string | null;
+  checked_at: string;
+}
+
+/** 取某个来源最近一轮的接入点检查结果（主地址排前面）。 */
+export async function getSourceEndpoints(db: D1Database, sourceId: string, runId?: string): Promise<EndpointRow[]> {
+  let target = runId;
+  if (!target) {
+    const latest = await db
+      .prepare('SELECT run_id FROM source_runs WHERE source_id = ? ORDER BY checked_at DESC LIMIT 1')
+      .bind(sourceId)
+      .first<{ run_id: string }>();
+    target = latest?.run_id;
+  }
+  if (!target) return [];
+
+  const rows = await db
+    .prepare(
+      `SELECT url, role, ok, status, sha, version, version_state, bytes, ms, error, checked_at
+       FROM source_endpoints
+       WHERE run_id = ? AND source_id = ?
+       ORDER BY CASE role WHEN 'primary' THEN 0 ELSE 1 END, ok DESC, ms ASC`,
+    )
+    .bind(target, sourceId)
+    .all<EndpointDbRow>();
+
+  return rows.results.map((row) => ({
+    url: row.url,
+    role: row.role === 'primary' ? 'primary' : 'candidate',
+    ok: Boolean(row.ok),
+    status: row.status,
+    sha: row.sha,
+    version: row.version,
+    versionState:
+      row.version_state === 'synced' || row.version_state === 'lagging' || row.version_state === 'unknown'
+        ? row.version_state
+        : null,
+    bytes: row.bytes,
+    ms: row.ms,
+    error: row.error,
+    checkedAt: row.checked_at,
+  }));
 }

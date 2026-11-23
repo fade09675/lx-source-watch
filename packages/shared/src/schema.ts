@@ -66,6 +66,23 @@ export const SourceStatsSchema = z.object({
 });
 export type SourceStats = z.infer<typeof SourceStatsSchema>;
 
+export const EndpointResultSchema = z.object({
+  url: httpUrl,
+  /** primary=清单主地址；candidate=镜像/加速候选。 */
+  role: z.enum(['primary', 'candidate']),
+  ok: z.boolean(),
+  status: z.number().int().optional(),
+  sha: z.string().max(64).optional(),
+  bytes: z.number().int().nonnegative().optional(),
+  version: z.string().max(40).optional(),
+  /** synced=与主地址同 sha；lagging=可下载但内容不同；unknown=主地址不可用无法比对。 */
+  versionState: z.enum(['synced', 'lagging', 'unknown']).optional(),
+  ms: z.number().int().nonnegative(),
+  error: z.string().max(300).optional(),
+  checkedAt: isoDateTime,
+});
+export type EndpointResult = z.infer<typeof EndpointResultSchema>;
+
 export const SourceResultSchema = z.object({
   id: z.string().min(1).max(80),
   title: z.string().min(1).max(160),
@@ -80,6 +97,8 @@ export const SourceResultSchema = z.object({
   expire: z.string().max(40).optional(),
   /** 脚本内容的 sha256 前 16 位，用于发现“同源换皮”。 */
   scriptSha: z.string().max(64).optional(),
+  /** 所有接入点（主地址 + 镜像/加速候选）的下载检查结果。 */
+  endpoints: z.array(EndpointResultSchema).max(16).default([]),
   status: SourceStatusSchema,
   /** 脚本能否完成 inited。 */
   initOk: z.boolean(),
@@ -163,6 +182,8 @@ export const RegistrySourceSchema = z
     storage: z.enum(['remote', 'repo']).default('remote'),
     url: httpUrl.optional(),
     mirror: httpUrl.optional(),
+    /** 显式声明的镜像/加速地址；未声明时按主地址自动生成候选。 */
+    mirrors: z.array(httpUrl).max(10).default([]),
     path: z.string().max(300).optional(),
     homepage: httpUrl.optional(),
     category: z.string().max(40).default('在线'),
@@ -254,8 +275,24 @@ export interface PlatformDailyRow {
   avgMs: number | null;
 }
 
+export interface EndpointRow {
+  url: string;
+  role: 'primary' | 'candidate';
+  ok: boolean;
+  status: number | null;
+  sha: string | null;
+  version: string | null;
+  versionState: 'synced' | 'lagging' | 'unknown' | null;
+  bytes: number | null;
+  ms: number;
+  error: string | null;
+  checkedAt: string;
+}
+
 export interface SourceDetailResponse {
   source: SourceResult;
+  /** 最近一轮各接入点的下载检查结果。 */
+  endpoints: EndpointRow[];
   history: SourceRunSummary[];
   daily: DailyRow[];
   platformDaily: PlatformDailyRow[];
@@ -278,7 +315,7 @@ export interface RunSummary {
 export interface EventItem {
   id: string;
   at: string;
-  type: 'recovered' | 'degraded' | 'failed' | 'new';
+  type: 'recovered' | 'degraded' | 'failed' | 'new' | 'updated';
   sourceId: string;
   title: string;
   message: string;

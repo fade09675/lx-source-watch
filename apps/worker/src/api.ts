@@ -21,6 +21,7 @@ import {
   getRuns,
   getSetting,
   getSourceDaily,
+  getSourceEndpoints,
   getSourceHistory,
   getSourcePlatformDaily,
   setCandidateState,
@@ -33,6 +34,7 @@ import { handleIngest } from './ingest';
 import { isStale } from './merge';
 import { dispatchProbe, dispatchProxyTest, listProbeRuns } from './dispatch';
 import { getUsage, recordKvPut, refreshUsage } from './usage';
+import { getMirrorTemplates, resetMirrorTemplates, saveMirrorTemplates, MirrorConfigError } from './mirrors';
 
 type Ctx = { Bindings: Env };
 
@@ -319,6 +321,49 @@ export function createApi(): Hono<Ctx> {
     return Response.json({ ok: true, dispatchedAt: outcome.dispatchedAt }, { headers: { 'cache-control': CACHE_PRIVATE } });
   });
 
+  // 加速镜像模板：网页可替换内置 8 条，探测任务通过公开接口读取。
+  api.get('/admin/mirrors', async (c) => {
+    const config = await getMirrorTemplates(c.env.DB);
+    return Response.json(config, { headers: { 'cache-control': CACHE_PRIVATE } });
+  });
+
+  api.put('/admin/mirrors', async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return Response.json(
+        { error: 'bad_request', message: '请求体不是合法 JSON' },
+        { status: 400, headers: { 'cache-control': CACHE_PRIVATE } },
+      );
+    }
+    try {
+      const config = await saveMirrorTemplates(c.env.DB, (body as { templates?: unknown })?.templates);
+      return Response.json(config, { headers: { 'cache-control': CACHE_PRIVATE } });
+    } catch (error) {
+      if (error instanceof MirrorConfigError) {
+        return Response.json(
+          { error: 'bad_templates', message: error.message, issues: error.issues },
+          { status: 400, headers: { 'cache-control': CACHE_PRIVATE } },
+        );
+      }
+      throw error;
+    }
+  });
+
+  api.post('/admin/mirrors/reset', async (c) => {
+    const config = await resetMirrorTemplates(c.env.DB);
+    return Response.json(config, { headers: { 'cache-control': CACHE_PRIVATE } });
+  });
+
+  api.get('/config/mirrors', async (c) => {
+    const config = await getMirrorTemplates(c.env.DB);
+    return Response.json(
+      { templates: config.templates },
+      { headers: { 'cache-control': 'public, max-age=300, s-maxage=600' } },
+    );
+  });
+
   api.get('/status', async (c) => {
     const snapshot = await readSnapshot(c.env);
     if (!snapshot) return notReady();
@@ -344,14 +389,15 @@ export function createApi(): Hono<Ctx> {
     const source = snapshot.sources.find((item) => item.id === id);
     if (!source) return notFound(`未知来源：${id}`);
 
-    const [history, daily, platformDaily] = await Promise.all([
+    const [endpoints, history, daily, platformDaily] = await Promise.all([
+      getSourceEndpoints(c.env.DB, id),
       getSourceHistory(c.env.DB, id, 42),
       getSourceDaily(c.env.DB, id, 180),
       getSourcePlatformDaily(c.env.DB, id, 180),
     ]);
 
     return Response.json(
-      { source, history, daily, platformDaily, generatedAt: snapshot.generatedAt },
+      { source, endpoints, history, daily, platformDaily, generatedAt: snapshot.generatedAt },
       { headers: { 'cache-control': CACHE_PRIVATE } },
     );
   });

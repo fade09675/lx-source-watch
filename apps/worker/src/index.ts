@@ -23,6 +23,7 @@ const PUBLIC_PATHS = new Set([
   '/api/auth/login',
   '/api/ingest',
   '/api/runner/proxies',
+  '/api/config/mirrors',
   '/favicon.ico',
   '/favicon.svg',
   '/robots.txt',

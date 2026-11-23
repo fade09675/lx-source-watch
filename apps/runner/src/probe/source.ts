@@ -43,6 +43,7 @@ function baseResult(src: ResolvedSource, script: LoadedScript, started: number):
     category: src.category,
     storage: src.storage,
     scriptSha: script.sha,
+    endpoints: [],
     status: 'untested',
     initOk: false,
     stats: { ok: 0, tested: 0, total: 0 },
@@ -58,7 +59,7 @@ export function failedSourceResult(
   script: LoadedScript | undefined,
   error: string,
   started: number,
-  meta?: { support?: string[] },
+  meta?: { support?: string[]; version?: string; author?: string; description?: string },
 ): SourceResult {
   const base = script
     ? baseResult(src, script, started)
@@ -70,6 +71,7 @@ export function failedSourceResult(
         homepage: src.homepage,
         category: src.category,
         storage: src.storage,
+        endpoints: [],
         status: 'untested' as const,
         initOk: false,
         stats: { ok: 0, tested: 0, total: 0 },
