@@ -101,6 +101,7 @@ export interface SubscriptionItem {
   id: string;
   name: string;
   url: string;
+  kind: 'url' | 'file';
   userAgent: string;
   enabled: boolean;
   lastFetchAt: string | null;

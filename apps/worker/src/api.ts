@@ -250,6 +250,7 @@ export function createApi(): Hono<Ctx> {
       limit,
       deep: body.deep === true,
       preferMirror: body.preferMirror === true,
+      proxyId: typeof body.proxyId === 'string' ? body.proxyId.trim().slice(0, 64) : '',
     });
     if (!outcome.ok) {
       return Response.json(

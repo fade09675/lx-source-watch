@@ -59,12 +59,21 @@ export async function cnRun(opts: CnRunOptions): Promise<CnFile> {
       timeoutMs: opts.timeoutMs ?? 15_000,
       limit: opts.limit,
       platform: opts.platform,
+    }).catch(async (error: unknown) => {
+      // 补测中途失败（节点掉线/内核退出）也要写回，下一次才能避开这个节点。
+      await reportProxyCheck(opts.endpoint, opts.token, picked.proxy.id, {
+        ok: false,
+        latencyMs: picked.check.latencyMs,
+        egressIp: picked.check.egressIp,
+        error: errorMessage(error).slice(0, 300),
+      }, opts.allowPrivate).catch(() => undefined);
+      throw error;
     });
     await reportProxyCheck(opts.endpoint, opts.token, picked.proxy.id, {
       ok: true,
       latencyMs: picked.check.latencyMs,
       egressIp: picked.check.egressIp,
-    }, opts.allowPrivate);
+    }, opts.allowPrivate).catch(() => undefined);
     return file;
   } finally {
     await active.stop();

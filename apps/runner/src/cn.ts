@@ -47,6 +47,8 @@ export interface CnVerifyOptions {
 }
 
 const CN_MAX_BYTES = 262_144;
+const CN_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
 
 interface UrlsFile {
   version: 1;
@@ -71,7 +73,7 @@ async function probeUrl(record: UrlRecord, proxy: ProxyConfig, timeoutMs: number
   let res;
   try {
     res = await httpRequest(record.url, {
-      headers: { range: `bytes=0-${CN_MAX_BYTES - 1}`, accept: '*/*' },
+      headers: { range: `bytes=0-${CN_MAX_BYTES - 1}`, accept: '*/*', 'user-agent': CN_USER_AGENT },
       timeoutMs,
       maxBytes: CN_MAX_BYTES,
       proxy,
@@ -79,7 +81,7 @@ async function probeUrl(record: UrlRecord, proxy: ProxyConfig, timeoutMs: number
     });
     if ([400, 405, 416, 501].includes(res.status)) {
       res = await httpRequest(record.url, {
-        headers: { accept: '*/*' },
+        headers: { accept: '*/*', 'user-agent': CN_USER_AGENT },
         timeoutMs,
         maxBytes: CN_MAX_BYTES,
         proxy,

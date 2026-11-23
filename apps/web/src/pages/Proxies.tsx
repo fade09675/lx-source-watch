@@ -275,9 +275,12 @@ export function ProxiesPage() {
                         </div>
                       ) : (
                         <div>
-                          <div>{item.name}</div>
+                          <div>
+                            {item.name}
+                            {item.kind === 'file' && <span className="pill pill-idle" style={{ marginLeft: 8 }}>文件</span>}
+                          </div>
                           <div className="small muted mono" title={item.url}>
-                            {item.url.length > 52 ? `${item.url.slice(0, 52)}…` : item.url}
+                            {item.kind === 'file' ? '由文件导入，不能在线刷新' : item.url.length > 52 ? `${item.url.slice(0, 52)}…` : item.url}
                           </div>
                         </div>
                       )}
@@ -305,7 +308,13 @@ export function ProxiesPage() {
                         </>
                       ) : (
                         <>
-                          <button type="button" className="ghost-button" disabled={busy} onClick={() => void refreshSub(item)}>
+                          <button
+                            type="button"
+                            className="ghost-button"
+                            disabled={busy || item.kind === 'file'}
+                            title={item.kind === 'file' ? '文件订阅不能在线刷新，请重新上传文件' : '重新拉取订阅'}
+                            onClick={() => void refreshSub(item)}
+                          >
                             刷新
                           </button>
                           <button

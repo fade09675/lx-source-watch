@@ -241,6 +241,11 @@ async function touchSubscription(env: Env, id: string, status: string): Promise<
 }
 
 async function refreshSubscription(env: Env, row: SubscriptionRow): Promise<ImportSummary> {
+  if (row.kind === 'file' || !row.url.trim()) {
+    const message = '文件订阅不能在线刷新，请重新上传节点文件';
+    await touchSubscription(env, row.id, `失败：${message}`);
+    throw new Error(message);
+  }
   try {
     const url = assertFetchable(row.url);
     const { parsed } = await fetchSubscription(url, row.user_agent);
@@ -737,6 +742,9 @@ export function createAdminProxyRoutes(): Hono<{ Bindings: Env }> {
     const id = c.req.param('id');
     const row = await c.env.DB.prepare('SELECT * FROM proxy_subscriptions WHERE id = ?').bind(id).first<SubscriptionRow>();
     if (!row) return c.json({ error: 'not_found' }, 404);
+    if (row.kind === 'file' || !row.url.trim()) {
+      return c.json({ error: 'file_subscription', message: '文件订阅不能在线刷新，请重新上传节点文件' }, 400);
+    }
     try {
       const summary = await refreshSubscription(c.env, row);
       return c.json({ ok: true, ...summary });

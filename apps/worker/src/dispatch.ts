@@ -9,6 +9,8 @@ export interface ProbeDispatchInput {
   limit?: string;
   deep?: boolean;
   preferMirror?: boolean;
+  /** 强制国内补测使用指定代理节点；留空则自动挑选。 */
+  proxyId?: string;
 }
 
 export type DispatchResult =
@@ -64,6 +66,7 @@ export async function dispatchProbe(env: Env, input: ProbeDispatchInput): Promis
       limit: clean(input.limit, 10),
       deep: input.deep ? 'true' : 'false',
       prefer_mirror: input.preferMirror ? 'true' : 'false',
+      proxy_id: clean(input.proxyId, 64),
     },
   };
 

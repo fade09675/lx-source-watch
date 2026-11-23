@@ -4,6 +4,7 @@ import { chmodSync, createWriteStream, existsSync, mkdirSync, readFileSync, writ
 import net from 'node:net';
 import path from 'node:path';
 import { gunzipSync } from 'node:zlib';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
 /**
  * 内核协议（vmess/vless/trojan/ss/...）需要本地引擎：
@@ -29,10 +30,6 @@ export const DEFAULT_KERNEL_DIR = process.env.MIHOMO_DIR ?? path.join(process.cw
 export const MIHOMO_DOWNLOAD_URL =
   process.env.MIHOMO_URL ??
   `https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-linux-amd64-${MIHOMO_VERSION}.gz`;
-
-function quoteYaml(value: string): string {
-  return JSON.stringify(value);
-}
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -187,24 +184,78 @@ export function clashProxyFromUri(raw: string): Record<string, unknown> | null {
   return null;
 }
 
-function parseKernelNode(node: KernelNode): { yaml?: string; proxy?: Record<string, unknown>; warning?: string } {
+function firstProxyItem(value: unknown): Record<string, unknown> | null {
+  if (!Array.isArray(value)) return null;
+  for (const item of value) {
+    if (!isPlainRecord(item)) continue;
+    const type = String(item.type ?? '').toLowerCase();
+    if (['selector', 'urltest', 'direct', 'block', 'dns', 'reject'].includes(type)) continue;
+    return item;
+  }
+  return null;
+}
+
+/** 从 Clash 或 sing-box 的配置对象里取第一个可用代理。 */
+function proxyFromObject(value: unknown): Record<string, unknown> | null {
+  if (!isPlainRecord(value)) return null;
+  let candidate: Record<string, unknown> | null = null;
+  if (Array.isArray(value.proxies)) candidate = firstProxyItem(value.proxies);
+  if (!candidate && Array.isArray(value.outbounds)) {
+    const outbound = firstProxyItem(value.outbounds);
+    candidate = outbound ? clashProxyFromJson(outbound) : null;
+  }
+  if (!candidate && (value.type || value.protocol) && (value.server ?? value.address)) {
+    candidate = clashProxyFromJson(value);
+  }
+  if (!candidate) return null;
+  const server = String(candidate.server ?? '');
+  const port = Number(candidate.port);
+  if (!server || !Number.isFinite(port) || port <= 0) return null;
+  return candidate;
+}
+
+/**
+ * IPTV 导出的 Clash 片段常把子键缩进 4 格（`- name:` 在 0 格），
+ * 这在 YAML 里不合法。这里统一把子键改成 2 格起、并按最小缩进重新对齐。
+ */
+function normalizeYamlFragment(text: string): string {
+  const lines = text.split(/\r?\n/);
+  while (lines.length && !(lines[0] ?? '').trim()) lines.shift();
+  if (!lines.length) return text;
+  const firstRaw = (lines[0] ?? '').trimStart();
+  const startsWithDash = firstRaw.startsWith('-');
+  const first = startsWithDash ? firstRaw : `- ${firstRaw}`;
+  const rest = lines.slice(1);
+  const indents = rest.filter((line) => line.trim()).map((line) => /^ */.exec(line)?.[0].length ?? 0);
+  const minIndent = indents.length ? Math.min(...indents) : 0;
+  const shifted = rest.map((line) => {
+    if (!line.trim()) return '';
+    const current = /^ */.exec(line)?.[0].length ?? 0;
+    const target = Math.max(2, current - minIndent + 2);
+    return `${' '.repeat(target)}${line.trimStart()}`;
+  });
+  return [first, ...shifted].join('\n');
+}
+
+function parseKernelNode(node: KernelNode): { proxy?: Record<string, unknown>; warning?: string } {
   const config = (node.config ?? '').trim();
   if (!config) return { warning: `${node.name}：没有保存节点配置` };
-  if (config.startsWith('-') || config.startsWith('name:')) {
-    const lines = config.split(/\r?\n/).filter((line) => line.trim().length > 0);
-    const indented = lines.map((line) => (line.startsWith(' ') ? line : `  ${line}`)).join('\n');
-    const nameMatch = indented.match(/^\s*-\s*name:\s*(.+)$/m) ?? indented.match(/^\s*name:\s*(.+)$/m);
-    const name = nameMatch?.[1]?.trim().replace(/^['"]|['"]$/g, '') ?? '';
-    if (name.includes(',')) return { warning: `${node.name}：名称含逗号，无法用 MATCH 规则选中` };
-    return { yaml: indented };
-  }
   if (config.startsWith('{')) {
     try {
-      const record = JSON.parse(config) as Record<string, unknown>;
-      const proxy = clashProxyFromJson(record);
+      const proxy = proxyFromObject(JSON.parse(config));
       return proxy ? { proxy } : { warning: `${node.name}：不支持的配置类型` };
     } catch {
       return { warning: `${node.name}：配置不是合法 JSON` };
+    }
+  }
+  if (config.startsWith('-') || config.startsWith('name:') || /(^|\n)\s*type:\s*\S/.test(config)) {
+    try {
+      const parsedConfig = parseYaml(normalizeYamlFragment(config), { strict: false }) as unknown;
+      const first = Array.isArray(parsedConfig) ? parsedConfig[0] : parsedConfig;
+      const proxy = proxyFromObject(first);
+      return proxy ? { proxy } : { warning: `${node.name}：YAML 里没有可用节点` };
+    } catch (error) {
+      return { warning: `${node.name}：配置不是合法 YAML（${error instanceof Error ? error.message : String(error)}）` };
     }
   }
   if (config.includes('://')) {
@@ -218,44 +269,27 @@ function parseKernelNode(node: KernelNode): { yaml?: string; proxy?: Record<stri
 export function buildKernelConfig(nodes: KernelNode[], mixedPort = 7890): KernelConfig {
   const usable: KernelNode[] = [];
   const warnings: string[] = [];
-  const blocks: string[] = [];
+  const proxies: Record<string, unknown>[] = [];
   nodes.forEach((node, index) => {
     const parsed = parseKernelNode(node);
-    if (parsed.warning) {
-      warnings.push(parsed.warning);
+    if (parsed.warning || !parsed.proxy) {
+      if (parsed.warning) warnings.push(parsed.warning);
       return;
     }
-    if (parsed.proxy) {
-      const name = `node-${index}`;
-      const lines = [`  - name: ${quoteYaml(name)}`];
-      for (const [key, value] of Object.entries(parsed.proxy)) {
-        if (value === undefined || value === null || value === '') continue;
-        if (typeof value === 'object') lines.push(`    ${key}: ${JSON.stringify(value)}`);
-        else if (typeof value === 'boolean') lines.push(`    ${key}: ${value ? 'true' : 'false'}`);
-        else if (typeof value === 'number') lines.push(`    ${key}: ${value}`);
-        else lines.push(`    ${key}: ${quoteYaml(String(value))}`);
-      }
-      blocks.push(lines.join('\n'));
-      usable.push(node);
-      return;
-    }
-    if (parsed.yaml) {
-      blocks.push(parsed.yaml);
-      usable.push(node);
-    }
+    proxies.push({ ...parsed.proxy, name: `node-${index}` });
+    usable.push(node);
   });
-  const firstName = blocks[0]?.match(/name:\s*"([^"]+)"/)?.[1] ?? blocks[0]?.match(/name:\s*([^\n,]+)/)?.[1]?.trim() ?? '';
-  const rules = usable.length ? `rules:\n  - MATCH,${firstName || 'node-0'}` : 'rules:\n  - MATCH,DIRECT';
-  const yaml = [
-    `mixed-port: ${mixedPort}`,
-    'allow-lan: false',
-    'mode: rule',
-    'log-level: info',
-    'proxies:',
-    blocks.join('\n'),
-    rules,
-  ].join('\n');
-  return { yaml: `${yaml}\n`, usable, warnings };
+  const names = proxies.map((proxy) => String(proxy.name));
+  const config: Record<string, unknown> = {
+    'mixed-port': mixedPort,
+    'allow-lan': false,
+    mode: 'rule',
+    'log-level': 'info',
+    proxies,
+    'proxy-groups': proxies.length ? [{ name: 'PROXY', type: 'select', proxies: names }] : [],
+    rules: proxies.length ? ['MATCH,PROXY'] : ['MATCH,DIRECT'],
+  };
+  return { yaml: stringifyYaml(config, { lineWidth: 0 }), usable, warnings };
 }
 
 function waitForPort(port: number, timeoutMs: number): Promise<void> {

@@ -25,6 +25,10 @@ on:
         required: false
         type: boolean
         default: false
+      proxy_id:
+        description: "国内补测强制使用指定代理节点 id（留空=自动挑）"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -103,6 +107,7 @@ jobs:
     env:
       INGEST_URL: ${{ secrets.INGEST_URL }}
       RUNNER_TOKEN: ${{ secrets.RUNNER_TOKEN }}
+      PROXY_ID: ${{ inputs.proxy_id }}
     steps:
       - name: 检出
         uses: actions/checkout@v4
@@ -138,13 +143,9 @@ jobs:
       - name: 国内补测
         if: env.RUNNER_TOKEN != ''
         run: |
-          pnpm cn -- \
-            --urls-in out/urls.json \
-            --out out/cn.json \
-            --endpoint "$INGEST_URL" \
-            --token "$RUNNER_TOKEN" \
-            --max-proxies 8 \
-            --concurrency 5
+          args=(--urls-in out/urls.json --out out/cn.json --endpoint "$INGEST_URL" --token "$RUNNER_TOKEN" --max-proxies 8 --concurrency 5)
+          if [ -n "$PROXY_ID" ]; then args+=(--proxy-id "$PROXY_ID"); fi
+          pnpm cn -- "${args[@]}"
 
       - name: 未配置代理池
         if: env.RUNNER_TOKEN == ''
