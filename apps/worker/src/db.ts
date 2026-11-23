@@ -492,3 +492,16 @@ export async function touchSetting(db: D1Database, key: string, value: string, n
     .bind(key, value, now)
     .run();
 }
+
+export async function getSetting(db: D1Database, key: string): Promise<string | null> {
+  const row = await db.prepare('SELECT value FROM settings WHERE key = ?').bind(key).first<{ value: string }>();
+  return row?.value ?? null;
+}
+
+export async function setCandidateState(db: D1Database, id: string, state: string, now: string): Promise<boolean> {
+  const result = await db
+    .prepare('UPDATE candidates SET state = ?, last_seen = COALESCE(last_seen, ?) WHERE id = ?')
+    .bind(state, now, id)
+    .run();
+  return (result.meta.changes ?? 0) > 0;
+}

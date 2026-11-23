@@ -1,25 +1,51 @@
 import { SnapshotSchema, type ExportItem, type Snapshot, type SourceResult, type StatusEnvelope } from '@lx/shared';
 import { Hono } from 'hono';
 import {
+  buildClearSessionCookie,
+  buildSessionCookie,
+  clearLoginFailures,
+  createSessionToken,
+  hashPassword,
+  loginAllowed,
+  MIN_PASSWORD_LENGTH,
+  noteLoginFailure,
+  readCookie,
+  SESSION_COOKIE,
+  verifyPassword,
+} from './auth';
+import {
   countCandidates,
   getCandidates,
   getEvents,
   getLastRun,
   getRuns,
+  getSetting,
   getSourceDaily,
   getSourceHistory,
   getSourcePlatformDaily,
+  setCandidateState,
+  touchSetting,
 } from './db';
 import type { Env } from './env';
-import { SNAPSHOT_KEY } from './env';
+import { ADMIN_PASSWORD_SETTING, SNAPSHOT_KEY } from './env';
 import { filterSnapshot, parseList } from './filter';
 import { handleIngest } from './ingest';
 import { isStale } from './merge';
 
 type Ctx = { Bindings: Env };
 
-const CACHE_PUBLIC = 'public, max-age=30, s-maxage=60';
-const CACHE_DETAIL = 'public, max-age=60, s-maxage=120';
+// 整站需要登录，任何响应都不允许被共享缓存保存。
+const CACHE_PRIVATE = 'private, no-store';
+
+const CANDIDATE_STATES = ['new', 'qualified', 'rejected', 'promoted'];
+
+function isSecure(requestUrl: string): boolean {
+  return new URL(requestUrl).protocol === 'https:';
+}
+
+async function readPasswordHash(env: Env): Promise<string | null> {
+  return (await getSetting(env.DB, ADMIN_PASSWORD_SETTING)) ?? env.ADMIN_PASSWORD_HASH ?? null;
+}
 
 async function readSnapshot(env: Env): Promise<Snapshot | null> {
   const raw = await env.SNAPSHOT.get(SNAPSHOT_KEY);
@@ -102,6 +128,98 @@ export function createApi(): Hono<Ctx> {
 
   api.post('/ingest', handleIngest);
 
+  api.get('/auth/me', (c) => c.json({ ok: true, site: c.env.SITE_NAME ?? 'LX 音源监测' }, 200, { 'cache-control': CACHE_PRIVATE }));
+
+  api.post('/auth/login', async (c) => {
+    if (!c.env.SESSION_SECRET) {
+      return c.json({ error: 'not_configured', message: '服务端未配置会话密钥' }, 500);
+    }
+    const ip = c.req.header('cf-connecting-ip') ?? '127.0.0.1';
+    if (!(await loginAllowed(c.env.SNAPSHOT, ip))) {
+      return c.json(
+        { error: 'too_many_attempts', message: '密码错误次数过多，请 10 分钟后再试' },
+        429,
+        { 'retry-after': '600', 'cache-control': CACHE_PRIVATE },
+      );
+    }
+
+    let password = '';
+    try {
+      const body = await c.req.json<{ password?: unknown }>();
+      password = typeof body.password === 'string' ? body.password : '';
+    } catch {
+      return c.json({ error: 'bad_request', message: '请求格式错误' }, 400);
+    }
+    if (!password) return c.json({ error: 'bad_request', message: '请输入密码' }, 400);
+
+    const stored = await readPasswordHash(c.env);
+    if (!stored) return c.json({ error: 'not_configured', message: '服务端未设置登录密码' }, 500);
+
+    if (!(await verifyPassword(password, stored))) {
+      await noteLoginFailure(c.env.SNAPSHOT, ip);
+      return c.json({ error: 'bad_password', message: '密码不正确' }, 401);
+    }
+
+    await clearLoginFailures(c.env.SNAPSHOT, ip);
+    const token = await createSessionToken(c.env.SESSION_SECRET);
+    return c.json({ ok: true }, 200, {
+      'set-cookie': buildSessionCookie(token, isSecure(c.req.url)),
+      'cache-control': CACHE_PRIVATE,
+    });
+  });
+
+  api.post('/auth/logout', (c) =>
+    c.json({ ok: true }, 200, {
+      'set-cookie': buildClearSessionCookie(isSecure(c.req.url)),
+      'cache-control': CACHE_PRIVATE,
+    }),
+  );
+
+  api.post('/auth/change-password', async (c) => {
+    let oldPassword = '';
+    let newPassword = '';
+    try {
+      const body = await c.req.json<{ oldPassword?: unknown; newPassword?: unknown }>();
+      oldPassword = typeof body.oldPassword === 'string' ? body.oldPassword : '';
+      newPassword = typeof body.newPassword === 'string' ? body.newPassword : '';
+    } catch {
+      return c.json({ error: 'bad_request', message: '请求格式错误' }, 400);
+    }
+    if (newPassword.length < MIN_PASSWORD_LENGTH) {
+      return c.json({ error: 'weak_password', message: `新密码至少 ${MIN_PASSWORD_LENGTH} 位` }, 400);
+    }
+    const stored = await readPasswordHash(c.env);
+    if (!stored) return c.json({ error: 'not_configured', message: '服务端未设置登录密码' }, 500);
+    if (!(await verifyPassword(oldPassword, stored))) {
+      return c.json({ error: 'bad_password', message: '旧密码不正确' }, 400);
+    }
+    const hash = await hashPassword(newPassword);
+    await touchSetting(c.env.DB, ADMIN_PASSWORD_SETTING, hash, new Date().toISOString());
+    return c.json({ ok: true }, 200, { 'cache-control': CACHE_PRIVATE });
+  });
+
+  api.get('/admin/candidates', async (c) => {
+    const candidates = await getCandidates(c.env.DB, { limit: 500 });
+    return c.json({ candidates, count: candidates.length }, 200, { 'cache-control': CACHE_PRIVATE });
+  });
+
+  api.patch('/admin/candidates/:id', async (c) => {
+    let state = '';
+    try {
+      const body = await c.req.json<{ state?: unknown }>();
+      state = typeof body.state === 'string' ? body.state : '';
+    } catch {
+      return c.json({ error: 'bad_request', message: '请求格式错误' }, 400);
+    }
+    if (!CANDIDATE_STATES.includes(state)) {
+      return c.json({ error: 'bad_state', message: `未知候选状态：${state}` }, 400);
+    }
+    const id = c.req.param('id');
+    const updated = await setCandidateState(c.env.DB, id, state, new Date().toISOString());
+    if (!updated) return c.json({ error: 'not_found', message: `未知候选源：${id}` }, 404);
+    return c.json({ ok: true, id, state }, 200, { 'cache-control': CACHE_PRIVATE });
+  });
+
   api.get('/status', async (c) => {
     const snapshot = await readSnapshot(c.env);
     if (!snapshot) return notReady();
@@ -116,7 +234,7 @@ export function createApi(): Hono<Ctx> {
       serverTime: new Date().toISOString(),
       stale: isStale(filtered.generatedAt),
     };
-    return Response.json(envelope, { headers: { 'cache-control': CACHE_PUBLIC } });
+    return Response.json(envelope, { headers: { 'cache-control': CACHE_PRIVATE } });
   });
 
   api.get('/sources/:id', async (c) => {
@@ -135,20 +253,20 @@ export function createApi(): Hono<Ctx> {
 
     return Response.json(
       { source, history, daily, platformDaily, generatedAt: snapshot.generatedAt },
-      { headers: { 'cache-control': CACHE_DETAIL } },
+      { headers: { 'cache-control': CACHE_PRIVATE } },
     );
   });
 
   api.get('/history', async (c) => {
     const days = clampInt(c.req.query('days'), 14, 1, 90);
     const runs = await getRuns(c.env.DB, days * 6);
-    return Response.json(runs, { headers: { 'cache-control': CACHE_DETAIL } });
+    return Response.json(runs, { headers: { 'cache-control': CACHE_PRIVATE } });
   });
 
   api.get('/events', async (c) => {
     const limit = clampInt(c.req.query('limit'), 50, 1, 200);
     const events = await getEvents(c.env.DB, limit);
-    return Response.json(events, { headers: { 'cache-control': CACHE_DETAIL } });
+    return Response.json(events, { headers: { 'cache-control': CACHE_PRIVATE } });
   });
 
   api.get('/candidates', async (c) => {
@@ -158,7 +276,7 @@ export function createApi(): Hono<Ctx> {
     }
     const limit = clampInt(c.req.query('limit'), 100, 1, 500);
     const candidates = await getCandidates(c.env.DB, { state, limit });
-    return Response.json(candidates, { headers: { 'cache-control': CACHE_DETAIL } });
+    return Response.json(candidates, { headers: { 'cache-control': CACHE_PRIVATE } });
   });
 
   api.get('/export', async (c) => {
@@ -172,14 +290,14 @@ export function createApi(): Hono<Ctx> {
         headers: {
           'content-type': 'text/csv; charset=utf-8',
           'content-disposition': 'attachment; filename="lx-source-watch.csv"',
-          'cache-control': CACHE_PUBLIC,
+          'cache-control': CACHE_PRIVATE,
         },
       });
     }
     return Response.json(items, {
       headers: {
         'content-disposition': 'attachment; filename="lx-source-watch.json"',
-        'cache-control': CACHE_PUBLIC,
+        'cache-control': CACHE_PRIVATE,
       },
     });
   });

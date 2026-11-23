@@ -7,6 +7,7 @@ on:
     branches: [main]
     paths:
       - "apps/worker/**"
+      - "apps/web/**"
       - "packages/shared/**"
       - "pnpm-lock.yaml"
       - "package.json"
@@ -43,6 +44,9 @@ jobs:
 
       - name: 安装依赖
         run: pnpm install --frozen-lockfile
+
+      - name: 构建前端
+        run: pnpm --filter @lx/web build
 
       - name: 部署
         working-directory: apps/worker
