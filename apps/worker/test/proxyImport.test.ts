@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isKernelProtocol, parseProxyText, proxyKey } from '../src/proxyImport';
+import { isKernelProtocol, isSubscriptionUrl, parseProxyText, proxyKey } from '../src/proxyImport';
 
 describe('parseProxyText', () => {
   it('解析 socks5 分享链接', () => {
@@ -70,5 +70,21 @@ describe('parseProxyText', () => {
     expect(isKernelProtocol('hysteria2')).toBe(true);
     expect(isKernelProtocol('http')).toBe(false);
     expect(proxyKey({ protocol: 'http', host: 'A.com', port: 80, username: '' })).toBe('tcp-proxy|a.com|80|');
+  });
+
+  it('订阅地址不会被当成节点', () => {
+    const result = parseProxyText('https://sub.example.com/api/v1/client/subscribe?token=abc123');
+    expect(result.nodes).toHaveLength(0);
+    expect(result.warnings[0]).toContain('订阅');
+  });
+
+  it('区分订阅地址与 HTTP 代理地址', () => {
+    expect(isSubscriptionUrl('https://sub.example.com/api/v1/client/subscribe?token=abc')).toBe(true);
+    expect(isSubscriptionUrl('https://sub.example.com:8443/sub?token=abc')).toBe(true);
+    expect(isSubscriptionUrl('http://1.2.3.4:8080')).toBe(false);
+    expect(isSubscriptionUrl('http://1.2.3.4:8080/')).toBe(false);
+    expect(isSubscriptionUrl('http://1.2.3.4')).toBe(true);
+    const noPort = parseProxyText('http://1.2.3.4');
+    expect(noPort.nodes).toHaveLength(0);
   });
 });

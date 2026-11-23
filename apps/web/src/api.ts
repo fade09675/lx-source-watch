@@ -84,6 +84,8 @@ export interface AdminProxy {
   kernelOnly: boolean;
   engine: string;
   enabled: boolean;
+  subscriptionId: string | null;
+  subscriptionName: string | null;
   hasPassword: boolean;
   hasConfig: boolean;
   lastOkAt: string | null;
@@ -93,6 +95,36 @@ export interface AdminProxy {
   checkedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface SubscriptionItem {
+  id: string;
+  name: string;
+  url: string;
+  userAgent: string;
+  enabled: boolean;
+  lastFetchAt: string | null;
+  lastStatus: string;
+  createdAt: string;
+  updatedAt: string;
+  nodeCount: number;
+}
+
+export interface SubscriptionList {
+  items: SubscriptionItem[];
+}
+
+export interface SubscriptionInput {
+  name?: string;
+  url: string;
+  userAgent?: string;
+}
+
+export interface SubscriptionPatch {
+  name?: string;
+  url?: string;
+  enabled?: boolean;
+  userAgent?: string;
 }
 
 export interface ProxyList {
@@ -106,6 +138,9 @@ export interface ProxyImportResult {
   total: number;
   kernelOnly: number;
   warnings: string[];
+  source?: string;
+  fetchedBytes?: number;
+  subscription?: SubscriptionItem;
 }
 
 export interface ProxyInput {
@@ -160,6 +195,11 @@ export const api = {
   proxies: () => request<ProxyList>('/api/admin/proxies'),
   importProxies: (text: string) =>
     request<ProxyImportResult>('/api/admin/proxies/import', { method: 'POST', body: JSON.stringify({ text }) }),
+  importProxyUrl: (url: string, name?: string, userAgent?: string) =>
+    request<ProxyImportResult>('/api/admin/proxies/import-url', {
+      method: 'POST',
+      body: JSON.stringify({ url, name, userAgent }),
+    }),
   createProxy: (input: ProxyInput) =>
     request<{ ok: boolean }>('/api/admin/proxies', { method: 'POST', body: JSON.stringify(input) }),
   updateProxy: (id: string, patch: ProxyPatch) =>
@@ -169,4 +209,23 @@ export const api = {
     }),
   deleteProxy: (id: string) =>
     request<{ ok: boolean }>(`/api/admin/proxies/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  subscriptions: () => request<SubscriptionList>('/api/admin/proxies/subscriptions'),
+  createSubscription: (input: SubscriptionInput) =>
+    request<{ ok: boolean; subscription: SubscriptionItem; created?: boolean; duplicate?: boolean }>(
+      '/api/admin/proxies/subscriptions',
+      { method: 'POST', body: JSON.stringify(input) },
+    ),
+  updateSubscription: (id: string, patch: SubscriptionPatch) =>
+    request<{ ok: boolean }>(`/api/admin/proxies/subscriptions/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  deleteSubscription: (id: string, nodes: 'delete_all' | 'keep' = 'delete_all') =>
+    request<{ ok: boolean; deleted: number }>(
+      `/api/admin/proxies/subscriptions/${encodeURIComponent(id)}?nodes=${nodes}`,
+      { method: 'DELETE' },
+    ),
+  refreshSubscription: (id: string) =>
+    request<ProxyImportResult>(`/api/admin/proxies/subscriptions/${encodeURIComponent(id)}/refresh`, { method: 'POST' }),
 };

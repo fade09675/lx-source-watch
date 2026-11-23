@@ -23,6 +23,25 @@ export function isKernelProtocol(protocol: string): boolean {
   return KERNEL.has(protocol.toLowerCase());
 }
 
+/** 判断单行文本是不是“订阅地址”而不是代理节点。 */
+export function isSubscriptionUrl(raw: string): boolean {
+  const text = raw.trim();
+  if (!text || /\s/.test(text)) return false;
+  let url: URL;
+  try {
+    url = new URL(text);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+  if (url.username || url.password) return false;
+  // 没有端口、或带路径/查询参数 → 视为订阅地址；HTTP 代理必须显式写端口。
+  if (!url.port) return true;
+  if (url.pathname !== '/' && url.pathname !== '') return true;
+  if (url.search) return true;
+  return false;
+}
+
 function normalizeProtocol(raw: string): string | null {
   const value = raw.trim().toLowerCase();
   if (value === 'socks') return 'socks5';
@@ -39,6 +58,7 @@ function emptyNode(protocol: string, name: string): ParsedProxy {
 export function parseProxyUri(raw: string): ParsedProxy | null {
   const text = raw.trim();
   if (!text || text.startsWith('//')) return null;
+  if (isSubscriptionUrl(text)) return null;
   const hashIndex = text.indexOf('#');
   const label = hashIndex >= 0 ? decodeURIComponent(text.slice(hashIndex + 1)) : '';
   const base = hashIndex >= 0 ? text.slice(0, hashIndex) : text;
@@ -46,6 +66,8 @@ export function parseProxyUri(raw: string): ParsedProxy | null {
     const url = new URL(base);
     const protocol = normalizeProtocol(url.protocol.replace(':', ''));
     if (!protocol) return null;
+    // HTTP/SOCKS 代理必须有显式端口；订阅地址已经在上一步排除。
+    if (PLAIN.has(protocol) && !url.port) return null;
     const node = emptyNode(protocol, label || protocol);
     node.host = url.hostname;
     node.port = Number(url.port) || 0;
@@ -182,6 +204,9 @@ function decodeBase64(text: string): string | null {
 export function parseProxyText(text: string): ParseResult {
   const trimmed = text.trim();
   if (!trimmed) return { nodes: [], warnings: ['内容为空'] };
+  if (isSubscriptionUrl(trimmed)) {
+    return { nodes: [], warnings: ['这是订阅链接，请用上方的“订阅地址”导入，让服务端拉取节点'] };
+  }
   const json = parseJson(trimmed);
   if (json) return dedupe(json);
   const yaml = parseClashYaml(trimmed);
