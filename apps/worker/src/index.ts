@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { createApi } from './api';
 import { readCookie, SESSION_COOKIE, verifySessionToken } from './auth';
 import type { Env } from './env';
+import { createAdminProxyRoutes, createRunnerProxyRoutes } from './proxyRoutes';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -17,7 +18,15 @@ const CSP = [
   "form-action 'self'",
 ].join('; ');
 
-const PUBLIC_PATHS = new Set(['/login', '/api/auth/login', '/api/ingest', '/favicon.ico', '/favicon.svg', '/robots.txt']);
+const PUBLIC_PATHS = new Set([
+  '/login',
+  '/api/auth/login',
+  '/api/ingest',
+  '/api/runner/proxies',
+  '/favicon.ico',
+  '/favicon.svg',
+  '/robots.txt',
+]);
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.has(pathname) || pathname.startsWith('/assets/');
@@ -57,6 +66,8 @@ app.use('*', async (c, next) => {
   return c.json({ error: 'unauthorized', message: '请先登录' }, 401);
 });
 
+app.route('/api/admin/proxies', createAdminProxyRoutes());
+app.route('/api/runner/proxies', createRunnerProxyRoutes());
 app.route('/api', createApi());
 
 app.all('/api/*', (c) =>

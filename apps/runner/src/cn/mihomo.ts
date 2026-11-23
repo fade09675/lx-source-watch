@@ -1,0 +1,387 @@
+import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { chmodSync, createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import net from 'node:net';
+import path from 'node:path';
+import { gunzipSync } from 'node:zlib';
+
+/**
+ * 内核协议（vmess/vless/trojan/ss/...）需要本地引擎：
+ * 把节点配置转成 mihomo 配置，启动固定版本的 mihomo，再通过本地 mixed 端口探测。
+ */
+
+export interface KernelNode {
+  id: string;
+  name: string;
+  protocol: string;
+  /** 导入时保存的原始配置：Clash YAML 片段、sing-box JSON 或分享 URI。 */
+  config?: string;
+}
+
+export interface KernelConfig {
+  yaml: string;
+  usable: KernelNode[];
+  warnings: string[];
+}
+
+export const MIHOMO_VERSION = process.env.MIHOMO_VERSION ?? 'v1.19.9';
+export const DEFAULT_KERNEL_DIR = process.env.MIHOMO_DIR ?? path.join(process.cwd(), '.tmp', 'mihomo');
+export const MIHOMO_DOWNLOAD_URL =
+  process.env.MIHOMO_URL ??
+  `https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-linux-amd64-${MIHOMO_VERSION}.gz`;
+
+function quoteYaml(value: string): string {
+  return JSON.stringify(value);
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function decodeBase64Text(text: string): string | null {
+  try {
+    const decoded = Buffer.from(text.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+    return decoded && decoded.includes(':') ? decoded : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 把 sing-box outbound 对象转成 Clash/mihomo 节点。 */
+export function clashProxyFromJson(record: Record<string, unknown>): Record<string, unknown> | null {
+  const rawType = String(record.type ?? record.protocol ?? '').toLowerCase();
+  const type = rawType === 'shadowsocks' ? 'ss' : rawType;
+  if (!['ss', 'vmess', 'vless', 'trojan', 'hysteria2', 'tuic', 'anytls'].includes(type)) return null;
+  const server = String(record.server ?? record.address ?? '');
+  const port = Number(record.server_port ?? record.port);
+  if (!server || !Number.isFinite(port) || port <= 0) return null;
+  const proxy: Record<string, unknown> = { type, server, port };
+  if (record.password) proxy.password = String(record.password);
+  if (record.uuid) proxy.uuid = String(record.uuid);
+  if (record.method) proxy.cipher = String(record.method);
+  if (record.cipher) proxy.cipher = String(record.cipher);
+  if (type === 'vmess' && !proxy.cipher) proxy.cipher = String(record.security ?? 'auto');
+  if (record.alter_id !== undefined) proxy.alterId = Number(record.alter_id) || 0;
+  if (type === 'vmess' && proxy.alterId === undefined) proxy.alterId = 0;
+  if (record.flow) proxy.flow = String(record.flow);
+  const tls = isPlainRecord(record.tls) ? record.tls : null;
+  if (tls) {
+    proxy.tls = tls.enabled !== false;
+    if (tls.server_name) proxy.servername = String(tls.server_name);
+    if (tls.insecure) proxy['skip-cert-verify'] = true;
+    if (Array.isArray(tls.alpn) && tls.alpn.length) proxy.alpn = tls.alpn.map(String);
+  }
+  const transport = isPlainRecord(record.transport) ? record.transport : null;
+  const network = String(transport?.type ?? record.network ?? '');
+  if (network === 'ws') {
+    proxy.network = 'ws';
+    const rawHeaders = isPlainRecord(transport?.headers) ? transport.headers : {};
+    const headers: Record<string, string> = {};
+    for (const [name, value] of Object.entries(rawHeaders)) {
+      const first = Array.isArray(value) ? value[0] : value;
+      if (first !== undefined && first !== null) headers[name] = String(first);
+    }
+    proxy['ws-opts'] = {
+      path: String((transport?.path as string) ?? record.path ?? '/'),
+      headers,
+    };
+  } else if (network === 'grpc') {
+    proxy.network = 'grpc';
+    proxy['grpc-opts'] = { 'grpc-service-name': String((transport?.service_name as string) ?? record.service_name ?? '') };
+  } else if (network === 'h2' || network === 'http') {
+    proxy.network = 'h2';
+  }
+  return proxy;
+}
+
+/** 把常见分享 URI 转成 Clash/mihomo 节点（尽力而为）。 */
+export function clashProxyFromUri(raw: string): Record<string, unknown> | null {
+  const text = raw.trim();
+  const hashIndex = text.indexOf('#');
+  const base = hashIndex >= 0 ? text.slice(0, hashIndex) : text;
+  const scheme = base.slice(0, base.indexOf('://')).toLowerCase();
+  try {
+    if (scheme === 'vmess') {
+      const body = decodeBase64Text(base.slice('vmess://'.length));
+      if (!body) return null;
+      const data = JSON.parse(body) as Record<string, unknown>;
+      const proxy: Record<string, unknown> = {
+        type: 'vmess',
+        server: String(data.add ?? ''),
+        port: Number(data.port) || 0,
+        uuid: String(data.id ?? ''),
+        alterId: Number(data.aid ?? 0) || 0,
+        cipher: String(data.scy ?? 'auto'),
+      };
+      if (data.tls === 'tls') {
+        proxy.tls = true;
+        if (data.sni || data.host) proxy.servername = String(data.sni ?? data.host);
+      }
+      if (data.net === 'ws') {
+        proxy.network = 'ws';
+        proxy['ws-opts'] = { path: String(data.path ?? '/'), headers: data.host ? { Host: String(data.host) } : {} };
+      }
+      if (!proxy.server || !proxy.port) return null;
+      return proxy;
+    }
+    if (scheme === 'ss') {
+      const url = new URL(base);
+      let method = decodeURIComponent(url.username);
+      let password = decodeURIComponent(url.password);
+      if (!password && method) {
+        // SIP002：ss://base64(method:password)@host:port
+        const decoded = decodeBase64Text(method);
+        if (decoded) {
+          const split = decoded.indexOf(':');
+          if (split > 0) {
+            method = decoded.slice(0, split);
+            password = decoded.slice(split + 1);
+          }
+        }
+      }
+      if (!method || !password) {
+        // 旧格式：ss://base64(method:password@host:port)
+        const decoded = decodeBase64Text(decodeURIComponent(url.hostname));
+        if (!decoded) return null;
+        const at = decoded.lastIndexOf('@');
+        const credential = at >= 0 ? decoded.slice(0, at) : decoded;
+        const split = credential.indexOf(':');
+        if (split <= 0) return null;
+        method = credential.slice(0, split);
+        password = credential.slice(split + 1);
+        if (at >= 0) {
+          const hostPort = decoded.slice(at + 1).split(':');
+          const port = Number(hostPort[1]);
+          if (hostPort[0] && port > 0) return { type: 'ss', server: hostPort[0], port, cipher: method, password };
+        }
+      }
+      if (!method || !password || !url.port) return null;
+      return { type: 'ss', server: url.hostname, port: Number(url.port), cipher: method, password };
+    }
+    if (scheme === 'trojan') {
+      const url = new URL(base);
+      return {
+        type: 'trojan',
+        server: url.hostname,
+        port: Number(url.port),
+        password: decodeURIComponent(url.username),
+        ...(url.searchParams.get('sni') ? { sni: url.searchParams.get('sni') } : {}),
+        ...(url.searchParams.get('allowInsecure') === '1' ? { 'skip-cert-verify': true } : {}),
+      };
+    }
+    if (scheme === 'vless') {
+      const url = new URL(base);
+      const proxy: Record<string, unknown> = { type: 'vless', server: url.hostname, port: Number(url.port), uuid: decodeURIComponent(url.username) };
+      if (url.searchParams.get('security') === 'tls' || url.searchParams.get('tls') === '1') proxy.tls = true;
+      const sni = url.searchParams.get('sni');
+      if (sni) proxy.servername = sni;
+      if (url.searchParams.get('type') === 'ws') {
+        proxy.network = 'ws';
+        proxy['ws-opts'] = { path: url.searchParams.get('path') ?? '/', headers: { Host: url.searchParams.get('host') ?? '' } };
+      }
+      return proxy;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function parseKernelNode(node: KernelNode): { yaml?: string; proxy?: Record<string, unknown>; warning?: string } {
+  const config = (node.config ?? '').trim();
+  if (!config) return { warning: `${node.name}：没有保存节点配置` };
+  if (config.startsWith('-') || config.startsWith('name:')) {
+    const lines = config.split(/\r?\n/).filter((line) => line.trim().length > 0);
+    const indented = lines.map((line) => (line.startsWith(' ') ? line : `  ${line}`)).join('\n');
+    const nameMatch = indented.match(/^\s*-\s*name:\s*(.+)$/m) ?? indented.match(/^\s*name:\s*(.+)$/m);
+    const name = nameMatch?.[1]?.trim().replace(/^['"]|['"]$/g, '') ?? '';
+    if (name.includes(',')) return { warning: `${node.name}：名称含逗号，无法用 MATCH 规则选中` };
+    return { yaml: indented };
+  }
+  if (config.startsWith('{')) {
+    try {
+      const record = JSON.parse(config) as Record<string, unknown>;
+      const proxy = clashProxyFromJson(record);
+      return proxy ? { proxy } : { warning: `${node.name}：不支持的配置类型` };
+    } catch {
+      return { warning: `${node.name}：配置不是合法 JSON` };
+    }
+  }
+  if (config.includes('://')) {
+    const proxy = clashProxyFromUri(config);
+    return proxy ? { proxy } : { warning: `${node.name}：暂不支持该 URI 协议` };
+  }
+  return { warning: `${node.name}：无法识别的配置格式` };
+}
+
+/** 构建单节点 mihomo 配置，MATCH 规则固定走这个节点。 */
+export function buildKernelConfig(nodes: KernelNode[], mixedPort = 7890): KernelConfig {
+  const usable: KernelNode[] = [];
+  const warnings: string[] = [];
+  const blocks: string[] = [];
+  nodes.forEach((node, index) => {
+    const parsed = parseKernelNode(node);
+    if (parsed.warning) {
+      warnings.push(parsed.warning);
+      return;
+    }
+    if (parsed.proxy) {
+      const name = `node-${index}`;
+      const lines = [`  - name: ${quoteYaml(name)}`];
+      for (const [key, value] of Object.entries(parsed.proxy)) {
+        if (value === undefined || value === null || value === '') continue;
+        if (typeof value === 'object') lines.push(`    ${key}: ${JSON.stringify(value)}`);
+        else if (typeof value === 'boolean') lines.push(`    ${key}: ${value ? 'true' : 'false'}`);
+        else if (typeof value === 'number') lines.push(`    ${key}: ${value}`);
+        else lines.push(`    ${key}: ${quoteYaml(String(value))}`);
+      }
+      blocks.push(lines.join('\n'));
+      usable.push(node);
+      return;
+    }
+    if (parsed.yaml) {
+      blocks.push(parsed.yaml);
+      usable.push(node);
+    }
+  });
+  const firstName = blocks[0]?.match(/name:\s*"([^"]+)"/)?.[1] ?? blocks[0]?.match(/name:\s*([^\n,]+)/)?.[1]?.trim() ?? '';
+  const rules = usable.length ? `rules:\n  - MATCH,${firstName || 'node-0'}` : 'rules:\n  - MATCH,DIRECT';
+  const yaml = [
+    `mixed-port: ${mixedPort}`,
+    'allow-lan: false',
+    'mode: rule',
+    'log-level: info',
+    'proxies:',
+    blocks.join('\n'),
+    rules,
+  ].join('\n');
+  return { yaml: `${yaml}\n`, usable, warnings };
+}
+
+function waitForPort(port: number, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  return new Promise((resolve, reject) => {
+    const attempt = () => {
+      const socket = net.connect({ host: '127.0.0.1', port }, () => {
+        socket.destroy();
+        resolve();
+      });
+      socket.on('error', () => {
+        socket.destroy();
+        if (Date.now() > deadline) reject(new Error('mihomo 启动超时'));
+        else setTimeout(attempt, 300);
+      });
+    };
+    attempt();
+  });
+}
+
+const binaryPromises = new Map<string, Promise<string>>();
+
+export async function ensureMihomoBinary(dir: string, options: { url?: string; sha256?: string } = {}): Promise<string> {
+  const binary = path.join(dir, 'mihomo');
+  mkdirSync(dir, { recursive: true });
+  if (existsSync(binary)) return binary;
+  const url = options.url ?? MIHOMO_DOWNLOAD_URL;
+  const key = `${binary}|${url}`;
+  const inflight = binaryPromises.get(key);
+  if (inflight) return inflight;
+  const task = (async () => {
+    const response = await fetch(url, { headers: { 'user-agent': 'lx-source-watch-kernel/1.0' } });
+    if (!response.ok) throw new Error(`下载 mihomo 失败：HTTP ${response.status}`);
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const data = buffer[0] === 0x1f && buffer[1] === 0x8b ? gunzipSync(buffer) : buffer;
+    const expected = options.sha256 ?? process.env.MIHOMO_SHA256 ?? '';
+    if (expected) {
+      const actual = createHash('sha256').update(data).digest('hex');
+      if (actual !== expected.toLowerCase()) throw new Error(`mihomo 校验失败：${actual}`);
+    }
+    writeFileSync(binary, data);
+    chmodSync(binary, 0o755);
+    return binary;
+  })();
+  binaryPromises.set(key, task);
+  try {
+    return await task;
+  } finally {
+    binaryPromises.delete(key);
+  }
+}
+
+export interface KernelHandle {
+  port: number;
+  logPath: string;
+  stop: () => Promise<void>;
+}
+
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      const port = typeof address === 'object' && address ? address.port : 0;
+      server.close(() => (port ? resolve(port) : reject(new Error('没有可用端口'))));
+    });
+  });
+}
+
+/** 为单个节点启动 mihomo，返回本地 mixed 端口。 */
+export async function startKernel(
+  node: KernelNode,
+  options: { dir?: string; mixedPort?: number; binary?: string; sha256?: string; startupTimeoutMs?: number } = {},
+): Promise<KernelHandle> {
+  const dir = options.dir ?? DEFAULT_KERNEL_DIR;
+  const port = options.mixedPort ?? (await freePort());
+  const built = buildKernelConfig([node], port);
+  if (!built.usable.length) throw new Error(built.warnings[0] ?? '节点配置不可用');
+  const binary = options.binary ?? (await ensureMihomoBinary(dir, { sha256: options.sha256 }));
+  const configPath = path.join(dir, `config-${port}.yaml`);
+  writeFileSync(configPath, built.yaml);
+  const logPath = path.join(dir, `mihomo-${port}.log`);
+  const log = createWriteStream(logPath, { flags: 'a' });
+  let logClosed = false;
+  const writeLog = (chunk: Buffer) => {
+    if (logClosed) return;
+    try {
+      log.write(chunk);
+    } catch {
+      // 关闭后的流不能拖垮整轮。
+    }
+  };
+  log.on('error', () => {
+    logClosed = true;
+  });
+  const child = spawn(binary, ['-f', configPath, '-d', dir], { stdio: ['ignore', 'pipe', 'pipe'] });
+  child.stdout?.on('data', writeLog);
+  child.stderr?.on('data', writeLog);
+  let stopped = false;
+  const stop = async () => {
+    if (stopped) return;
+    stopped = true;
+    child.stdout?.removeListener('data', writeLog);
+    child.stderr?.removeListener('data', writeLog);
+    logClosed = true;
+    log.end();
+    if (child.exitCode !== null) return;
+    child.kill('SIGTERM');
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        child.kill('SIGKILL');
+        resolve();
+      }, 3_000);
+      child.once('exit', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  };
+  try {
+    await waitForPort(port, options.startupTimeoutMs ?? 15_000);
+  } catch (error) {
+    const logText = existsSync(logPath) ? readFileSync(logPath, 'utf8').slice(-800) : '';
+    await stop();
+    throw new Error(`${error instanceof Error ? error.message : String(error)}${logText ? `：${logText}` : ''}`);
+  }
+  return { port, logPath, stop };
+}

@@ -93,10 +93,75 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
-  # 第二个平面：只读 JSON 并签名上报，绝不执行音源代码。
+  # 第二个平面：只测已解析 URL，不执行任何音源脚本；持有代理池 token。
+  cn:
+    name: 国内补测（不执行脚本）
+    needs: probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    env:
+      INGEST_URL: ${{ secrets.INGEST_URL }}
+      RUNNER_TOKEN: ${{ secrets.RUNNER_TOKEN }}
+    steps:
+      - name: 检出
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.28.5
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 下载探测结果
+        uses: actions/download-artifact@v4
+        with:
+          name: probe-result
+          path: out
+
+      - name: 缓存 mihomo 内核
+        uses: actions/cache@v4
+        with:
+          path: .tmp/mihomo
+          key: mihomo-v1.19.9
+
+      - name: 国内补测
+        if: env.RUNNER_TOKEN != ''
+        run: |
+          pnpm cn -- \
+            --urls-in out/urls.json \
+            --out out/cn.json \
+            --endpoint "$INGEST_URL" \
+            --token "$RUNNER_TOKEN" \
+            --max-proxies 8 \
+            --concurrency 5
+
+      - name: 未配置代理池
+        if: env.RUNNER_TOKEN == ''
+        run: echo "未配置 RUNNER_TOKEN，跳过国内补测。"
+
+      - name: 上传国内补测结果
+        uses: actions/upload-artifact@v4
+        with:
+          name: cn-result
+          path: out/cn.json
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # 第三个平面：只读 JSON 并签名上报，绝不执行音源代码。
   publish:
     name: 上报（持密钥，不执行脚本）
-    needs: probe
+    needs: [probe, cn]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: production
@@ -129,11 +194,19 @@ jobs:
           name: probe-result
           path: out
 
+      - name: 下载国内补测结果
+        uses: actions/download-artifact@v4
+        with:
+          name: cn-result
+          path: out
+        continue-on-error: true
+
       - name: 上报
         if: env.INGEST_URL != ''
         run: >-
           pnpm ingest --
           --snapshot out/status.json
+          --cn out/cn.json
           --endpoint "$INGEST_URL"
           --secret "$INGEST_SECRET"
 

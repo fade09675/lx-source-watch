@@ -74,6 +74,58 @@ export interface CandidateList {
   count: number;
 }
 
+export interface AdminProxy {
+  id: string;
+  name: string;
+  protocol: string;
+  host: string;
+  port: number;
+  username: string;
+  kernelOnly: boolean;
+  engine: string;
+  enabled: boolean;
+  hasPassword: boolean;
+  hasConfig: boolean;
+  lastOkAt: string | null;
+  lastLatencyMs: number | null;
+  egressIp: string | null;
+  lastError: string | null;
+  checkedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProxyList {
+  items: AdminProxy[];
+}
+
+export interface ProxyImportResult {
+  ok: boolean;
+  added: number;
+  updated: number;
+  total: number;
+  kernelOnly: number;
+  warnings: string[];
+}
+
+export interface ProxyInput {
+  name?: string;
+  protocol: string;
+  host: string;
+  port: number;
+  username?: string;
+  password?: string;
+  config?: string;
+}
+
+export interface ProxyPatch {
+  name?: string;
+  enabled?: boolean;
+  sortOrder?: number;
+  password?: string;
+  config?: string;
+}
+
 export const api = {
   me: () => request<{ ok: boolean; site: string }>('/api/auth/me'),
   login: (password: string) =>
@@ -104,4 +156,17 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ state }),
     }),
+
+  proxies: () => request<ProxyList>('/api/admin/proxies'),
+  importProxies: (text: string) =>
+    request<ProxyImportResult>('/api/admin/proxies/import', { method: 'POST', body: JSON.stringify({ text }) }),
+  createProxy: (input: ProxyInput) =>
+    request<{ ok: boolean }>('/api/admin/proxies', { method: 'POST', body: JSON.stringify(input) }),
+  updateProxy: (id: string, patch: ProxyPatch) =>
+    request<{ ok: boolean }>(`/api/admin/proxies/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  deleteProxy: (id: string) =>
+    request<{ ok: boolean }>(`/api/admin/proxies/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 };

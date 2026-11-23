@@ -7,6 +7,7 @@ import {
   type Quality,
 } from '@lx/shared';
 import { cnExecute, cnVerify } from './cn.js';
+import { cnRun } from './cn/run.js';
 import { enrichCandidates } from './candidates.js';
 import { discoverCandidates } from './discover.js';
 import { log } from './logger.js';
@@ -131,13 +132,18 @@ discover:
 cn:
   --urls-in <path>          默认 out/urls.json
   --out <path>              默认 out/cn.json
-  --proxy <url>             国内代理，默认读 CN_PROXY_URL
+  --endpoint <url>          从 Worker 代理池取节点（默认读 INGEST_URL）
+  --token <token>           Runner Token（默认读 RUNNER_TOKEN）
+  --proxy-id <id>           指定代理节点
+  --max-proxies <n>         最多预检几个节点，默认 8
+  --proxy <url>             直接指定代理，跳过代理池
   --execute                 走代理重新执行脚本（危险，仅 trusted 来源）
   --registry <path>
   --only a,b --platform kg --limit <n> --concurrency <n> --timeout <ms>
 
 publish:
   --snapshot <path>         默认 out/status.json
+  --cn <path>               国内补测结果，默认 out/cn.json（存在才合并）
   --candidates <path>       默认 out/candidates.json（存在才带）
   --endpoint <url>          默认读 INGEST_URL
   --secret <secret>         默认读 INGEST_SECRET
@@ -145,7 +151,7 @@ publish:
   --allow-private           允许上报到 127.0.0.1（仅本地联调）
 
 环境变量：
-  LX_PROXY_URL / CN_PROXY_URL / INGEST_URL / INGEST_SECRET / GITHUB_TOKEN / RAW_BASE
+  LX_PROXY_URL / CN_PROXY_URL / INGEST_URL / INGEST_SECRET / RUNNER_TOKEN / GITHUB_TOKEN / RAW_BASE
   LX_PREFER_MIRROR=1 等价于 --prefer-mirror；INGEST_ALLOW_PRIVATE=1 等价于 --allow-private
 `.trim();
 
@@ -192,8 +198,27 @@ async function cmdCandidates(args: Args): Promise<void> {
 }
 
 async function cmdCn(args: Args): Promise<void> {
+  const endpoint = str(args, 'endpoint') ?? process.env.INGEST_URL ?? '';
+  const token = str(args, 'token') ?? process.env.RUNNER_TOKEN ?? '';
+  if (!bool(args, 'execute') && endpoint && token && !str(args, 'proxy')) {
+    await cnRun({
+      urlsPath: str(args, 'urls-in', 'out/urls.json') as string,
+      outPath: str(args, 'out', 'out/cn.json') as string,
+      endpoint,
+      token,
+      preferredId: str(args, 'proxy-id'),
+      maxProxies: num(args, 'max-proxies', 8),
+      concurrency: num(args, 'concurrency', 5),
+      timeoutMs: num(args, 'timeout', 15_000),
+      limit: num(args, 'limit'),
+      platform: str(args, 'platform'),
+      allowPrivate: bool(args, 'allow-private') || process.env.INGEST_ALLOW_PRIVATE === '1',
+    });
+    return;
+  }
+
   const proxy = parseProxy(str(args, 'proxy') ?? process.env.CN_PROXY_URL);
-  if (!proxy) throw new Error('缺少国内代理：传 --proxy 或设置 CN_PROXY_URL');
+  if (!proxy) throw new Error('缺少国内代理：传 --proxy、设置 CN_PROXY_URL，或用 --endpoint + --token 从代理池取');
   if (bool(args, 'execute')) {
     await cnExecute({
       registryPath: str(args, 'registry', 'sources/registry.json') as string,
@@ -226,6 +251,7 @@ async function cmdPublish(args: Args): Promise<void> {
   if (!dryRun && !secret) throw new Error('缺少 --secret 或 INGEST_SECRET');
   await publishIngest({
     snapshotPath: str(args, 'snapshot', 'out/status.json') as string,
+    cnPath: str(args, 'cn', 'out/cn.json'),
     candidatesPath: str(args, 'candidates', 'out/candidates.json'),
     endpoint,
     secret,

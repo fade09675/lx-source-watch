@@ -227,3 +227,39 @@ git commit --amend --reset-author --no-edit
 - Worker：`wrangler deployments list` 找到上一版，`wrangler rollback [deployment-id]`
 - 数据：D1 有 14 天明细 / 180 天汇总；误删只能靠 `wrangler d1 export` 的备份（建议每周导出一次）
 - 代码：`git revert` 后重新 deploy；探测逻辑在 `apps/runner`，与展示层解耦
+
+## 11. 国内补测（P5，可选）
+
+国内补测通过你自备的 HTTP/SOCKS 代理或 mihomo 内核节点完成，不依赖 Cloudflare 的出口。
+
+### 11.1 新增两个密钥
+
+```powershell
+# Worker：供 Actions 的 cn job 拉取代理池（随机 32 字节 hex 即可）
+$runnerToken = -join ((1..64) | ForEach-Object { '{0:x}' -f (Get-Random -Max 16) })
+pnpm --filter @lx/worker exec wrangler secret put RUNNER_TOKEN
+# 粘贴上面的 $runnerToken
+
+# Worker：代理密码/内核配置的加密密钥（32 字节，base64）
+$proxyKey = [Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Max 256 }))
+pnpm --filter @lx/worker exec wrangler secret put PROXY_ENC_KEY
+# 粘贴上面的 $proxyKey
+```
+
+GitHub 仓库 Actions secrets 里再加一个 `RUNNER_TOKEN`，值与 Worker 的相同。
+
+### 11.2 建表与导入代理
+
+```powershell
+pnpm --filter @lx/worker exec wrangler d1 migrations apply lx-source-watch --remote -y
+```
+
+打开 `https://dash.dpdns.org/admin/proxies`，粘贴订阅（Clash YAML / Base64 / 分享链接 / host:port），或手动添加。密码与内核配置会用 AES-GCM 加密存 D1，页面只显示掩码。
+
+### 11.3 补测如何运行
+
+- `probe` job（无密钥）只负责产出 `out/status.json` 与 `out/urls.json`。
+- `cn` job 拿 `RUNNER_TOKEN` 拉代理池，挑一个可用节点，对已解析 URL 发 Range 64KB 请求，产出 `out/cn.json`；**不执行任何音源脚本**。
+- `publish` job 合并 `out/cn.json` 后一次 HMAC 上报；国内可达只作为独立标记，不改变总状态。
+- 没配 `RUNNER_TOKEN` 时 cn job 自动跳过，站点仍可用。
+- 内核协议（ss/vmess/vless/trojan/hysteria2/tuic）会让 cn job 下载固定版本 mihomo（v1.19.9）并缓存；单个代理只代表该节点出口，不代表全国各地区。

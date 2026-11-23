@@ -38,6 +38,8 @@ export interface CnVerifyOptions {
   urlsPath: string;
   outPath: string;
   proxy: ProxyConfig;
+  /** 展示用代理名；缺省用 proxy.label。 */
+  proxyLabel?: string;
   concurrency?: number;
   timeoutMs?: number;
   limit?: number;
@@ -52,14 +54,14 @@ interface UrlsFile {
   urls: UrlRecord[];
 }
 
-async function probeUrl(record: UrlRecord, proxy: ProxyConfig, timeoutMs: number): Promise<CnRow> {
+async function probeUrl(record: UrlRecord, proxy: ProxyConfig, timeoutMs: number, proxyLabel: string): Promise<CnRow> {
   const started = Date.now();
   const base: CnRow = {
     sourceId: record.sourceId,
     platform: record.platform,
     quality: record.quality,
     url: record.url,
-    proxy: proxy.label,
+    proxy: proxyLabel,
     ok: false,
     status: 0,
     ttfbMs: 0,
@@ -123,22 +125,23 @@ export async function cnVerify(opts: CnVerifyOptions): Promise<CnFile> {
     return true;
   });
 
-  log.step(`国内补测：${unique.length} 条 URL，代理 ${opts.proxy.label}，并发 ${opts.concurrency ?? 5}`);
+  log.step(`国内补测：${unique.length} 条 URL，代理 ${opts.proxyLabel ?? opts.proxy.label}，并发 ${opts.concurrency ?? 5}`);
+  const label = opts.proxyLabel ?? opts.proxy.label;
   const rows = await mapLimit(unique, Math.max(1, opts.concurrency ?? 5), (u) =>
-    probeUrl(u, opts.proxy as ProxyConfig, opts.timeoutMs ?? 15_000),
+    probeUrl(u, opts.proxy as ProxyConfig, opts.timeoutMs ?? 15_000, label),
   );
   const ok = rows.filter((r) => r.ok).length;
   const file: CnFile = {
     version: 1,
     generatedAt: nowIso(),
     mode: 'verify',
-    proxy: opts.proxy.label,
+    proxy: label,
     summary: { tested: rows.length, ok },
     rows,
   };
   await mkdir(dirname(opts.outPath), { recursive: true });
   await writeFile(opts.outPath, `${JSON.stringify(file, null, 2)}\n`, 'utf8');
-  log.success(`国内补测完成：${ok}/${rows.length} 可达（${opts.proxy.label}）`);
+  log.success(`国内补测完成：${ok}/${rows.length} 可达（${opts.proxyLabel ?? opts.proxy.label}）`);
   return file;
 }
 

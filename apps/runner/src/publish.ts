@@ -7,13 +7,17 @@ import {
   SnapshotSchema,
   type Candidate,
   type IngestPayload,
+  type Snapshot,
 } from '@lx/shared';
 import { log } from './logger.js';
+import type { CnFile } from './cn.js';
 import { httpRequest } from './net/http.js';
 
 export interface PublishOptions {
   snapshotPath: string;
   candidatesPath?: string;
+  /** 国内补测结果；存在时合并进每个平台的 cn 字段。 */
+  cnPath?: string;
   endpoint: string;
   secret: string;
   dryRun?: boolean;
@@ -21,6 +25,44 @@ export interface PublishOptions {
   maxCandidates?: number;
   /** 仅本地联调时允许上报到 127.0.0.1。 */
   allowPrivate?: boolean;
+}
+
+export async function readCnFile(path: string): Promise<CnFile | null> {
+  try {
+    return JSON.parse(await readFile(path, 'utf8')) as CnFile;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    log.warn(`读取国内补测结果失败，忽略：${(e as Error).message}`);
+    return null;
+  }
+}
+
+/** 把国内补测行按 sourceId+platform 合并进快照；一个平台多条 URL 时任一可达即算可达。 */
+export function applyCnResults(snapshot: Snapshot, cn: CnFile): void {
+  const grouped = new Map<string, CnFile['rows']>();
+  for (const row of cn.rows ?? []) {
+    const key = `${row.sourceId}\u0000${row.platform}`;
+    const list = grouped.get(key) ?? [];
+    list.push(row);
+    grouped.set(key, list);
+  }
+  for (const source of snapshot.sources) {
+    for (const platform of source.platforms) {
+      const rows = grouped.get(`${source.id}\u0000${platform.key}`);
+      if (!rows || !rows.length) continue;
+      const okRow = rows.find((row) => row.ok);
+      const best = okRow ?? rows[0]!;
+      platform.cn = {
+        tested: true,
+        ok: Boolean(okRow),
+        ms: best.totalMs || undefined,
+        ttfbMs: best.ttfbMs || undefined,
+        error: okRow ? undefined : best.error ?? `国内不可达（HTTP ${best.status}）`,
+        httpStatus: best.status || undefined,
+        proxy: cn.proxy,
+      };
+    }
+  }
 }
 
 export function signPayload(body: string, secret: string): string {
@@ -57,6 +99,13 @@ async function readCandidates(path: string | undefined, max: number): Promise<Ca
 export async function publishIngest(opts: PublishOptions): Promise<{ status: number; body: string }> {
   const snapshotRaw = await readFile(opts.snapshotPath, 'utf8');
   const snapshot = SnapshotSchema.parse(JSON.parse(snapshotRaw));
+  if (opts.cnPath) {
+    const cn = await readCnFile(opts.cnPath);
+    if (cn) {
+      applyCnResults(snapshot, cn);
+      log.info(`已合并国内补测：${cn.summary.ok}/${cn.summary.tested} 可达（${cn.proxy}）`);
+    }
+  }
   const candidates = await readCandidates(opts.candidatesPath, opts.maxCandidates ?? 100);
 
   const payload: IngestPayload = IngestPayloadSchema.parse({ snapshot, candidates });

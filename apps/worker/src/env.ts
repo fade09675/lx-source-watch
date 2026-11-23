@@ -8,6 +8,10 @@ export interface Env {
   ADMIN_PASSWORD_HASH?: string;
   /** 会话 Cookie 的 HMAC 密钥。 */
   SESSION_SECRET?: string;
+  /** 代理密码/内核配置的 AES-GCM 密钥（base64 或 hex 32 字节）；缺省时由 SESSION_SECRET 派生。 */
+  PROXY_ENC_KEY?: string;
+  /** Actions 的 cn job 拉取代理池用的 Bearer Token。 */
+  RUNNER_TOKEN?: string;
   SITE_NAME?: string;
   PUBLIC_ORIGIN?: string;
   ASSETS?: Fetcher;

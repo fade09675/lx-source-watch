@@ -2,11 +2,13 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-route
 import type { ReactNode } from 'react';
 import { AuthProvider, useAuth } from './auth';
 import { Layout } from './components/Layout';
+import { ThemeProvider } from './theme';
 import { AboutPage } from './pages/About';
 import { AdminPage } from './pages/Admin';
 import { CandidatesPage } from './pages/Candidates';
 import { LoginPage } from './pages/Login';
 import { OverviewPage } from './pages/Overview';
+import { ProxiesPage } from './pages/Proxies';
 import { SourceDetailPage } from './pages/SourceDetail';
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -29,26 +31,29 @@ function RequireAuth({ children }: { children: ReactNode }) {
 
 export function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route
-            element={
-              <RequireAuth>
-                <Layout />
-              </RequireAuth>
-            }
-          >
-            <Route path="/" element={<OverviewPage />} />
-            <Route path="/s/:id" element={<SourceDetailPage />} />
-            <Route path="/candidates" element={<CandidatesPage />} />
-            <Route path="/admin" element={<AdminPage />} />
-            <Route path="/about" element={<AboutPage />} />
-          </Route>
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route
+              element={
+                <RequireAuth>
+                  <Layout />
+                </RequireAuth>
+              }
+            >
+              <Route path="/" element={<OverviewPage />} />
+              <Route path="/s/:id" element={<SourceDetailPage />} />
+              <Route path="/candidates" element={<CandidatesPage />} />
+              <Route path="/admin" element={<AdminPage />} />
+              <Route path="/admin/proxies" element={<ProxiesPage />} />
+              <Route path="/about" element={<AboutPage />} />
+            </Route>
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </BrowserRouter>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

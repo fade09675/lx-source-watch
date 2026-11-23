@@ -13,7 +13,7 @@ interface Step {
 }
 
 interface Job {
-  needs?: string;
+  needs?: string | string[];
   'timeout-minutes'?: number;
   environment?: string;
   env?: Record<string, string>;
@@ -89,9 +89,28 @@ describe('probe.yml', () => {
     expect(String(upload?.with?.path)).toContain('out/status.json');
 
     const publish = doc.jobs.publish;
-    expect(publish.needs).toBe('probe');
-    const download = publish.steps.find((s) => s.uses?.startsWith('actions/download-artifact'));
+    expect(publish.needs).toEqual(['probe', 'cn']);
+    const downloads = publish.steps.filter((s) => s.uses?.startsWith('actions/download-artifact'));
+    expect(downloads.map((step) => step.with?.name)).toEqual(['probe-result', 'cn-result']);
+  });
+
+  it('国内补测 job 不接触上报密钥，并缓存 mihomo 内核', async () => {
+    const doc = await loadWorkflow();
+    const cn = doc.jobs.cn;
+    expect(cn).toBeDefined();
+    expect(cn.needs).toBe('probe');
+    expect(JSON.stringify(cn)).not.toContain('secrets.INGEST_SECRET');
+    expect(JSON.stringify(cn)).toContain('secrets.RUNNER_TOKEN');
+    expect(JSON.stringify(cn)).not.toContain('pnpm probe');
+
+    const cache = cn.steps.find((s) => s.uses?.startsWith('actions/cache'));
+    expect(cache?.with?.key).toBe('mihomo-v1.19.9');
+
+    const download = cn.steps.find((s) => s.uses?.startsWith('actions/download-artifact'));
     expect(download?.with?.name).toBe('probe-result');
+
+    const upload = cn.steps.find((s) => s.uses?.startsWith('actions/upload-artifact'));
+    expect(upload?.with?.name).toBe('cn-result');
   });
 
   it('上报 job 只做 JSON 上报，不执行探测', async () => {
@@ -101,6 +120,7 @@ describe('probe.yml', () => {
     const ingest = namedStep(publish, '上报');
     expect(ingest.run).toContain('pnpm ingest');
     expect(ingest.run).toContain('--endpoint');
+    expect(ingest.run).toContain('--cn');
     expect(ingest.if).toContain('INGEST_URL');
     expect(publish.env?.INGEST_SECRET).toContain('secrets.INGEST_SECRET');
     expect(publish.environment).toBe('production');
