@@ -6,6 +6,7 @@
   "description": "lx-source-watch 的 Cloudflare Worker：接收探测快照并提供公开 API",
   "scripts": {
     "dev": "wrangler dev --local --port 8787",
+    "dev:scheduled": "wrangler dev --local --port 8787 --test-scheduled",
     "deploy": "wrangler deploy",
     "db:migrate": "wrangler d1 migrations apply lx-source-watch --local",
     "db:migrate:remote": "wrangler d1 migrations apply lx-source-watch --remote",

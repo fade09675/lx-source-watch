@@ -48,9 +48,9 @@ function namedStep(job: Job, name: string): Step {
 }
 
 describe('probe.yml', () => {
-  it('每 4 小时一次，支持手动触发', async () => {
+  it('由 Worker 定时触发，支持手动触发', async () => {
     const doc = await loadWorkflow();
-    expect(doc.on?.schedule?.[0]?.cron).toBe('17 */4 * * *');
+    expect(doc.on?.schedule).toBeUndefined();
     expect(doc.on?.workflow_dispatch).toBeDefined();
   });
 

@@ -11,9 +11,9 @@ interface Workflow {
 const workflow = parse(readFileSync('.github/workflows/proxy-test.yml', 'utf8')) as Workflow;
 
 describe('proxy-test workflow', () => {
-  it('每 6 小时运行，也能手动触发', () => {
+  it('由 Worker 定时触发，也能手动触发', () => {
     const on = workflow.on ?? {};
-    expect(on.schedule).toEqual([{ cron: '23 */6 * * *' }]);
+    expect(on.schedule).toBeUndefined();
     expect(on.workflow_dispatch).toBeTruthy();
   });
 

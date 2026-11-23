@@ -1,9 +1,7 @@
 name: 代理测活
 
+# 由 Cloudflare Worker 的 Cron Trigger（每 5 分钟检查）在到点时触发；不再使用 GitHub schedule。
 on:
-  schedule:
-    # 每 6 小时一次，错开探测任务的 17 分。
-    - cron: "23 */6 * * *"
   workflow_dispatch:
     inputs:
       proxy_id:

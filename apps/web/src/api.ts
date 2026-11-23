@@ -204,12 +204,28 @@ export interface UsageView {
   cloudflareError?: string | null;
 }
 
+export interface SchedulerJobStatus {
+  intervalHours: number;
+  lastAt?: string;
+  lastOk?: boolean;
+  lastError?: string;
+  manualAt?: string;
+  nextAt: string;
+}
+
+export interface SchedulerStatus {
+  probe: SchedulerJobStatus;
+  proxyTest: SchedulerJobStatus;
+  now: string;
+}
+
 export interface WorkflowRunsResult {
   ok?: boolean;
   runs: WorkflowRunView[];
   errors: string[];
   lastProbeDispatchedAt?: string | null;
   lastProxyTestDispatchedAt?: string | null;
+  scheduler?: SchedulerStatus;
 }
 
 export interface RunSourceDetail {

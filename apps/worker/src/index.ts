@@ -3,6 +3,7 @@ import { createApi } from './api';
 import { readCookie, SESSION_COOKIE, verifySessionToken } from './auth';
 import type { Env } from './env';
 import { createAdminProxyRoutes, createRunnerProxyRoutes } from './proxyRoutes';
+import { runScheduler } from './scheduler';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -92,4 +93,17 @@ app.onError((error, c) => {
   return c.json({ error: 'internal_error', message: '服务内部错误' }, 500);
 });
 
-export default app;
+export default {
+  fetch: app.fetch,
+  /**
+   * Cloudflare Cron Trigger：每 5 分钟醒一次，由 scheduler 决定是否到点。
+   * GitHub 自己的 schedule 在新仓库上经常不触发，这里用 Worker 定时兜底。
+   */
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(
+      runScheduler(env).catch((error) => {
+        console.error('scheduler error', error);
+      }),
+    );
+  },
+} satisfies ExportedHandler<Env>;

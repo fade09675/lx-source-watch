@@ -155,8 +155,11 @@ export function WorkbenchPage() {
   const summary = status?.snapshot.summary;
   const running = (workflows?.runs ?? []).filter((run) => ACTIVE.has(run.status));
   const finished = (workflows?.runs ?? []).filter((run) => !ACTIVE.has(run.status)).slice(0, 8);
-  const nextProbe = status?.snapshot.nextCheckAt;
-  const proxyNext = nextProxyTestAt();
+  const scheduler = workflows?.scheduler;
+  const nextProbe = scheduler?.probe.nextAt ?? status?.snapshot.nextCheckAt;
+  const proxyNext = scheduler?.proxyTest.nextAt ?? nextProxyTestAt().toISOString();
+  const probeInterval = scheduler?.probe.intervalHours ?? 4;
+  const proxyInterval = scheduler?.proxyTest.intervalHours ?? 6;
 
   return (
     <div className="page">
@@ -164,7 +167,7 @@ export function WorkbenchPage() {
         <div>
           <span className="eyebrow">WORKBENCH</span>
           <h1>工作台</h1>
-          <p className="muted">任务状态、最近运行和额度用量都在这页；探测和测活都由 GitHub Actions 执行。</p>
+          <p className="muted">任务状态、最近运行和额度用量都在这页；Worker 每 5 分钟检查是否到点，探测和测活由 GitHub Actions 执行。</p>
         </div>
         <button type="button" className="ghost-button" onClick={() => void load()} disabled={!loaded}>
           刷新
@@ -239,16 +242,20 @@ export function WorkbenchPage() {
           <div className="panel task-panel">
             <div className="panel-head">
               <h3>定时计划</h3>
-              <span className="muted">Actions 定时</span>
+              <span className="muted">Worker 定时</span>
             </div>
             <div className="schedule-list">
               <div className="schedule-item">
                 <div>
                   <strong>音源探测</strong>
                   <span className="muted">
-                    {nextProbe ? `下次 ${formatDateTime(nextProbe)}` : '每 4 小时一轮'}
+                    每 {probeInterval} 小时
+                    {nextProbe ? ` · 下次 ${formatDateTime(nextProbe)}` : ' · 马上触发'}
                     {summary ? ` · 上轮 ${summary.available} 可用 / ${summary.total} 源` : ''}
                   </span>
+                  {scheduler?.probe.lastOk === false && scheduler.probe.lastError && (
+                    <span className="text-bad small">上次触发失败：{scheduler.probe.lastError}</span>
+                  )}
                 </div>
                 <button type="button" className="primary-button" onClick={() => void run('probe')} disabled={busy !== null}>
                   {busy === 'probe' ? '触发中…' : '立即运行'}
@@ -257,7 +264,12 @@ export function WorkbenchPage() {
               <div className="schedule-item">
                 <div>
                   <strong>代理测活</strong>
-                  <span className="muted">每 6 小时 · 下次 {formatDateTime(proxyNext.toISOString())}</span>
+                  <span className="muted">
+                    每 {proxyInterval} 小时 · 下次 {formatDateTime(proxyNext)}
+                  </span>
+                  {scheduler?.proxyTest.lastOk === false && scheduler.proxyTest.lastError && (
+                    <span className="text-bad small">上次触发失败：{scheduler.proxyTest.lastError}</span>
+                  )}
                 </div>
                 <button type="button" className="ghost-button" onClick={() => void run('proxy')} disabled={busy !== null}>
                   {busy === 'proxy' ? '触发中…' : '立即测活'}

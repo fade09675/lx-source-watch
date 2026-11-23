@@ -1,10 +1,9 @@
 name: 音源探测
 
-# 每 4 小时探测一次；GitHub 的 cron 是 UTC，且高峰期可能延迟十几分钟。
+# 由 Cloudflare Worker 的 Cron Trigger（每 5 分钟检查）在到点时触发本工作流。
+# GitHub 自己的 schedule 在新仓库上不可靠，这里不再配置，避免重复运行。
 # 6 次/天 × 约 90 秒，公开仓库不计费。
 on:
-  schedule:
-    - cron: "17 */4 * * *"
   workflow_dispatch:
     inputs:
       only:

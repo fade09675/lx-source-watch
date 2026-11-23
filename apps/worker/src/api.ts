@@ -40,6 +40,7 @@ import { isStale } from './merge';
 import { dispatchProbe, dispatchProxyTest, listAllRuns, listProbeRuns } from './dispatch';
 import { getUsage, recordKvPut, refreshUsage } from './usage';
 import { getMirrorTemplates, resetMirrorTemplates, saveMirrorTemplates, MirrorConfigError } from './mirrors';
+import { getSchedulerStatus } from './scheduler';
 
 type Ctx = { Bindings: Env };
 
@@ -328,9 +329,10 @@ export function createApi(): Hono<Ctx> {
     const runs = 'runs' in result ? result.runs : [];
     const baseErrors = 'errors' in result && Array.isArray(result.errors) ? result.errors : [];
     const errors = result.ok ? baseErrors : [result.message ?? '查询运行状态失败', ...baseErrors];
-    const [lastProbeDispatchedAt, lastProxyTestDispatchedAt] = await Promise.all([
+    const [lastProbeDispatchedAt, lastProxyTestDispatchedAt, scheduler] = await Promise.all([
       c.env.SNAPSHOT.get('run:probe:last'),
       c.env.SNAPSHOT.get('run:proxy-test:last'),
+      getSchedulerStatus(c.env),
     ]);
     return Response.json(
       {
@@ -339,6 +341,7 @@ export function createApi(): Hono<Ctx> {
         errors,
         lastProbeDispatchedAt,
         lastProxyTestDispatchedAt,
+        scheduler,
       },
       { headers: { 'cache-control': CACHE_PRIVATE } },
     );
