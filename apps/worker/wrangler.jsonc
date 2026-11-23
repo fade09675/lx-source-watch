@@ -1,0 +1,24 @@
+{
+  "name": "lx-source-watch",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "observability": { "enabled": true },
+  "kv_namespaces": [
+    {
+      "binding": "SNAPSHOT",
+      "id": "00000000000000000000000000000000"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "lx-source-watch",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "SITE_NAME": "LX 音源监测",
+    "PUBLIC_ORIGIN": "http://localhost:8787"
+  }
+}

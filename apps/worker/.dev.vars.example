@@ -1,0 +1,4 @@
+# 本地开发用（wrangler dev 读取 .dev.vars，不要提交真实密钥）
+INGEST_SECRET=dev-secret-change-me
+SITE_NAME=LX 音源监测
+PUBLIC_ORIGIN=http://localhost:8787

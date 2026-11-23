@@ -1,0 +1,144 @@
+name: 音源探测
+
+# 每 4 小时探测一次；GitHub 的 cron 是 UTC，且高峰期可能延迟十几分钟。
+# 6 次/天 × 约 90 秒，公开仓库不计费。
+on:
+  schedule:
+    - cron: "17 */4 * * *"
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "只测指定来源 id，逗号分隔（留空=全部）"
+        required: false
+        type: string
+      limit:
+        description: "最多测几个来源（留空=全部）"
+        required: false
+        type: string
+      deep:
+        description: "从脚本声明的最高音质开始测试"
+        required: false
+        type: boolean
+        default: false
+      prefer_mirror:
+        description: "优先用 ghproxy 镜像下载脚本"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lx-probe
+  cancel-in-progress: false
+
+jobs:
+  # 第一个平面：执行第三方脚本、拉流。此 job 不能接触任何密钥。
+  probe:
+    name: 探测（无密钥）
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 检出
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.28.5
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 类型检查
+        run: pnpm typecheck
+
+      - name: 单元测试
+        run: pnpm test
+
+      - name: 探测
+        env:
+          INPUT_ONLY: ${{ inputs.only }}
+          INPUT_LIMIT: ${{ inputs.limit }}
+          INPUT_DEEP: ${{ inputs.deep }}
+          INPUT_PREFER_MIRROR: ${{ inputs.prefer_mirror }}
+        run: |
+          set -euo pipefail
+          args=(--concurrency 4)
+          if [ -n "${INPUT_ONLY}" ]; then args+=(--only "${INPUT_ONLY}"); fi
+          if [ -n "${INPUT_LIMIT}" ]; then args+=(--limit "${INPUT_LIMIT}"); fi
+          if [ "${INPUT_DEEP}" = "true" ]; then args+=(--deep); fi
+          if [ "${INPUT_PREFER_MIRROR}" = "true" ]; then args+=(--prefer-mirror); fi
+          pnpm probe -- "${args[@]}"
+
+      - name: 校验产物
+        run: pnpm validate
+
+      - name: 上传探测结果
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-result
+          path: |
+            out/status.json
+            out/urls.json
+          retention-days: 7
+          if-no-files-found: error
+
+  # 第二个平面：只读 JSON 并签名上报，绝不执行音源代码。
+  publish:
+    name: 上报（持密钥，不执行脚本）
+    needs: probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    env:
+      INGEST_URL: ${{ secrets.INGEST_URL }}
+      INGEST_SECRET: ${{ secrets.INGEST_SECRET }}
+    steps:
+      - name: 检出
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.28.5
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 下载探测结果
+        uses: actions/download-artifact@v4
+        with:
+          name: probe-result
+          path: out
+
+      - name: 上报
+        if: env.INGEST_URL != ''
+        run: >-
+          pnpm ingest --
+          --snapshot out/status.json
+          --endpoint "$INGEST_URL"
+          --secret "$INGEST_SECRET"
+
+      - name: 未配置上报地址
+        if: env.INGEST_URL == ''
+        run: |
+          echo "未配置 INGEST_URL，跳过上报。"
+          echo "P3 部署 Worker 后，在仓库 Secrets 里添加 INGEST_URL 与 INGEST_SECRET 即可自动生效。"

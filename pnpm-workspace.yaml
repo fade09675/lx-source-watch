@@ -1,0 +1,14 @@
+packages:
+  - apps/*
+  - packages/*
+
+# pnpm 11 用 allowBuilds 显式裁决依赖的安装脚本。esbuild 的原生二进制由
+# optionalDependencies 提供，不需要 postinstall；明确写 false 可避免
+# ERR_PNPM_IGNORED_BUILDS 让 install 以退出码 1 结束（CI 会因此失败）。
+allowBuilds:
+  esbuild: false
+  workerd: true
+  sharp: true
+
+# pnpm 11 每次 run 前会做一次依赖校验；关闭后脚本退出码只反映命令本身。
+verifyDepsBeforeRun: false

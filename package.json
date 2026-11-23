@@ -1,0 +1,33 @@
+{
+  "name": "lx-source-watch",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "LX Music 音源可用性监测：GitHub Actions 检测 + Cloudflare Workers/KV/D1 看板",
+  "license": "MIT",
+  "packageManager": "pnpm@11.28.5",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "probe": "tsx apps/runner/src/index.ts probe",
+    "discover": "tsx apps/runner/src/index.ts discover",
+    "cn": "tsx apps/runner/src/index.ts cn",
+    "ingest": "tsx apps/runner/src/index.ts publish",
+    "validate": "tsx apps/runner/src/index.ts validate",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p packages/shared/tsconfig.json && tsc -p apps/runner/tsconfig.json && tsc -p apps/worker/tsconfig.json --noEmit",
+    "build": "pnpm --filter @lx/web build",
+    "dev:web": "pnpm --filter @lx/web dev",
+    "dev:worker": "pnpm --filter @lx/worker dev",
+    "db:migrate": "pnpm --filter @lx/worker db:migrate"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.8",
+    "yaml": "^2.9.1"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "@lx/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "lx-source-watch 的 Cloudflare Worker：接收探测快照并提供公开 API",
+  "scripts": {
+    "dev": "wrangler dev --local --port 8787",
+    "deploy": "wrangler deploy",
+    "db:migrate": "wrangler d1 migrations apply lx-source-watch --local",
+    "db:migrate:remote": "wrangler d1 migrations apply lx-source-watch --remote",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@lx/shared": "workspace:*",
+    "hono": "^4.13.20"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261121.1",
+    "wrangler": "^4.166.0"
+  }
+}

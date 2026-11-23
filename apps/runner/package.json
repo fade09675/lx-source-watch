@@ -1,0 +1,28 @@
+{
+  "name": "@lx/runner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "probe": "tsx src/index.ts probe",
+    "discover": "tsx src/index.ts discover",
+    "cn": "tsx src/index.ts cn",
+    "publish": "tsx src/index.ts publish",
+    "validate": "tsx src/index.ts validate",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@lx/shared": "workspace:*",
+    "http-proxy-agent": "^7.0.2",
+    "https-proxy-agent": "^7.0.6",
+    "picocolors": "^1.1.1",
+    "socks-proxy-agent": "^8.0.5",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.8"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "maxFetchPerRun": 20,
+  "repos": [
+    {
+      "repo": "pdone/lx-music-source",
+      "branch": "main",
+      "pathPrefixes": [],
+      "exclude": ["node_modules", ".min.js", "dist/", "docs/"],
+      "enabled": true
+    }
+  ]
+}
