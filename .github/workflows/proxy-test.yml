@@ -1,0 +1,82 @@
+name: 代理测活
+
+on:
+  schedule:
+    # 每 6 小时一次，错开探测任务的 17 分。
+    - cron: "23 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      proxy_id:
+        description: "只测指定节点 id（留空=全部）"
+        required: false
+        default: ""
+      sub_id:
+        description: "只测指定订阅 id（留空=全部）"
+        required: false
+        default: ""
+      concurrency:
+        description: "并发数（1-10）"
+        required: false
+        default: "5"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lx-proxy-test
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      INGEST_URL: ${{ secrets.INGEST_URL }}
+      RUNNER_TOKEN: ${{ secrets.RUNNER_TOKEN }}
+      PROXY_ID: ${{ inputs.proxy_id }}
+      SUB_ID: ${{ inputs.sub_id }}
+      CONCURRENCY: ${{ inputs.concurrency || '5' }}
+    steps:
+      - name: 检出代码（不保留凭据）
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.28.5
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 类型检查
+        run: pnpm typecheck
+
+      - name: 单元测试
+        run: pnpm test
+
+      - name: 缓存 mihomo 内核
+        uses: actions/cache@v4
+        with:
+          path: .tmp/mihomo
+          key: mihomo-v1.19.9
+
+      - name: 测活代理池
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${INGEST_URL}" ] || [ -z "${RUNNER_TOKEN}" ]; then
+            echo "未配置 INGEST_URL / RUNNER_TOKEN，跳过代理测活。"
+            exit 0
+          fi
+          args=(--endpoint "$INGEST_URL" --token "$RUNNER_TOKEN" --concurrency "$CONCURRENCY" --max-hops 5)
+          if [ -n "${PROXY_ID}" ]; then args+=(--proxy-id "$PROXY_ID"); fi
+          if [ -n "${SUB_ID}" ]; then args+=(--sub-id "$SUB_ID"); fi
+          pnpm proxy-test -- "${args[@]}"

@@ -91,6 +91,10 @@ export interface AdminProxy {
   lastOkAt: string | null;
   lastLatencyMs: number | null;
   egressIp: string | null;
+  country: string;
+  asn: string;
+  successCount: number;
+  failCount: number;
   lastError: string | null;
   checkedAt: string | null;
   createdAt: string;
@@ -180,6 +184,12 @@ export interface RunProbeInput {
   preferMirror?: boolean;
 }
 
+export interface RunProxyTestInput {
+  proxyId?: string;
+  subscriptionId?: string;
+  concurrency?: number;
+}
+
 export interface RunStatusResult {
   runs: WorkflowRunView[];
   lastDispatchedAt?: string | null;
@@ -255,6 +265,11 @@ export const api = {
 
   runProbe: (input: RunProbeInput = {}) =>
     request<{ ok: boolean; dispatchedAt: string }>('/api/admin/run/probe', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  runProxyTest: (input: RunProxyTestInput = {}) =>
+    request<{ ok: boolean; dispatchedAt: string }>('/api/admin/run/proxy-test', {
       method: 'POST',
       body: JSON.stringify(input),
     }),

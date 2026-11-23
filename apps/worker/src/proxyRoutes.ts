@@ -20,6 +20,10 @@ interface ProxyRow {
   last_ok_at: string | null;
   last_latency_ms: number | null;
   egress_ip: string | null;
+  last_country: string;
+  last_asn: string;
+  success_count: number;
+  fail_count: number;
   last_error: string | null;
   checked_at: string | null;
   created_at: string;
@@ -68,6 +72,10 @@ function publicRow(row: ProxyRow) {
     lastOkAt: row.last_ok_at,
     lastLatencyMs: row.last_latency_ms,
     egressIp: row.egress_ip,
+    country: row.last_country,
+    asn: row.last_asn,
+    successCount: row.success_count,
+    failCount: row.fail_count,
     lastError: row.last_error,
     checkedAt: row.checked_at,
     createdAt: row.created_at,
@@ -801,12 +809,18 @@ export function createAdminProxyRoutes(): Hono<{ Bindings: Env }> {
     const ok = body.ok === true;
     const now = new Date().toISOString();
     await c.env.DB.prepare(
-      `UPDATE proxies SET last_ok_at = ?, last_latency_ms = ?, egress_ip = ?, last_error = ?, checked_at = ?, updated_at = ? WHERE id = ?`,
+      `UPDATE proxies SET last_ok_at = ?, last_latency_ms = ?, egress_ip = ?, last_country = ?, last_asn = ?,
+         success_count = success_count + ?, fail_count = fail_count + ?,
+         last_error = ?, checked_at = ?, updated_at = ? WHERE id = ?`,
     )
       .bind(
         ok ? now : null,
         Number(body.latencyMs) || null,
         clean(body.egressIp, 120) || null,
+        clean(body.country, 80),
+        clean(body.asn, 80),
+        ok ? 1 : 0,
+        ok ? 0 : 1,
         ok ? null : clean(body.error, 500) || '不可用',
         now,
         now,
@@ -846,7 +860,13 @@ export function createRunnerProxyRoutes(): Hono<{ Bindings: Env }> {
         config: await decryptSecret(c.env, row.config_enc),
         kernelOnly: row.kernel_only === 1,
         engine: row.engine,
+        subscriptionId: row.subscription_id ?? null,
         lastOkAt: row.last_ok_at,
+        lastLatencyMs: row.last_latency_ms,
+        successCount: row.success_count,
+        failCount: row.fail_count,
+        country: row.last_country,
+        asn: row.last_asn,
       });
     }
     return c.json({ items });
@@ -859,9 +879,23 @@ export function createRunnerProxyRoutes(): Hono<{ Bindings: Env }> {
     const ok = body.ok === true;
     const now = new Date().toISOString();
     await c.env.DB.prepare(
-      `UPDATE proxies SET last_ok_at = ?, last_latency_ms = ?, egress_ip = ?, last_error = ?, checked_at = ?, updated_at = ? WHERE id = ?`,
+      `UPDATE proxies SET last_ok_at = ?, last_latency_ms = ?, egress_ip = ?, last_country = ?, last_asn = ?,
+         success_count = success_count + ?, fail_count = fail_count + ?,
+         last_error = ?, checked_at = ?, updated_at = ? WHERE id = ?`,
     )
-      .bind(ok ? now : null, Number(body.latencyMs) || null, clean(body.egressIp, 120) || null, ok ? null : clean(body.error, 500) || '不可用', now, now, id)
+      .bind(
+        ok ? now : null,
+        Number(body.latencyMs) || null,
+        clean(body.egressIp, 120) || null,
+        clean(body.country, 80),
+        clean(body.asn, 80),
+        ok ? 1 : 0,
+        ok ? 0 : 1,
+        ok ? null : clean(body.error, 500) || '不可用',
+        now,
+        now,
+        id,
+      )
       .run();
     return c.json({ ok: true });
   });

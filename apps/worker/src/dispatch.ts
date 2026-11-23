@@ -56,23 +56,44 @@ function clean(value: unknown, max = 200): string {
 
 /** 触发一次探测工作流。GitHub 的派发接口成功时返回 204。 */
 export async function dispatchProbe(env: Env, input: ProbeDispatchInput): Promise<DispatchResult> {
+  return dispatchWorkflow(env, 'probe.yml', {
+    only: clean(input.only),
+    limit: clean(input.limit, 10),
+    deep: input.deep ? 'true' : 'false',
+    prefer_mirror: input.preferMirror ? 'true' : 'false',
+    proxy_id: clean(input.proxyId, 64),
+  });
+}
+
+export interface ProxyTestDispatchInput {
+  proxyId?: string;
+  subscriptionId?: string;
+  concurrency?: number;
+}
+
+/** 触发代理测活工作流。 */
+export async function dispatchProxyTest(env: Env, input: ProxyTestDispatchInput): Promise<DispatchResult> {
+  const concurrency = Math.max(1, Math.min(10, Number(input.concurrency) || 5));
+  return dispatchWorkflow(env, 'proxy-test.yml', {
+    proxy_id: clean(input.proxyId, 64),
+    sub_id: clean(input.subscriptionId, 64),
+    concurrency: String(concurrency),
+  });
+}
+
+async function dispatchWorkflow(
+  env: Env,
+  workflow: string,
+  inputs: Record<string, string>,
+): Promise<DispatchResult> {
   const token = tokenOf(env);
   if (!token) return { ok: false, status: 503, message: '未配置触发令牌，无法从网页启动' };
 
-  const payload = {
-    ref: 'main',
-    inputs: {
-      only: clean(input.only),
-      limit: clean(input.limit, 10),
-      deep: input.deep ? 'true' : 'false',
-      prefer_mirror: input.preferMirror ? 'true' : 'false',
-      proxy_id: clean(input.proxyId, 64),
-    },
-  };
+  const payload = { ref: 'main', inputs };
 
   let response: Response;
   try {
-    response = await fetch(`${GITHUB_API}/repos/${repoOf(env)}/actions/workflows/${WORKFLOW_FILE}/dispatches`, {
+    response = await fetch(`${GITHUB_API}/repos/${repoOf(env)}/actions/workflows/${workflow}/dispatches`, {
       method: 'POST',
       headers: githubHeaders(token),
       body: JSON.stringify(payload),

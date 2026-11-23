@@ -100,6 +100,18 @@ describe('buildKernelConfig', () => {
     expect(docOf(config.yaml).proxies[0]).toMatchObject({ type: 'vmess', server: '1.1.1.1', port: 443 });
   });
 
+  it('内核节点可挂一个中转跳板（dialer-proxy）', () => {
+    const config = buildKernelConfig(
+      [{ id: 'h', name: '节点H', protocol: 'ss', config: 'ss://YWVzLTI1Ni1nY206cGFzcw==@5.6.7.8:8388#H' }],
+      7890,
+      { hop: { protocol: 'socks5', host: '10.0.0.1', port: 1080, username: 'u', password: 'p' } },
+    );
+    const doc = docOf(config.yaml);
+    expect(doc.proxies[0]).toMatchObject({ name: 'hop', type: 'socks5', server: '10.0.0.1', port: 1080 });
+    expect(doc.proxies[1]).toMatchObject({ name: 'node-0', 'dialer-proxy': 'hop' });
+    expect(doc['proxy-groups'][0]?.proxies).toEqual(['node-0']);
+  });
+
   it('无法解析的节点给出警告', () => {
     const config = buildKernelConfig([{ id: 'f', name: '坏节点', protocol: 'vmess', config: 'not-json' }]);
     expect(config.usable).toHaveLength(0);

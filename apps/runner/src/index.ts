@@ -7,6 +7,7 @@ import {
   type Quality,
 } from '@lx/shared';
 import { cnExecute, cnVerify } from './cn.js';
+import { runProxyTest } from './cn/proxyTest.js';
 import { cnRun } from './cn/run.js';
 import { enrichCandidates } from './candidates.js';
 import { discoverCandidates } from './discover.js';
@@ -100,6 +101,7 @@ lx-source-watch runner
   pnpm discover [选项]     从 GitHub 发现候选脚本
   pnpm candidates [选项]   对候选脚本做初始化体检
   pnpm cn [选项]           国内代理补测（verify=只测已解析 URL / --execute 重跑脚本）
+  pnpm proxy-test [选项]   代理池测活：出口、地区、成功率写回
   pnpm publish [选项]      把快照 HMAC 签名后上报 Worker
   pnpm validate            校验清单/配置/快照/候选文件
 
@@ -140,6 +142,16 @@ cn:
   --execute                 走代理重新执行脚本（危险，仅 trusted 来源）
   --registry <path>
   --only a,b --platform kg --limit <n> --concurrency <n> --timeout <ms>
+
+proxy-test:
+  --endpoint <url>          默认读 INGEST_URL
+  --token <token>           默认读 RUNNER_TOKEN
+  --proxy-id <id>           只测指定节点
+  --sub-id <id>             只测指定订阅下的节点
+  --concurrency <n>         测活并发，默认 5，最高 10
+  --max-hops <n>            内核节点最多试几个跳板，默认 5
+  --limit <n>               最多测 n 个（调试用）
+  --allow-private           允许访问 127.0.0.1（仅本地联调）
 
 publish:
   --snapshot <path>         默认 out/status.json
@@ -243,6 +255,26 @@ async function cmdCn(args: Args): Promise<void> {
   });
 }
 
+async function cmdProxyTest(args: Args): Promise<void> {
+  const endpoint = str(args, 'endpoint') ?? process.env.INGEST_URL ?? '';
+  const token = str(args, 'token') ?? process.env.RUNNER_TOKEN ?? '';
+  if (!endpoint) throw new Error('缺少 --endpoint 或 INGEST_URL');
+  if (!token) throw new Error('缺少 --token 或 RUNNER_TOKEN');
+  const summary = await runProxyTest({
+    endpoint,
+    token,
+    proxyId: str(args, 'proxy-id'),
+    subscriptionId: str(args, 'sub-id'),
+    concurrency: num(args, 'concurrency', 5),
+    maxHops: num(args, 'max-hops', 5),
+    limit: num(args, 'limit'),
+    allowPrivate: bool(args, 'allow-private') || process.env.INGEST_ALLOW_PRIVATE === '1',
+  });
+  log.success(
+    `测活完成：${summary.ok}/${summary.total} 可用（内核 ${summary.kernelOk}），跳过 UDP ${summary.skippedUdp}，${Math.round(summary.durationMs / 1000)}s`,
+  );
+}
+
 async function cmdPublish(args: Args): Promise<void> {
   const endpoint = str(args, 'endpoint') ?? process.env.INGEST_URL ?? '';
   const secret = str(args, 'secret') ?? process.env.INGEST_SECRET ?? '';
@@ -310,6 +342,9 @@ async function main(): Promise<void> {
       break;
     case 'cn':
       await cmdCn(args);
+      break;
+    case 'proxy-test':
+      await cmdProxyTest(args);
       break;
     case 'publish':
       await cmdPublish(args);

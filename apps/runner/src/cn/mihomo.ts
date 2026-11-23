@@ -265,18 +265,43 @@ function parseKernelNode(node: KernelNode): { proxy?: Record<string, unknown>; w
   return { warning: `${node.name}：无法识别的配置格式` };
 }
 
-/** 构建单节点 mihomo 配置，MATCH 规则固定走这个节点。 */
-export function buildKernelConfig(nodes: KernelNode[], mixedPort = 7890): KernelConfig {
+/** 内核节点的中转跳板：先经一个已测活的普通代理再出网。 */
+export interface ChainHop {
+  protocol: 'http' | 'socks5';
+  host: string;
+  port: number;
+  username?: string;
+  password?: string;
+}
+
+function hopProxy(hop: ChainHop): Record<string, unknown> {
+  return {
+    name: 'hop',
+    type: hop.protocol === 'socks5' ? 'socks5' : 'http',
+    server: hop.host,
+    port: hop.port,
+    ...(hop.username ? { username: hop.username } : {}),
+    ...(hop.password ? { password: hop.password } : {}),
+  };
+}
+
+/** 构建单节点 mihomo 配置，MATCH 规则固定走这个节点；可选挂一个中转跳板。 */
+export function buildKernelConfig(nodes: KernelNode[], mixedPort = 7890, options: { hop?: ChainHop } = {}): KernelConfig {
   const usable: KernelNode[] = [];
   const warnings: string[] = [];
   const proxies: Record<string, unknown>[] = [];
+  const hop = options.hop;
   nodes.forEach((node, index) => {
     const parsed = parseKernelNode(node);
     if (parsed.warning || !parsed.proxy) {
       if (parsed.warning) warnings.push(parsed.warning);
       return;
     }
-    proxies.push({ ...parsed.proxy, name: `node-${index}` });
+    proxies.push({
+      ...parsed.proxy,
+      name: `node-${index}`,
+      ...(hop ? { 'dialer-proxy': 'hop' } : {}),
+    });
     usable.push(node);
   });
   const names = proxies.map((proxy) => String(proxy.name));
@@ -285,7 +310,7 @@ export function buildKernelConfig(nodes: KernelNode[], mixedPort = 7890): Kernel
     'allow-lan': false,
     mode: 'rule',
     'log-level': 'info',
-    proxies,
+    proxies: hop && proxies.length ? [hopProxy(hop), ...proxies] : proxies,
     'proxy-groups': proxies.length ? [{ name: 'PROXY', type: 'select', proxies: names }] : [],
     rules: proxies.length ? ['MATCH,PROXY'] : ['MATCH,DIRECT'],
   };
@@ -363,11 +388,18 @@ function freePort(): Promise<number> {
 /** 为单个节点启动 mihomo，返回本地 mixed 端口。 */
 export async function startKernel(
   node: KernelNode,
-  options: { dir?: string; mixedPort?: number; binary?: string; sha256?: string; startupTimeoutMs?: number } = {},
+  options: {
+    dir?: string;
+    mixedPort?: number;
+    binary?: string;
+    sha256?: string;
+    startupTimeoutMs?: number;
+    hop?: ChainHop;
+  } = {},
 ): Promise<KernelHandle> {
   const dir = options.dir ?? DEFAULT_KERNEL_DIR;
   const port = options.mixedPort ?? (await freePort());
-  const built = buildKernelConfig([node], port);
+  const built = buildKernelConfig([node], port, { hop: options.hop });
   if (!built.usable.length) throw new Error(built.warnings[0] ?? '节点配置不可用');
   const binary = options.binary ?? (await ensureMihomoBinary(dir, { sha256: options.sha256 }));
   const configPath = path.join(dir, `config-${port}.yaml`);

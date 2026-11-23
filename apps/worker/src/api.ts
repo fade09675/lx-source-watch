@@ -31,7 +31,7 @@ import { ADMIN_PASSWORD_SETTING, SNAPSHOT_KEY } from './env';
 import { filterSnapshot, parseList } from './filter';
 import { handleIngest } from './ingest';
 import { isStale } from './merge';
-import { dispatchProbe, listProbeRuns } from './dispatch';
+import { dispatchProbe, dispatchProxyTest, listProbeRuns } from './dispatch';
 
 type Ctx = { Bindings: Env };
 
@@ -273,6 +273,36 @@ export function createApi(): Hono<Ctx> {
     }
     const lastDispatchedAt = await c.env.SNAPSHOT.get('run:probe:last');
     return Response.json({ runs: result.runs, lastDispatchedAt }, { headers: { 'cache-control': CACHE_PRIVATE } });
+  });
+
+  // 网页触发一次代理测活（全部或指定节点）。
+  api.post('/admin/run/proxy-test', async (c) => {
+    const last = await c.env.SNAPSHOT.get('run:proxy-test:last');
+    if (last) {
+      return Response.json(
+        { error: 'too_frequent', message: '刚刚已经触发过测活，请等一分钟再试' },
+        { status: 429, headers: { 'retry-after': '60', 'cache-control': CACHE_PRIVATE } },
+      );
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      body = await c.req.json<Record<string, unknown>>();
+    } catch {
+      // 空请求体表示测全部。
+    }
+    const outcome = await dispatchProxyTest(c.env, {
+      proxyId: typeof body.proxyId === 'string' ? body.proxyId.trim().slice(0, 64) : '',
+      subscriptionId: typeof body.subscriptionId === 'string' ? body.subscriptionId.trim().slice(0, 64) : '',
+      concurrency: Number(body.concurrency) || 5,
+    });
+    if (!outcome.ok) {
+      return Response.json(
+        { error: 'dispatch_failed', message: outcome.message },
+        { status: outcome.status, headers: { 'cache-control': CACHE_PRIVATE } },
+      );
+    }
+    await c.env.SNAPSHOT.put('run:proxy-test:last', outcome.dispatchedAt, { expirationTtl: 60 });
+    return Response.json({ ok: true, dispatchedAt: outcome.dispatchedAt }, { headers: { 'cache-control': CACHE_PRIVATE } });
   });
 
   api.get('/status', async (c) => {

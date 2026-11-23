@@ -28,8 +28,13 @@ const PUBLIC_PATHS = new Set([
   '/robots.txt',
 ]);
 
-function isPublicPath(pathname: string): boolean {
-  return PUBLIC_PATHS.has(pathname) || pathname.startsWith('/assets/');
+export function isPublicPath(pathname: string): boolean {
+  return (
+    PUBLIC_PATHS.has(pathname) ||
+    pathname.startsWith('/assets/') ||
+    pathname === '/api/runner/proxies' ||
+    pathname.startsWith('/api/runner/proxies/')
+  );
 }
 
 // 统一安全响应头；包括静态资源与接口。

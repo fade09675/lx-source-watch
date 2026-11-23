@@ -28,6 +28,8 @@ export function ProxiesPage() {
   const [subUa, setSubUa] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const [testingAll, setTestingAll] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -172,6 +174,25 @@ export function ProxiesPage() {
       '已添加',
     );
     setForm({ name: '', protocol: 'http', host: '', port: '', username: '', password: '', config: '' });
+  }
+
+  async function triggerTest(proxyId?: string) {
+    if (proxyId) setTestingId(proxyId);
+    else setTestingAll(true);
+    setMessage('');
+    try {
+      await api.runProxyTest(proxyId ? { proxyId } : {});
+      setMessage(
+        proxyId
+          ? '已触发该节点的测活，Actions 通常 30–60 秒内开始，稍后刷新查看结果'
+          : '已触发全部节点测活，Actions 通常 30–60 秒内开始，稍后刷新查看结果',
+      );
+    } catch (e) {
+      setMessage(e instanceof ApiError ? e.message : '触发测活失败');
+    } finally {
+      setTestingId(null);
+      setTestingAll(false);
+    }
   }
 
   const kernelForm = ['ss', 'vmess', 'vless', 'trojan', 'hysteria2', 'tuic', 'anytls'].includes(form.protocol);
@@ -435,18 +456,28 @@ export function ProxiesPage() {
         <section className="panel">
           <div className="page-head">
             <h2>节点（{items.filter((item) => item.enabled).length}/{items.length} 启用）</h2>
-            <label className="small muted">
-              来源筛选
-              <select value={filterSub} onChange={(event) => setFilterSub(event.target.value)}>
-                <option value="">全部</option>
-                <option value="__manual__">手动添加</option>
-                {subs?.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="page-actions">
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={testingAll || testingId !== null}
+                onClick={() => void triggerTest()}
+              >
+                {testingAll ? '触发中…' : '测活全部'}
+              </button>
+              <label className="small muted">
+                来源筛选
+                <select value={filterSub} onChange={(event) => setFilterSub(event.target.value)}>
+                  <option value="">全部</option>
+                  <option value="__manual__">手动添加</option>
+                  {subs?.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
           </div>
           {items.length === 0 && <p className="muted">还没有节点。导入订阅后，Actions 的 cn job 会自动测活并回写结果。</p>}
           {visible.length > 0 && (
@@ -457,7 +488,8 @@ export function ProxiesPage() {
                     <th>名称 / 来源</th>
                     <th>协议 / 地址</th>
                     <th>最近测活</th>
-                    <th>出口</th>
+                    <th>出口 / 地区</th>
+                    <th>成功率</th>
                     <th>状态</th>
                     <th />
                   </tr>
@@ -476,12 +508,32 @@ export function ProxiesPage() {
                         {item.protocol}://{item.host}:{item.port}
                       </td>
                       <td className="small muted">{item.lastOkAt ? shortTime(item.lastOkAt) : item.lastError ?? '未测'}</td>
-                      <td className="small mono">{item.egressIp ?? '—'}</td>
+                      <td className="small mono">
+                        {item.egressIp ?? '—'}
+                        {(item.country || item.asn) && (
+                          <div className="muted">
+                            {[item.country, item.asn].filter(Boolean).join(' · ')}
+                          </div>
+                        )}
+                      </td>
+                      <td className="small muted">
+                        {item.successCount + item.failCount > 0
+                          ? `${item.successCount}/${item.successCount + item.failCount}`
+                          : '—'}
+                      </td>
                       <td>
                         <span className={`pill ${item.enabled ? 'pill-ok' : 'pill-idle'}`}>{item.enabled ? '启用' : '停用'}</span>
                         {item.lastLatencyMs ? <span className="small muted"> {item.lastLatencyMs}ms</span> : null}
                       </td>
                       <td className="row-actions">
+                        <button
+                          type="button"
+                          className="ghost-button"
+                          disabled={testingId !== null || testingAll}
+                          onClick={() => void triggerTest(item.id)}
+                        >
+                          {testingId === item.id ? '触发中…' : '测活'}
+                        </button>
                         <button
                           type="button"
                           className="ghost-button"

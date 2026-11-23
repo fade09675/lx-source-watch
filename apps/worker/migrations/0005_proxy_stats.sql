@@ -1,0 +1,5 @@
+-- 代理测活结果：出口地区、运营商 ASN、成功/失败次数。
+ALTER TABLE proxies ADD COLUMN last_country TEXT NOT NULL DEFAULT '';
+ALTER TABLE proxies ADD COLUMN last_asn TEXT NOT NULL DEFAULT '';
+ALTER TABLE proxies ADD COLUMN success_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE proxies ADD COLUMN fail_count INTEGER NOT NULL DEFAULT 0;
