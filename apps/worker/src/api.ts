@@ -17,8 +17,13 @@ import {
   countCandidates,
   getCandidates,
   getEvents,
+  getFailureAggregate,
   getLastRun,
+  getRun,
+  getRunEndpointStats,
+  getRunPlatforms,
   getRuns,
+  getRunSources,
   getSetting,
   getSourceDaily,
   getSourceEndpoints,
@@ -277,6 +282,42 @@ export function createApi(): Hono<Ctx> {
     }
     const lastDispatchedAt = await c.env.SNAPSHOT.get('run:probe:last');
     return Response.json({ runs: result.runs, lastDispatchedAt }, { headers: { 'cache-control': CACHE_PRIVATE } });
+  });
+
+  // 快照运行记录（每轮 ingest 一条），与上面的 GitHub 工作流运行区分开。
+  api.get('/admin/snapshots', async (c) => {
+    const raw = Number(c.req.query('limit') ?? 30);
+    const limit = Number.isFinite(raw) ? Math.max(1, Math.min(100, Math.trunc(raw))) : 30;
+    const runs = await getRuns(c.env.DB, limit);
+    return Response.json({ runs }, { headers: { 'cache-control': 'private, max-age=15' } });
+  });
+
+  api.get('/admin/snapshots/:runId', async (c) => {
+    const runId = c.req.param('runId');
+    const run = await getRun(c.env.DB, runId);
+    if (!run) {
+      return Response.json(
+        { error: 'not_found', message: `未知运行记录：${runId}` },
+        { status: 404, headers: { 'cache-control': CACHE_PRIVATE } },
+      );
+    }
+    const [sources, platforms, endpoints] = await Promise.all([
+      getRunSources(c.env.DB, runId),
+      getRunPlatforms(c.env.DB, runId),
+      getRunEndpointStats(c.env.DB, runId),
+    ]);
+    return Response.json(
+      { run, sources, platforms, endpoints },
+      { headers: { 'cache-control': 'private, max-age=30' } },
+    );
+  });
+
+  // 最近 N 天的失败聚合：按错误类型 / 平台 / 源统计，只算真正测过的。
+  api.get('/admin/failures', async (c) => {
+    const raw = Number(c.req.query('days') ?? 7);
+    const days = Number.isFinite(raw) ? Math.max(1, Math.min(30, Math.trunc(raw))) : 7;
+    const aggregate = await getFailureAggregate(c.env.DB, days);
+    return Response.json(aggregate, { headers: { 'cache-control': 'private, max-age=60' } });
   });
 
   // 工作台：探测 + 测活两类工作流的最近运行。

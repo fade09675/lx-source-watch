@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   formatDateTime,
   formatDuration,
@@ -271,9 +272,12 @@ export function WorkbenchPage() {
       <section>
         <div className="panel-head">
           <h2>最近运行</h2>
-          <a href="https://github.com/fade09675/lx-source-watch/actions" target="_blank" rel="noreferrer">
-            全部运行
-          </a>
+          <div className="panel-links">
+            <Link to="/runs">快照运行记录</Link>
+            <a href="https://github.com/fade09675/lx-source-watch/actions" target="_blank" rel="noreferrer">
+              全部运行
+            </a>
+          </div>
         </div>
         {!workflows ? (
           <Spinner />

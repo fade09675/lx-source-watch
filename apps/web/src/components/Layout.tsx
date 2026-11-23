@@ -24,12 +24,15 @@ const GROUPS: Array<{ title: string; items: NavItem[] }> = [
     title: '运行',
     items: [
       { to: '/admin/proxies', label: '国内代理', icon: '⇄' },
-      { to: '/admin', label: '运行与日志', icon: '▤' },
+      { to: '/runs', label: '运行与日志', icon: '▤' },
     ],
   },
   {
     title: '其他',
-    items: [{ to: '/about', label: '设置与说明', icon: 'i' }],
+    items: [
+      { to: '/admin', label: '控制面板', icon: '⚙' },
+      { to: '/about', label: '设置与说明', icon: 'i' },
+    ],
   },
 ];
 
@@ -38,7 +41,7 @@ const TABS: NavItem[] = [
   { to: '/sources', label: '总览', icon: '◎' },
   { to: '/candidates', label: '候选', icon: '＋' },
   { to: '/admin/proxies', label: '代理', icon: '⇄' },
-  { to: '/admin', label: '日志', icon: '▤' },
+  { to: '/runs', label: '日志', icon: '▤' },
 ];
 
 export function Layout() {

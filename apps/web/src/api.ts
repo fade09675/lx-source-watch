@@ -212,6 +212,82 @@ export interface WorkflowRunsResult {
   lastProxyTestDispatchedAt?: string | null;
 }
 
+export interface RunSourceDetail {
+  sourceId: string;
+  title: string;
+  category: string;
+  status: string;
+  initOk: boolean;
+  initError: string | null;
+  ok: number;
+  tested: number;
+  total: number;
+  durationMs: number;
+}
+
+export interface RunPlatformDetail {
+  sourceId: string;
+  platform: string;
+  name: string;
+  declared: boolean;
+  tested: boolean;
+  ok: boolean;
+  totalMs: number | null;
+  errorKind: string | null;
+  error: string | null;
+  urlHost: string | null;
+  cnTested: boolean;
+  cnOk: boolean;
+  cnError: string | null;
+}
+
+export interface RunEndpointStat {
+  sourceId: string;
+  total: number;
+  ok: number;
+  failed: number;
+  error: string | null;
+}
+
+export interface RunDetailResult {
+  run: RunSummary;
+  sources: RunSourceDetail[];
+  platforms: RunPlatformDetail[];
+  endpoints: RunEndpointStat[];
+}
+
+export interface FailureKind {
+  kind: string;
+  count: number;
+  sample: string | null;
+}
+
+export interface FailurePlatform {
+  platform: string;
+  name: string;
+  tested: number;
+  failed: number;
+}
+
+export interface FailureSource {
+  sourceId: string;
+  title: string;
+  tested: number;
+  failed: number;
+  topError: string | null;
+}
+
+export interface FailureAggregate {
+  days: number;
+  runCount: number;
+  platformTests: number;
+  platformFailures: number;
+  byKind: FailureKind[];
+  byPlatform: FailurePlatform[];
+  bySource: FailureSource[];
+  recentRuns: RunSummary[];
+}
+
 export interface RunProbeInput {
   only?: string;
   limit?: string;
@@ -316,6 +392,9 @@ export const api = {
   workflowRuns: () => request<RunStatusResult>('/api/admin/runs'),
   workflows: () => request<WorkflowRunsResult>('/api/admin/workflows'),
   usage: (refresh = false) => request<{ usage: UsageView }>(`/api/admin/usage${refresh ? '?refresh=1' : ''}`),
+  snapshots: (limit = 30) => request<{ runs: RunSummary[] }>(`/api/admin/snapshots?limit=${limit}`),
+  snapshot: (runId: string) => request<RunDetailResult>(`/api/admin/snapshots/${encodeURIComponent(runId)}`),
+  failures: (days = 7) => request<FailureAggregate>(`/api/admin/failures?days=${days}`),
 
   mirrors: () => request<MirrorConfigView>('/api/admin/mirrors'),
   saveMirrors: (templates: MirrorTemplate[]) =>

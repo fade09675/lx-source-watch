@@ -9,6 +9,8 @@ import { CandidatesPage } from './pages/Candidates';
 import { LoginPage } from './pages/Login';
 import { OverviewPage } from './pages/Overview';
 import { ProxiesPage } from './pages/Proxies';
+import { RunDetailPage } from './pages/RunDetail';
+import { RunsPage } from './pages/Runs';
 import { SourceDetailPage } from './pages/SourceDetail';
 import { WorkbenchPage } from './pages/Workbench';
 
@@ -48,6 +50,8 @@ export function App() {
               <Route path="/sources" element={<OverviewPage />} />
               <Route path="/s/:id" element={<SourceDetailPage />} />
               <Route path="/candidates" element={<CandidatesPage />} />
+              <Route path="/runs" element={<RunsPage />} />
+              <Route path="/runs/:runId" element={<RunDetailPage />} />
               <Route path="/admin" element={<AdminPage />} />
               <Route path="/admin/proxies" element={<ProxiesPage />} />
               <Route path="/about" element={<AboutPage />} />

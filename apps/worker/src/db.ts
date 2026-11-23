@@ -594,3 +594,278 @@ export async function getSourceEndpoints(db: D1Database, sourceId: string, runId
     checkedAt: row.checked_at,
   }));
 }
+
+export interface RunSourceDetail {
+  sourceId: string;
+  title: string;
+  category: string;
+  status: SourceStatus;
+  initOk: boolean;
+  initError: string | null;
+  ok: number;
+  tested: number;
+  total: number;
+  durationMs: number;
+}
+
+export interface RunPlatformDetail {
+  sourceId: string;
+  platform: string;
+  name: string;
+  declared: boolean;
+  tested: boolean;
+  ok: boolean;
+  totalMs: number | null;
+  errorKind: string | null;
+  error: string | null;
+  urlHost: string | null;
+  cnTested: boolean;
+  cnOk: boolean;
+  cnError: string | null;
+}
+
+export interface RunEndpointStat {
+  sourceId: string;
+  total: number;
+  ok: number;
+  failed: number;
+  error: string | null;
+}
+
+export async function getRun(db: D1Database, runId: string): Promise<RunSummary | null> {
+  const row = await db
+    .prepare(`SELECT ${RUN_COLUMNS} FROM runs WHERE run_id = ?`)
+    .bind(runId)
+    .first<RunRow>();
+  return row ? toRunSummary(row) : null;
+}
+
+export async function getRunSources(db: D1Database, runId: string): Promise<RunSourceDetail[]> {
+  const rows = await db
+    .prepare(
+      `SELECT sr.source_id AS sourceId, COALESCE(s.title, sr.source_id) AS title,
+              COALESCE(s.category, '') AS category, sr.status, sr.init_ok AS initOk, sr.init_error AS initError,
+              sr.ok, sr.tested, sr.total, sr.duration_ms AS durationMs
+       FROM source_runs sr
+       LEFT JOIN sources s ON s.id = sr.source_id
+       WHERE sr.run_id = ?
+       ORDER BY CASE sr.status WHEN 'unavailable' THEN 0 WHEN 'partial' THEN 1 WHEN 'untested' THEN 2 ELSE 3 END,
+                sr.ok ASC, sr.source_id ASC`,
+    )
+    .bind(runId)
+    .all<{
+      sourceId: string;
+      title: string;
+      category: string;
+      status: SourceStatus;
+      initOk: number;
+      initError: string | null;
+      ok: number;
+      tested: number;
+      total: number;
+      durationMs: number;
+    }>();
+
+  return rows.results.map((row) => ({
+    sourceId: row.sourceId,
+    title: row.title,
+    category: row.category,
+    status: row.status,
+    initOk: Boolean(row.initOk),
+    initError: row.initError,
+    ok: row.ok,
+    tested: row.tested,
+    total: row.total,
+    durationMs: row.durationMs,
+  }));
+}
+
+export async function getRunPlatforms(db: D1Database, runId: string): Promise<RunPlatformDetail[]> {
+  const rows = await db
+    .prepare(
+      `SELECT source_id AS sourceId, platform, name, declared, tested, ok, total_ms AS totalMs,
+              error_kind AS errorKind, error, url_host AS urlHost,
+              cn_tested AS cnTested, cn_ok AS cnOk, cn_error AS cnError
+       FROM platform_results
+       WHERE run_id = ?
+       ORDER BY source_id, platform`,
+    )
+    .bind(runId)
+    .all<{
+      sourceId: string;
+      platform: string;
+      name: string;
+      declared: number;
+      tested: number;
+      ok: number;
+      totalMs: number | null;
+      errorKind: string | null;
+      error: string | null;
+      urlHost: string | null;
+      cnTested: number | null;
+      cnOk: number | null;
+      cnError: string | null;
+    }>();
+
+  return rows.results.map((row) => ({
+    sourceId: row.sourceId,
+    platform: row.platform,
+    name: row.name,
+    declared: Boolean(row.declared),
+    tested: Boolean(row.tested),
+    ok: Boolean(row.ok),
+    totalMs: row.totalMs,
+    errorKind: row.errorKind,
+    error: row.error,
+    urlHost: row.urlHost,
+    cnTested: Boolean(row.cnTested),
+    cnOk: Boolean(row.cnOk),
+    cnError: row.cnError,
+  }));
+}
+
+export async function getRunEndpointStats(db: D1Database, runId: string): Promise<RunEndpointStat[]> {
+  const rows = await db
+    .prepare(
+      `SELECT source_id AS sourceId, COUNT(*) AS total,
+              SUM(CASE WHEN ok = 1 THEN 1 ELSE 0 END) AS ok,
+              SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failed,
+              MAX(CASE WHEN ok = 0 THEN error END) AS error
+       FROM source_endpoints
+       WHERE run_id = ?
+       GROUP BY source_id`,
+    )
+    .bind(runId)
+    .all<{ sourceId: string; total: number; ok: number; failed: number; error: string | null }>();
+  return rows.results.map((row) => ({
+    sourceId: row.sourceId,
+    total: row.total,
+    ok: row.ok,
+    failed: row.failed,
+    error: row.error,
+  }));
+}
+
+export interface FailureKind {
+  kind: string;
+  count: number;
+  sample: string | null;
+}
+
+export interface FailurePlatform {
+  platform: string;
+  name: string;
+  tested: number;
+  failed: number;
+}
+
+export interface FailureSource {
+  sourceId: string;
+  title: string;
+  tested: number;
+  failed: number;
+  topError: string | null;
+}
+
+export interface FailureAggregate {
+  days: number;
+  runCount: number;
+  platformTests: number;
+  platformFailures: number;
+  byKind: FailureKind[];
+  byPlatform: FailurePlatform[];
+  bySource: FailureSource[];
+  recentRuns: RunSummary[];
+}
+
+/**
+ * 失败聚合：只统计真正测过的平台（tested=1），避免把“未测”算成失败。
+ * 数据量约 6 轮/天 × 7 天 × 90 平台 = 3,780 行，免费额度下可接受。
+ */
+export async function getFailureAggregate(db: D1Database, days = 7): Promise<FailureAggregate> {
+  const window = Math.max(1, Math.min(30, Math.trunc(days)));
+  const since = new Date(Date.now() - window * 86_400_000).toISOString();
+
+  const [runRow, totalRow, kindRows, platformRows, sourceRows, recentRuns] = await Promise.all([
+    db.prepare('SELECT COUNT(*) AS n FROM runs WHERE generated_at >= ?').bind(since).first<{ n: number }>(),
+    db
+      .prepare(
+        `SELECT COUNT(*) AS tests,
+                SUM(CASE WHEN pr.ok = 0 THEN 1 ELSE 0 END) AS failed
+         FROM platform_results pr
+         JOIN runs r ON r.run_id = pr.run_id
+         WHERE r.generated_at >= ? AND pr.tested = 1`,
+      )
+      .bind(since)
+      .first<{ tests: number; failed: number | null }>(),
+    db
+      .prepare(
+        `SELECT pr.error_kind AS kind, COUNT(*) AS count, MAX(pr.error) AS sample
+         FROM platform_results pr
+         JOIN runs r ON r.run_id = pr.run_id
+         WHERE r.generated_at >= ? AND pr.tested = 1 AND pr.ok = 0
+         GROUP BY pr.error_kind
+         ORDER BY count DESC
+         LIMIT 8`,
+      )
+      .bind(since)
+      .all<{ kind: string; count: number; sample: string | null }>(),
+    db
+      .prepare(
+        `SELECT pr.platform AS platform, MAX(pr.name) AS name,
+                COUNT(*) AS tested,
+                SUM(CASE WHEN pr.ok = 0 THEN 1 ELSE 0 END) AS failed
+         FROM platform_results pr
+         JOIN runs r ON r.run_id = pr.run_id
+         WHERE r.generated_at >= ? AND pr.tested = 1
+         GROUP BY pr.platform
+         ORDER BY failed DESC, tested DESC
+         LIMIT 15`,
+      )
+      .bind(since)
+      .all<{ platform: string; name: string; tested: number; failed: number }>(),
+    db
+      .prepare(
+        `SELECT pr.source_id AS sourceId, COALESCE(s.title, pr.source_id) AS title,
+                COUNT(*) AS tested,
+                SUM(CASE WHEN pr.ok = 0 THEN 1 ELSE 0 END) AS failed,
+                MAX(pr.error) AS topError
+         FROM platform_results pr
+         JOIN runs r ON r.run_id = pr.run_id
+         LEFT JOIN sources s ON s.id = pr.source_id
+         WHERE r.generated_at >= ? AND pr.tested = 1
+         GROUP BY pr.source_id
+         ORDER BY failed DESC, tested DESC
+         LIMIT 10`,
+      )
+      .bind(since)
+      .all<{ sourceId: string; title: string; tested: number; failed: number; topError: string | null }>(),
+    getRuns(db, 20),
+  ]);
+
+  return {
+    days: window,
+    runCount: runRow?.n ?? 0,
+    platformTests: totalRow?.tests ?? 0,
+    platformFailures: totalRow?.failed ?? 0,
+    byKind: kindRows.results.map((row) => ({
+      kind: row.kind ?? 'unknown',
+      count: row.count,
+      sample: row.sample,
+    })),
+    byPlatform: platformRows.results.map((row) => ({
+      platform: row.platform,
+      name: row.name,
+      tested: row.tested,
+      failed: row.failed,
+    })),
+    bySource: sourceRows.results.map((row) => ({
+      sourceId: row.sourceId,
+      title: row.title,
+      tested: row.tested,
+      failed: row.failed,
+      topError: row.topError,
+    })),
+    recentRuns: recentRuns.filter((run) => run.finishedAt >= since),
+  };
+}
