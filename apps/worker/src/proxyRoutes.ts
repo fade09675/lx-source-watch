@@ -31,6 +31,8 @@ interface SubscriptionRow {
   name: string;
   url: string;
   user_agent: string;
+  kind: string;
+  headers: string;
   enabled: number;
   last_fetch_at: string | null;
   last_status: string;
@@ -187,6 +189,7 @@ function publicSubscription(row: SubscriptionItem) {
     name: row.name,
     url: row.url,
     userAgent: row.user_agent,
+    kind: row.kind,
     enabled: row.enabled === 1,
     lastFetchAt: row.last_fetch_at,
     lastStatus: row.last_status,
@@ -278,6 +281,172 @@ function authRunner(env: Env, header: string | undefined): boolean {
   return Boolean(match) && match![1] === expected;
 }
 
+interface BundleSubscriptionInput {
+  name?: string;
+  url?: string;
+  kind?: string;
+  userAgent?: string;
+  headers?: string;
+  enabled?: boolean;
+  lastFetchAt?: string | null;
+  lastStatus?: string;
+}
+
+interface BundleNodeInput {
+  name?: string;
+  protocol?: string;
+  host?: string;
+  port?: number;
+  username?: string;
+  password?: string;
+  config?: string;
+  kernelOnly?: boolean;
+  enabled?: boolean;
+  subscriptionName?: string | null;
+  lastOkAt?: string | null;
+  lastCheckedAt?: string | null;
+  lastLatencyMs?: number | null;
+  lastError?: string | null;
+  lastEgressIp?: string | null;
+}
+
+/** IPTV 导出里的时间形如 2026-11-13 04:10:35（东八区），统一转 ISO。 */
+function bundleTime(value: unknown): string | null {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw)) {
+    const parsed = new Date(`${raw.replace(' ', 'T')}+08:00`);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  }
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+async function upsertBundleSubscription(env: Env, input: BundleSubscriptionInput, now: string): Promise<string | null> {
+  const name = clean(input.name, 80);
+  if (!name) return null;
+  const kind = clean(input.kind, 20) === 'file' ? 'file' : 'url';
+  const url = kind === 'file' ? '' : clean(input.url, 2000);
+  const userAgent = clean(input.userAgent, 200);
+  const headers = clean(input.headers, 2000);
+  const enabled = input.enabled === false ? 0 : 1;
+  const lastStatus = clean(input.lastStatus, 300);
+  const lastFetchAt = bundleTime(input.lastFetchAt);
+
+  const existing = await env.DB.prepare('SELECT id FROM proxy_subscriptions WHERE name = ?').bind(name).first<{ id: string }>();
+  if (existing) {
+    await env.DB.prepare(
+      `UPDATE proxy_subscriptions SET url = ?, user_agent = ?, kind = ?, headers = ?, enabled = ?,
+        last_fetch_at = COALESCE(?, last_fetch_at), last_status = ?, updated_at = ? WHERE id = ?`,
+    )
+      .bind(url, userAgent, kind, headers, enabled, lastFetchAt, lastStatus, now, existing.id)
+      .run();
+    return existing.id;
+  }
+
+  const id = crypto.randomUUID();
+  await env.DB.prepare(
+    `INSERT INTO proxy_subscriptions
+      (id, name, url, user_agent, kind, headers, enabled, last_fetch_at, last_status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  )
+    .bind(id, name, url, userAgent, kind, headers, enabled, lastFetchAt, lastStatus, now, now)
+    .run();
+  return id;
+}
+
+interface BundleNode {
+  name: string;
+  protocol: string;
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  config: string;
+  kernelOnly: boolean;
+  enabled: number;
+  subscriptionId: string | null;
+  lastOkAt: string | null;
+  lastCheckedAt: string | null;
+  lastLatencyMs: number | null;
+  lastError: string | null;
+  lastEgressIp: string | null;
+}
+
+const PLAIN_PROTOCOLS = new Set(['http', 'https', 'socks4', 'socks4a', 'socks5', 'socks5h']);
+
+async function insertBundleProxy(env: Env, node: BundleNode, now: string): Promise<string> {
+  const passwordEnc = node.password ? await encryptSecret(env, node.password) : '';
+  const configEnc = node.config ? await encryptSecret(env, node.config) : '';
+  const id = crypto.randomUUID();
+  await env.DB.prepare(
+    `INSERT INTO proxies
+      (id, name, protocol, host, port, username, password_enc, config_enc, kernel_only, engine, enabled, sort_order,
+       subscription_id, last_ok_at, last_latency_ms, egress_ip, last_error, checked_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  )
+    .bind(
+      id,
+      node.name.slice(0, 80),
+      node.protocol,
+      node.host,
+      node.port,
+      node.username,
+      passwordEnc,
+      configEnc,
+      node.kernelOnly ? 1 : 0,
+      node.kernelOnly ? 'mihomo' : '',
+      node.enabled,
+      node.subscriptionId,
+      node.lastOkAt,
+      node.lastLatencyMs,
+      node.lastEgressIp,
+      node.lastError,
+      node.lastCheckedAt,
+      now,
+      now,
+    )
+    .run();
+  return id;
+}
+
+async function updateBundleProxy(env: Env, id: string, node: BundleNode, now: string): Promise<void> {
+  const passwordEnc = node.password ? await encryptSecret(env, node.password) : '';
+  const configEnc = node.config ? await encryptSecret(env, node.config) : '';
+  await env.DB.prepare(
+    `UPDATE proxies SET name = ?, protocol = ?, host = ?, port = ?, username = ?,
+      password_enc = COALESCE(NULLIF(?, ''), password_enc),
+      config_enc = COALESCE(NULLIF(?, ''), config_enc),
+      kernel_only = ?, engine = ?, enabled = ?, subscription_id = ?,
+      last_ok_at = COALESCE(?, last_ok_at), last_latency_ms = COALESCE(?, last_latency_ms),
+      egress_ip = COALESCE(?, egress_ip), last_error = ?, checked_at = COALESCE(?, checked_at),
+      updated_at = ? WHERE id = ?`,
+  )
+    .bind(
+      node.name.slice(0, 80),
+      node.protocol,
+      node.host,
+      node.port,
+      node.username,
+      passwordEnc,
+      configEnc,
+      node.kernelOnly ? 1 : 0,
+      node.kernelOnly ? 'mihomo' : '',
+      node.enabled,
+      node.subscriptionId,
+      node.lastOkAt,
+      node.lastLatencyMs,
+      node.lastEgressIp,
+      node.lastError,
+      node.lastCheckedAt,
+      now,
+      id,
+    )
+    .run();
+}
+
+const MAX_BUNDLE_BYTES = 4 * 1024 * 1024;
+
 export function createAdminProxyRoutes(): Hono<{ Bindings: Env }> {
   const api = new Hono<{ Bindings: Env }>();
 
@@ -324,6 +493,99 @@ export function createAdminProxyRoutes(): Hono<{ Bindings: Env }> {
     }
     const result = await applyParsedNodes(c.env, parsed);
     return c.json({ ok: true, ...result });
+  });
+
+  /** 一次性导入导出包（订阅 + 节点快照），保留订阅归属、启停、密码与内核配置。 */
+  api.post('/import-bundle', async (c) => {
+    const raw = await c.req.text();
+    if (!raw.trim()) return c.json({ error: 'empty_body', message: '请求体为空' }, 400);
+    if (new TextEncoder().encode(raw).length > MAX_BUNDLE_BYTES) {
+      return c.json({ error: 'too_large', message: '导入包超过 4MB' }, 413);
+    }
+    let body: { subscriptions?: unknown; nodes?: unknown } | null = null;
+    try {
+      body = JSON.parse(raw) as { subscriptions?: unknown; nodes?: unknown };
+    } catch {
+      return c.json({ error: 'bad_json', message: '导入包不是合法 JSON' }, 400);
+    }
+    const subscriptionsIn = Array.isArray(body?.subscriptions) ? (body.subscriptions as BundleSubscriptionInput[]) : [];
+    const nodesIn = Array.isArray(body?.nodes) ? (body.nodes as BundleNodeInput[]) : [];
+    if (!nodesIn.length) return c.json({ error: 'no_nodes', message: '导入包里没有节点' }, 400);
+    if (nodesIn.length > 5000) return c.json({ error: 'too_many', message: '单次最多导入 5000 个节点' }, 400);
+
+    const now = new Date().toISOString();
+    const subIds = new Map<string, string>();
+    for (const existing of await listSubscriptions(c.env)) subIds.set(existing.name, existing.id);
+    for (const input of subscriptionsIn.slice(0, 100)) {
+      const id = await upsertBundleSubscription(c.env, input, now);
+      if (id) subIds.set(clean(input.name, 80), id);
+    }
+
+    const existing = await listRows(c.env);
+    const byKey = new Map(existing.map((row) => [proxyKey({ protocol: row.protocol, host: row.host, port: row.port, username: row.username }), row]));
+
+    let added = 0;
+    let updated = 0;
+    let disabled = 0;
+    let kernelOnly = 0;
+    const warnings: string[] = [];
+    const perSubscription = new Map<string, number>();
+
+    for (const input of nodesIn) {
+      const protocol = clean(input.protocol, 20).toLowerCase();
+      const host = clean(input.host, 200);
+      const port = portOf(input.port);
+      if (!protocol || !host || !port) {
+        if (warnings.length < 10) warnings.push(`跳过无效节点：${clean(input.name, 40) || host || '(无名)'}`);
+        continue;
+      }
+      const subName = clean(input.subscriptionName, 80);
+      let subscriptionId: string | null = null;
+      if (subName) {
+        subscriptionId = subIds.get(subName) ?? null;
+        if (!subscriptionId && warnings.length < 10) warnings.push(`订阅不存在：${subName}`);
+      }
+      const latency = Number(input.lastLatencyMs);
+      const node: BundleNode = {
+        name: clean(input.name, 80) || `${host}:${port}`,
+        protocol,
+        host,
+        port,
+        username: clean(input.username, 200),
+        password: String(input.password ?? ''),
+        config: String(input.config ?? ''),
+        kernelOnly: input.kernelOnly === true || !PLAIN_PROTOCOLS.has(protocol),
+        enabled: input.enabled === false ? 0 : 1,
+        subscriptionId,
+        lastOkAt: bundleTime(input.lastOkAt),
+        lastCheckedAt: bundleTime(input.lastCheckedAt),
+        lastLatencyMs: Number.isFinite(latency) && latency > 0 ? Math.round(latency) : null,
+        lastError: clean(input.lastError, 500) || null,
+        lastEgressIp: clean(input.lastEgressIp, 120) || null,
+      };
+      if (node.enabled === 0) disabled += 1;
+      if (node.kernelOnly) kernelOnly += 1;
+      if (subName) perSubscription.set(subName, (perSubscription.get(subName) ?? 0) + 1);
+
+      const key = proxyKey(node);
+      const row = byKey.get(key);
+      if (row) {
+        await updateBundleProxy(c.env, row.id, node, now);
+        updated += 1;
+      } else {
+        const id = await insertBundleProxy(c.env, node, now);
+        byKey.set(key, { id } as ProxyRow);
+        added += 1;
+      }
+    }
+
+    return c.json({
+      ok: true,
+      subscriptions: subIds.size,
+      nodes: { added, updated, total: nodesIn.length, kernelOnly, disabled },
+      perSubscription: Object.fromEntries(perSubscription),
+      warnings,
+    });
   });
 
   /** 从订阅地址拉取：创建/复用订阅源，再把节点挂在订阅下。 */
