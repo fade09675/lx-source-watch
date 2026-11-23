@@ -1,5 +1,6 @@
 import {
   toDay,
+  CandidateSchema,
   type Candidate,
   type DailyRow,
   type EventItem,
@@ -418,6 +419,71 @@ export async function getEvents(db: D1Database, limit = 50): Promise<EventItem[]
 export async function countCandidates(db: D1Database): Promise<number> {
   const row = await db.prepare('SELECT COUNT(*) AS n FROM candidates').first<{ n: number }>();
   return row?.n ?? 0;
+}
+
+interface CandidateRow {
+  id: string;
+  repo: string;
+  path: string;
+  url: string;
+  sha: string;
+  title: string | null;
+  version: string | null;
+  author: string | null;
+  description: string | null;
+  platforms: string;
+  bytes: number | null;
+  initOk: number | null;
+  initError: string | null;
+  state: string;
+  firstSeen: string | null;
+  lastSeen: string | null;
+}
+
+const CANDIDATE_COLUMNS = `id, repo, path, url, sha, title, version, author, description, platforms, bytes,
+  init_ok AS initOk, init_error AS initError, state, first_seen AS firstSeen, last_seen AS lastSeen`;
+
+export async function getCandidates(
+  db: D1Database,
+  opts: { state?: string; limit?: number } = {},
+): Promise<Candidate[]> {
+  const limit = Math.min(500, Math.max(1, opts.limit ?? 100));
+  const stmt = db.prepare(
+    `SELECT ${CANDIDATE_COLUMNS} FROM candidates ${opts.state ? 'WHERE state = ?' : ''} ORDER BY last_seen DESC LIMIT ?`,
+  );
+  const rows = opts.state
+    ? await stmt.bind(opts.state, limit).all<CandidateRow>()
+    : await stmt.bind(limit).all<CandidateRow>();
+
+  return rows.results.map((row) =>
+    CandidateSchema.parse({
+      id: row.id,
+      repo: row.repo,
+      path: row.path,
+      url: row.url,
+      sha: row.sha,
+      title: row.title ?? undefined,
+      version: row.version ?? undefined,
+      author: row.author ?? undefined,
+      description: row.description ?? undefined,
+      platforms: parseJsonArray(row.platforms),
+      bytes: row.bytes ?? undefined,
+      initOk: row.initOk === null ? undefined : Boolean(row.initOk),
+      initError: row.initError ?? undefined,
+      state: row.state,
+      firstSeen: row.firstSeen ?? undefined,
+      lastSeen: row.lastSeen ?? undefined,
+    }),
+  );
+}
+
+function parseJsonArray(raw: string): string[] {
+  try {
+    const value: unknown = JSON.parse(raw);
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
 }
 
 export async function touchSetting(db: D1Database, key: string, value: string, now: string): Promise<void> {

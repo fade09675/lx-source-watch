@@ -2,6 +2,7 @@ import { SnapshotSchema, type ExportItem, type Snapshot, type SourceResult, type
 import { Hono } from 'hono';
 import {
   countCandidates,
+  getCandidates,
   getEvents,
   getLastRun,
   getRuns,
@@ -148,6 +149,16 @@ export function createApi(): Hono<Ctx> {
     const limit = clampInt(c.req.query('limit'), 50, 1, 200);
     const events = await getEvents(c.env.DB, limit);
     return Response.json(events, { headers: { 'cache-control': CACHE_DETAIL } });
+  });
+
+  api.get('/candidates', async (c) => {
+    const state = c.req.query('state');
+    if (state && !['new', 'qualified', 'rejected', 'promoted'].includes(state)) {
+      return Response.json({ error: 'bad_state', message: `未知候选状态：${state}` }, { status: 400 });
+    }
+    const limit = clampInt(c.req.query('limit'), 100, 1, 500);
+    const candidates = await getCandidates(c.env.DB, { state, limit });
+    return Response.json(candidates, { headers: { 'cache-control': CACHE_DETAIL } });
   });
 
   api.get('/export', async (c) => {

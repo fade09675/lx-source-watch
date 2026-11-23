@@ -123,6 +123,7 @@
 | GET | `/api/sources/:id` | 源详情 + 最近历史 + 日汇总 + 平台日汇总 |
 | GET | `/api/history?days=14` | 轮次列表 |
 | GET | `/api/events?limit=50` | 最近恢复/降级/失效/新增事件 |
+| GET | `/api/candidates?state=new&limit=100` | 自动发现候选列表（按 last_seen 倒序） |
 | GET | `/api/export?format=json` | 全部源或筛选结果的导入清单 |
 | GET | `/api/health` | 健康检查 |
 | POST | `/api/ingest` | 仅 publish job，HMAC 校验 |
