@@ -4,6 +4,15 @@ import { ErrorBox, Spinner } from '../components/Feedback';
 
 const PROTOCOLS = ['http', 'socks5', 'ss', 'vmess', 'vless', 'trojan', 'hysteria2', 'tuic', 'anytls'];
 
+const UA_PRESETS = [
+  { label: '默认（本站 UA）', value: '' },
+  { label: 'Clash for Windows', value: 'ClashforWindows/0.20.39' },
+  { label: 'Clash Meta', value: 'clash.meta/1.18.0' },
+  { label: 'Shadowrocket', value: 'Shadowrocket/2.2.9 CFNetwork/1490 Darwin/23.4.0' },
+  { label: 'V2RayN', value: 'v2rayN/6.31' },
+  { label: '浏览器', value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36' },
+];
+
 function shortTime(value: string | null): string {
   if (!value) return '—';
   return new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -64,6 +73,27 @@ export function ProxiesPage() {
       await load();
     } catch (e) {
       setMessage(e instanceof ApiError ? e.message : '导入失败');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function importFile(file: File) {
+    if (file.size > 512 * 1024) {
+      setMessage('文件超过 512KB，请拆分后再导入');
+      return;
+    }
+    setBusy(true);
+    setMessage('');
+    try {
+      const content = await file.text();
+      const result = await api.importProxies(content);
+      setMessage(
+        `文件导入完成：新增 ${result.added}，更新 ${result.updated}，共 ${result.total} 个节点${result.warnings.length ? `；${result.warnings[0]}` : ''}（导入的节点属于“手动”）`,
+      );
+      await load();
+    } catch (e) {
+      setMessage(e instanceof ApiError ? e.message : '文件导入失败');
     } finally {
       setBusy(false);
     }
@@ -185,7 +215,19 @@ export function ProxiesPage() {
           </label>
           <label>
             UA（可选）
-            <input value={subUa} onChange={(event) => setSubUa(event.target.value)} placeholder="默认使用本站 UA" />
+            <input
+              value={subUa}
+              onChange={(event) => setSubUa(event.target.value)}
+              placeholder="默认使用本站 UA，可从下拉里选"
+              list="ua-presets"
+            />
+            <datalist id="ua-presets">
+              {UA_PRESETS.map((preset) => (
+                <option key={preset.label} value={preset.value}>
+                  {preset.label}
+                </option>
+              ))}
+            </datalist>
           </label>
           <div className="wide page-actions">
             <button type="button" className="primary-button" disabled={busy || !subUrl.trim()} onClick={() => void addSubscription()}>
@@ -193,6 +235,9 @@ export function ProxiesPage() {
             </button>
           </div>
         </div>
+        <p className="muted small">
+          如果提示 403：机场多半限制了海外/机房 IP 或要求特定 UA。可以先在下拉里换一个 UA 重试；仍然不行就在浏览器打开订阅链接，把内容复制到下面“批量导入”，或用文件导入。
+        </p>
 
         {subs && subs.length > 0 && (
           <div className="table-wrap">
@@ -299,7 +344,10 @@ export function ProxiesPage() {
 
       <section className="panel">
         <h2>批量导入</h2>
-        <p className="muted small">支持 Clash YAML、Base64 订阅、分享链接（ss:// vmess:// trojan:// vless://）、host:port 或 host:port:user:pass，一行一个。</p>
+        <p className="muted small">
+          支持 Clash YAML、Base64 订阅、分享链接（ss:// vmess:// trojan:// vless://）、host:port 或 host:port:user:pass，一行一个。
+          订阅链接在浏览器能打开、但服务端拉取报 403 时，用这里粘贴或上传文件最稳。
+        </p>
         <textarea
           className="proxy-textarea"
           value={text}
@@ -311,6 +359,19 @@ export function ProxiesPage() {
           <button type="button" className="primary-button" disabled={busy || !text.trim()} onClick={() => void importText()}>
             导入
           </button>
+          <label className="ghost-button file-button">
+            从文件导入
+            <input
+              type="file"
+              accept=".txt,.yaml,.yml,.json,.conf,.ini"
+              hidden
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void importFile(file);
+                event.target.value = '';
+              }}
+            />
+          </label>
         </div>
       </section>
 

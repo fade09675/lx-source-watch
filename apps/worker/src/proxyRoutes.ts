@@ -205,7 +205,20 @@ async function fetchSubscription(url: URL, userAgent: string): Promise<{ parsed:
     redirect: 'follow',
     signal: AbortSignal.timeout(20_000),
   });
-  if (!response.ok) throw new Error(`订阅返回 HTTP ${response.status}`);
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error(
+        `订阅返回 HTTP ${response.status}：机场可能限制海外/机房 IP，或要求 Clash/Shadowrocket 等特定 UA。可换一个 UA 重试；仍不行就把订阅内容粘贴或上传导入。`,
+      );
+    }
+    if (response.status === 404) {
+      throw new Error('订阅返回 HTTP 404：链接可能已失效，请在浏览器里确认能否打开');
+    }
+    if (response.status === 429) {
+      throw new Error('订阅返回 HTTP 429：请求太频繁，请稍后再试');
+    }
+    throw new Error(`订阅返回 HTTP ${response.status}`);
+  }
   const buffer = await response.arrayBuffer();
   if (buffer.byteLength > MAX_FETCH_BYTES) throw new Error('订阅内容超过 1MB');
   const text = new TextDecoder().decode(buffer);
