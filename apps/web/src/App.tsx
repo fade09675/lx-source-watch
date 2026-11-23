@@ -10,6 +10,7 @@ import { LoginPage } from './pages/Login';
 import { OverviewPage } from './pages/Overview';
 import { ProxiesPage } from './pages/Proxies';
 import { SourceDetailPage } from './pages/SourceDetail';
+import { WorkbenchPage } from './pages/Workbench';
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { status } = useAuth();
@@ -43,7 +44,8 @@ export function App() {
                 </RequireAuth>
               }
             >
-              <Route path="/" element={<OverviewPage />} />
+              <Route path="/" element={<WorkbenchPage />} />
+              <Route path="/sources" element={<OverviewPage />} />
               <Route path="/s/:id" element={<SourceDetailPage />} />
               <Route path="/candidates" element={<CandidatesPage />} />
               <Route path="/admin" element={<AdminPage />} />

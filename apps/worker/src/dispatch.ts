@@ -26,6 +26,8 @@ export interface WorkflowRunView {
   createdAt: string;
   updatedAt: string;
   url: string;
+  /** 工作流标识：probe / proxy-test。 */
+  workflow: string;
 }
 
 export type RunListResult =
@@ -112,13 +114,18 @@ async function dispatchWorkflow(
 
 /** 读取探测工作流最近几次运行，用于网页上显示进度。 */
 export async function listProbeRuns(env: Env, limit = 5): Promise<RunListResult> {
+  return listWorkflowRuns(env, WORKFLOW_FILE, limit);
+}
+
+/** 读取任意工作流的最近运行。 */
+export async function listWorkflowRuns(env: Env, workflow: string, limit = 5): Promise<RunListResult> {
   const token = tokenOf(env);
   if (!token) return { ok: false, status: 503, message: '未配置触发令牌，无法查询运行状态' };
 
   let response: Response;
   try {
     response = await fetch(
-      `${GITHUB_API}/repos/${repoOf(env)}/actions/workflows/${WORKFLOW_FILE}/runs?per_page=${Math.min(10, Math.max(1, limit))}`,
+      `${GITHUB_API}/repos/${repoOf(env)}/actions/workflows/${workflow}/runs?per_page=${Math.min(20, Math.max(1, limit))}`,
       { headers: githubHeaders(token) },
     );
   } catch {
@@ -145,7 +152,30 @@ export async function listProbeRuns(env: Env, limit = 5): Promise<RunListResult>
       createdAt: typeof item.created_at === 'string' ? item.created_at : '',
       updatedAt: typeof item.updated_at === 'string' ? item.updated_at : '',
       url: typeof item.html_url === 'string' ? item.html_url : '',
+      workflow,
     });
   }
   return { ok: true, runs };
+}
+
+export type WorkflowRunsResult =
+  | { ok: true; runs: WorkflowRunView[]; errors: string[] }
+  | { ok: false; status: number; message: string };
+
+/** 工作台用：一次取两类工作流的最近运行并合并排序。 */
+export async function listAllRuns(env: Env, limitPerWorkflow = 6): Promise<WorkflowRunsResult> {
+  const [probe, proxyTest] = await Promise.all([
+    listWorkflowRuns(env, 'probe.yml', limitPerWorkflow),
+    listWorkflowRuns(env, 'proxy-test.yml', limitPerWorkflow),
+  ]);
+  if (!probe.ok && !proxyTest.ok) {
+    return { ok: false, status: probe.status, message: probe.message };
+  }
+  const runs = [...(probe.ok ? probe.runs : []), ...(proxyTest.ok ? proxyTest.runs : [])].sort((a, b) =>
+    b.createdAt.localeCompare(a.createdAt),
+  );
+  const errors: string[] = [];
+  if (!probe.ok) errors.push(`探测：${probe.message}`);
+  if (!proxyTest.ok) errors.push(`测活：${proxyTest.message}`);
+  return { ok: true, runs, errors };
 }

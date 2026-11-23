@@ -57,7 +57,7 @@ export function SourceDetailPage() {
     <div className="page">
       <div className="detail-head">
         <div>
-          <Link to="/" className="back-link">
+          <Link to="/sources" className="back-link">
             ← 返回总览
           </Link>
           <h1>{source.title}</h1>

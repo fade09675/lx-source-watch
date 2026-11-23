@@ -176,6 +176,40 @@ export interface WorkflowRunView {
   createdAt: string;
   updatedAt: string;
   url: string;
+  workflow: string;
+}
+
+export interface UsageDay {
+  date: string;
+  kvWrites: number;
+  d1Writes: number;
+  githubMinutes: number;
+}
+
+export interface UsageView {
+  collectedAt: string;
+  kv: {
+    day: string;
+    reads: number;
+    writes: number;
+    lists: number;
+    deletes: number;
+    storageBytes: number;
+    storageDay?: string;
+    localWrites?: number;
+  };
+  d1: { day: string; rowsRead: number; rowsWritten: number };
+  github: { month: string; minutes: number; runs: number; private?: boolean };
+  history: UsageDay[];
+  cloudflareError?: string | null;
+}
+
+export interface WorkflowRunsResult {
+  ok?: boolean;
+  runs: WorkflowRunView[];
+  errors: string[];
+  lastProbeDispatchedAt?: string | null;
+  lastProxyTestDispatchedAt?: string | null;
 }
 
 export interface RunProbeInput {
@@ -280,6 +314,8 @@ export const api = {
       body: JSON.stringify(input),
     }),
   workflowRuns: () => request<RunStatusResult>('/api/admin/runs'),
+  workflows: () => request<WorkflowRunsResult>('/api/admin/workflows'),
+  usage: (refresh = false) => request<{ usage: UsageView }>(`/api/admin/usage${refresh ? '?refresh=1' : ''}`),
 
   mirrors: () => request<MirrorConfigView>('/api/admin/mirrors'),
   saveMirrors: (templates: MirrorTemplate[]) =>

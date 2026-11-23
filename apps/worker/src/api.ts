@@ -32,7 +32,7 @@ import { ADMIN_PASSWORD_SETTING, SNAPSHOT_KEY } from './env';
 import { filterSnapshot, parseList } from './filter';
 import { handleIngest } from './ingest';
 import { isStale } from './merge';
-import { dispatchProbe, dispatchProxyTest, listProbeRuns } from './dispatch';
+import { dispatchProbe, dispatchProxyTest, listAllRuns, listProbeRuns } from './dispatch';
 import { getUsage, recordKvPut, refreshUsage } from './usage';
 import { getMirrorTemplates, resetMirrorTemplates, saveMirrorTemplates, MirrorConfigError } from './mirrors';
 
@@ -277,6 +277,30 @@ export function createApi(): Hono<Ctx> {
     }
     const lastDispatchedAt = await c.env.SNAPSHOT.get('run:probe:last');
     return Response.json({ runs: result.runs, lastDispatchedAt }, { headers: { 'cache-control': CACHE_PRIVATE } });
+  });
+
+  // 工作台：探测 + 测活两类工作流的最近运行。
+  api.get('/admin/workflows', async (c) => {
+    const result = await listAllRuns(c.env, 6);
+    // 未配置令牌 / GitHub 暂时不可用时也返回 200：工作台仍要能显示额度与
+    // 定时计划，把失败作为 errors 展示，而不是整页报错。
+    const runs = 'runs' in result ? result.runs : [];
+    const baseErrors = 'errors' in result && Array.isArray(result.errors) ? result.errors : [];
+    const errors = result.ok ? baseErrors : [result.message ?? '查询运行状态失败', ...baseErrors];
+    const [lastProbeDispatchedAt, lastProxyTestDispatchedAt] = await Promise.all([
+      c.env.SNAPSHOT.get('run:probe:last'),
+      c.env.SNAPSHOT.get('run:proxy-test:last'),
+    ]);
+    return Response.json(
+      {
+        ok: result.ok,
+        runs,
+        errors,
+        lastProbeDispatchedAt,
+        lastProxyTestDispatchedAt,
+      },
+      { headers: { 'cache-control': CACHE_PRIVATE } },
+    );
   });
 
   // KV / D1 / Actions 用量。默认 5 分钟内复用缓存，?refresh=1 强制刷新。
