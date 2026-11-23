@@ -1,0 +1,52 @@
+name: 部署 Worker
+
+# push 到 main 且改动涉及 Worker / shared / 依赖时自动部署。
+# 也可以手动触发。
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/worker/**"
+      - "packages/shared/**"
+      - "pnpm-lock.yaml"
+      - "package.json"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lx-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: 部署（持 Cloudflare 令牌）
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 检出
+        uses: actions/checkout@v4
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.28.5
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 部署
+        working-directory: apps/worker
+        run: pnpm exec wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 8e8c755370e9a2bf44146edf108f3e39
