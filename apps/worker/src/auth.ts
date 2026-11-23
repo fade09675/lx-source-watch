@@ -55,7 +55,7 @@ export function parsePasswordHash(stored: string): ParsedHash | null {
   const [scheme, digest, iterationsRaw, saltRaw, hashRaw] = parts;
   if (scheme !== 'pbkdf2' || digest !== 'sha256') return null;
   const iterations = Number.parseInt(iterationsRaw ?? '', 10);
-  if (!Number.isFinite(iterations) || iterations < 10_000) return null;
+  if (!Number.isFinite(iterations) || iterations < 10_000 || iterations > 100_000) return null;
   try {
     return { iterations, salt: base64ToBytes(saltRaw ?? ''), hash: base64ToBytes(hashRaw ?? '') };
   } catch {
@@ -76,7 +76,10 @@ export async function verifyPassword(password: string, stored: string): Promise<
   return timingSafeEqual(derived, parsed.hash);
 }
 
-export async function hashPassword(password: string, iterations = 210_000): Promise<string> {
+/** Cloudflare Workers 的 WebCrypto 只支持 PBKDF2 最多 100000 轮，默认值必须不超过它。 */
+export const PBKDF2_MAX_ITERATIONS = 100_000;
+
+export async function hashPassword(password: string, iterations = PBKDF2_MAX_ITERATIONS): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const hash = await derive(password, salt, iterations, 32);
   return `pbkdf2$sha256$${iterations}$${bytesToBase64(salt)}$${bytesToBase64(hash)}`;
