@@ -1796,3 +1796,126 @@ a:hover {
 @media (max-width: 720px) {
   .settings-body { grid-template-columns: 1fr; }
 }
+
+/* ===== 运行日志 ===== */
+.log-panel { padding: 0; overflow: hidden; }
+.log-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--panel-2);
+}
+.log-search {
+  flex: 1 1 220px;
+  min-width: 160px;
+  padding: 7px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  color: var(--text);
+  font-size: 12px;
+}
+.log-toolbar .check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.log-view {
+  margin: 0;
+  padding: 10px 0;
+  max-height: 520px;
+  overflow: auto;
+  background: #05080f;
+  color: #c8d4e6;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
+}
+.log-line { display: block; padding: 0 12px; }
+.log-line:hover { background: rgba(56, 189, 248, 0.06); }
+.log-line.is-error { color: #fda4af; background: rgba(239, 68, 68, 0.08); }
+.log-ln {
+  display: inline-block;
+  width: 44px;
+  margin-right: 10px;
+  color: #475569;
+  text-align: right;
+  user-select: none;
+}
+.log-empty { padding: 18px 14px; }
+:root[data-theme='light'] .log-view { background: #0f172a; }
+
+/* ---------- 工作台任务中心 ---------- */
+.task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 12px;
+}
+
+.task-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.task-main strong {
+  font-size: 13px;
+}
+
+.task-main .muted {
+  font-size: 12px;
+}
+
+.meter {
+  height: 5px;
+  margin-top: 2px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+
+.meter span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), #8b5cf6);
+}
+
+.task-side {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.task-side a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.task-side a:hover {
+  text-decoration: underline;
+}
+
+.link-button.danger {
+  color: var(--bad);
+}
+
+@media (max-width: 560px) {
+  .task-side {
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+  }
+}

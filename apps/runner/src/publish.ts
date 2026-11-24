@@ -25,6 +25,10 @@ export interface PublishOptions {
   maxCandidates?: number;
   /** 仅本地联调时允许上报到 127.0.0.1。 */
   allowPrivate?: boolean;
+  /** 任务系统：关联任务、触发方式与日志文件。 */
+  taskId?: string;
+  trigger?: 'schedule' | 'manual' | 'retry' | 'local';
+  logPath?: string;
 }
 
 export async function readCnFile(path: string): Promise<CnFile | null> {
@@ -92,6 +96,18 @@ async function readCandidates(path: string | undefined, max: number): Promise<Ca
   }
 }
 
+async function readLog(path: string | undefined): Promise<string | undefined> {
+  if (!path) return undefined;
+  try {
+    const text = await readFile(path, 'utf8');
+    return text.slice(0, 200_000);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    log.warn(`读取运行日志失败，忽略：${(e as Error).message}`);
+    return undefined;
+  }
+}
+
 /**
  * 把快照 + 候选摘要 POST 给 Worker。
  * 这里绝不执行任何音源代码，只做 JSON 校验与 HMAC 签名。
@@ -107,8 +123,14 @@ export async function publishIngest(opts: PublishOptions): Promise<{ status: num
     }
   }
   const candidates = await readCandidates(opts.candidatesPath, opts.maxCandidates ?? 100);
+  const runLog = await readLog(opts.logPath);
 
-  const payload: IngestPayload = IngestPayloadSchema.parse({ snapshot, candidates });
+  const meta = {
+    ...(opts.taskId ? { taskId: opts.taskId } : {}),
+    trigger: opts.trigger ?? (process.env.GITHUB_ACTIONS === 'true' ? 'schedule' : 'local'),
+    ...(runLog ? { log: runLog } : {}),
+  };
+  const payload: IngestPayload = IngestPayloadSchema.parse({ snapshot, candidates, meta });
   const body = JSON.stringify(payload);
   const signature = opts.secret ? signPayload(body, opts.secret) : 'dry-run';
 

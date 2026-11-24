@@ -1,5 +1,11 @@
 import type { Env } from './env';
-import { dispatchProbe, dispatchProxyTest, type DispatchResult } from './dispatch';
+import {
+  createTask,
+  dispatchNext as dispatchNextDefault,
+  type DispatchNextResult,
+  type TaskPayload,
+  type TaskType,
+} from './tasks';
 import { loadSettings, normalizeSettings, type AppSettings } from './settings';
 
 /** 默认间隔（设置里可改）。 */
@@ -12,6 +18,7 @@ export const SCHEDULER_STATE_KEY = 'scheduler:state';
 const MANUAL_KEYS = {
   probe: 'run:probe:last',
   proxyTest: 'run:proxy-test:last',
+  discovery: 'run:discovery:last',
 } as const;
 
 export interface JobState {
@@ -24,7 +31,7 @@ export interface JobState {
 export interface SchedulerState {
   probe?: JobState;
   proxyTest?: JobState;
-  /** 最近一次携带自动发现的探测。 */
+  /** 最近一次自动发现。 */
   discovery?: JobState;
 }
 
@@ -48,11 +55,36 @@ export interface SchedulerStatus {
   now: string;
 }
 
+export interface EnqueueInput {
+  type: TaskType;
+  payload: TaskPayload;
+  priority?: number;
+}
+
+export interface EnqueueResult {
+  ok: boolean;
+  taskId?: string;
+  message?: string;
+}
+
 export interface SchedulerDeps {
   /** 测试时可注入设置，跳过数据库。 */
   settings?: AppSettings;
-  dispatchProbe?: (env: Env, input: Parameters<typeof dispatchProbe>[1]) => Promise<DispatchResult>;
-  dispatchProxyTest?: (env: Env, input: Parameters<typeof dispatchProxyTest>[1]) => Promise<DispatchResult>;
+  /** 测试时可注入建任务函数，跳过 D1。 */
+  enqueue?: (env: Env, input: EnqueueInput) => Promise<EnqueueResult>;
+  /** 测试时可注入派发函数。 */
+  dispatchNext?: (env: Env) => Promise<DispatchNextResult>;
+}
+
+async function defaultEnqueue(env: Env, input: EnqueueInput): Promise<EnqueueResult> {
+  if (!env.DB) return { ok: false, message: '未配置数据库，无法建任务' };
+  const task = await createTask(env.DB, {
+    type: input.type,
+    payload: input.payload,
+    priority: input.priority,
+    source: 'schedule',
+  });
+  return { ok: true, taskId: task.id };
 }
 
 export function isDue(lastAt: string | undefined, intervalHours: number, now = Date.now()): boolean {
@@ -122,8 +154,9 @@ async function readSettings(env: Env, deps: SchedulerDeps): Promise<AppSettings>
 /**
  * 由 Worker 的 Cron Trigger 每 5 分钟调用一次。
  *
- * 只有到点才真正派发 GitHub Actions，触发失败也会记录时间并等下一个间隔，
- * 避免每 5 分钟反复打 GitHub。间隔与开关来自网页设置。
+ * 到点只负责“建任务”（排队），随后尝试派发一个任务；真正执行由 Actions 完成。
+ * 触发失败也会记录时间并等下一个间隔，避免每 5 分钟反复打 GitHub。
+ * 间隔与开关来自网页设置。
  */
 export async function runScheduler(
   env: Env,
@@ -131,60 +164,89 @@ export async function runScheduler(
   deps: SchedulerDeps = {},
 ): Promise<{ probe: boolean; proxyTest: boolean; discovery: boolean }> {
   const settings = await readSettings(env, deps);
-  const dispatchProbeFn = deps.dispatchProbe ?? dispatchProbe;
-  const dispatchProxyTestFn = deps.dispatchProxyTest ?? dispatchProxyTest;
+  const enqueueFn = deps.enqueue ?? defaultEnqueue;
+  const dispatchFn = deps.dispatchNext ?? dispatchNextDefault;
 
   const state = await readState(env);
-  const [manualProbe, manualProxy] = await Promise.all([
+  const [manualProbe, manualProxy, manualDiscovery] = await Promise.all([
     env.SNAPSHOT.get(MANUAL_KEYS.probe),
     env.SNAPSHOT.get(MANUAL_KEYS.proxyTest),
+    env.SNAPSHOT.get(MANUAL_KEYS.discovery),
   ]);
 
   const at = new Date(now).toISOString();
-  const dispatched = { probe: false, proxyTest: false, discovery: false };
+  const queued = { probe: false, proxyTest: false, discovery: false };
   let changed = false;
 
   const probeDue =
     settings.probeEnabled &&
     isDue(laterIso(state.probe?.at, manualProbe), settings.probeIntervalHours, now);
   const discoveryDue =
-    probeDue &&
     settings.discoveryEnabled &&
-    isDue(state.discovery?.at, settings.discoveryIntervalHours, now);
+    isDue(laterIso(state.discovery?.at, manualDiscovery), settings.discoveryIntervalHours, now);
+  const proxyDue =
+    settings.proxyTestEnabled &&
+    isDue(laterIso(state.proxyTest?.at, manualProxy), settings.proxyTestIntervalHours, now);
 
   if (probeDue) {
-    dispatched.probe = true;
-    dispatched.discovery = discoveryDue;
     changed = true;
     try {
-      const result = await dispatchProbeFn(env, {
-        limit: settings.probeLimit > 0 ? String(settings.probeLimit) : undefined,
-        concurrency: settings.probeConcurrency,
-        deep: settings.probeDeep,
-        preferMirror: settings.preferMirror,
-        cn: settings.cnEnabled,
-        discover: discoveryDue,
+      const result = await enqueueFn(env, {
+        type: 'probe',
+        priority: 5,
+        payload: {
+          limit: settings.probeLimit > 0 ? String(settings.probeLimit) : undefined,
+          concurrency: settings.probeConcurrency,
+          deep: settings.probeDeep,
+          preferMirror: settings.preferMirror,
+          cn: settings.cnEnabled,
+        },
       });
       state.probe = result.ok ? { at, ok: true } : { at, ok: false, error: result.message };
-      if (result.ok && discoveryDue) state.discovery = { at, ok: true };
+      queued.probe = result.ok;
     } catch (error) {
       state.probe = { at, ok: false, error: errorMessage(error) };
     }
   }
 
-  if (settings.proxyTestEnabled && isDue(laterIso(state.proxyTest?.at, manualProxy), settings.proxyTestIntervalHours, now)) {
-    dispatched.proxyTest = true;
+  if (discoveryDue) {
     changed = true;
     try {
-      const result = await dispatchProxyTestFn(env, {});
+      const result = await enqueueFn(env, {
+        type: 'discovery',
+        priority: 6,
+        payload: { concurrency: 1, preferMirror: settings.preferMirror },
+      });
+      state.discovery = result.ok ? { at, ok: true } : { at, ok: false, error: result.message };
+      queued.discovery = result.ok;
+    } catch (error) {
+      state.discovery = { at, ok: false, error: errorMessage(error) };
+    }
+  }
+
+  if (proxyDue) {
+    changed = true;
+    try {
+      const result = await enqueueFn(env, { type: 'proxy-test', priority: 7, payload: {} });
       state.proxyTest = result.ok ? { at, ok: true } : { at, ok: false, error: result.message };
+      queued.proxyTest = result.ok;
     } catch (error) {
       state.proxyTest = { at, ok: false, error: errorMessage(error) };
     }
   }
 
-  if (changed) await writeState(env, state);
-  return dispatched;
+  if (changed) {
+    await writeState(env, state);
+    if (queued.probe || queued.discovery || queued.proxyTest) {
+      try {
+        await dispatchFn(env);
+      } catch {
+        // 派发失败由下一次 cron 或任务中心手动重试，这里不阻断状态写入。
+      }
+    }
+  }
+
+  return queued;
 }
 
 /** 给工作台读取的定时状态。 */
@@ -195,11 +257,11 @@ export async function getSchedulerStatus(
 ): Promise<SchedulerStatus> {
   const settings = await readSettings(env, deps);
   const state = await readState(env);
-  const [manualProbe, manualProxy] = await Promise.all([
+  const [manualProbe, manualProxy, manualDiscovery] = await Promise.all([
     env.SNAPSHOT.get(MANUAL_KEYS.probe),
     env.SNAPSHOT.get(MANUAL_KEYS.proxyTest),
+    env.SNAPSHOT.get(MANUAL_KEYS.discovery),
   ]);
-  const discoveryLast = laterIso(state.discovery?.at, state.probe?.at);
   return {
     probe: jobStatus(settings.probeIntervalHours, settings.probeEnabled, state.probe, manualProbe, now),
     proxyTest: jobStatus(
@@ -213,7 +275,7 @@ export async function getSchedulerStatus(
       settings.discoveryIntervalHours,
       settings.discoveryEnabled,
       state.discovery,
-      discoveryLast ?? null,
+      manualDiscovery,
       now,
     ),
     now: new Date(now).toISOString(),

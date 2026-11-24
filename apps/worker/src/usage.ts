@@ -356,3 +356,42 @@ export async function getUsage(env: Env, options: { refresh?: boolean; maxAgeMs?
   if (!options.refresh && fresh && previous) return previous;
   return refreshUsage(env);
 }
+
+/** 派发前的额度护栏：KV 写入或 D1 写入接近免费上限时暂停派发。 */
+export const QUOTA_KV_WRITES = 920;
+export const QUOTA_D1_WRITES = 90_000;
+
+export interface QuotaCheck {
+  ok: boolean;
+  message?: string;
+  kvWrites: number;
+  d1Writes: number;
+}
+
+export async function checkQuota(env: Env): Promise<QuotaCheck> {
+  try {
+    const usage = await getUsage(env, { maxAgeMs: 15 * 60_000 });
+    const kvWrites = usage.kv?.writes ?? 0;
+    const d1Writes = usage.d1?.rowsWritten ?? 0;
+    if (kvWrites >= QUOTA_KV_WRITES) {
+      return {
+        ok: false,
+        message: `KV 写入已用 ${kvWrites}/1000，暂停派发，等 UTC 零点重置`,
+        kvWrites,
+        d1Writes,
+      };
+    }
+    if (d1Writes >= QUOTA_D1_WRITES) {
+      return {
+        ok: false,
+        message: `D1 写入已用 ${d1Writes}/100000，暂停派发，等 UTC 零点重置`,
+        kvWrites,
+        d1Writes,
+      };
+    }
+    return { ok: true, kvWrites, d1Writes };
+  } catch {
+    // 额度读取失败不应阻断正常调度。
+    return { ok: true, kvWrites: 0, d1Writes: 0 };
+  }
+}

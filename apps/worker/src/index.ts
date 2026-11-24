@@ -4,6 +4,7 @@ import { readCookie, SESSION_COOKIE, verifySessionToken } from './auth';
 import type { Env } from './env';
 import { createAdminProxyRoutes, createRunnerProxyRoutes } from './proxyRoutes';
 import { runScheduler } from './scheduler';
+import { reapStaleTasks, refreshTaskState } from './tasks';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -103,9 +104,15 @@ export default {
    */
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(
-      runScheduler(env).catch((error) => {
-        console.error('scheduler error', error);
-      }),
+      (async () => {
+        try {
+          await runScheduler(env);
+          await reapStaleTasks(env);
+          await refreshTaskState(env);
+        } catch (error) {
+          console.error('scheduler error', error);
+        }
+      })(),
     );
   },
 } satisfies ExportedHandler<Env>;

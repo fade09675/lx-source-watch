@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Env } from '../src/env';
+import { DEFAULT_SETTINGS } from '../src/settings';
 import {
   getSchedulerStatus,
   isDue,
@@ -52,70 +53,90 @@ describe('scheduler isDue', () => {
 });
 
 describe('runScheduler', () => {
-  it('首次两个任务都派发并写入状态', async () => {
+  function collector() {
+    const types: string[] = [];
+    let dispatch = 0;
+    return {
+      types,
+      get dispatch() {
+        return dispatch;
+      },
+      deps: {
+        enqueue: async (_env: Env, input: { type: string }) => {
+          types.push(input.type);
+          return { ok: true, taskId: `task_${input.type}` };
+        },
+        dispatchNext: async () => {
+          dispatch += 1;
+          return { dispatched: true, message: '已派发' };
+        },
+      },
+    };
+  }
+
+  it('首次把探测、自动发现、测活都建成任务，并尝试派发一次', async () => {
     const kv = fakeKv();
-    const calls = { probe: 0, proxy: 0 };
-    await runScheduler(fakeEnv(kv), NOW, {
-      dispatchProbe: async () => {
-        calls.probe += 1;
-        return { ok: true, dispatchedAt: new Date(NOW).toISOString() };
-      },
-      dispatchProxyTest: async () => {
-        calls.proxy += 1;
-        return { ok: true, dispatchedAt: new Date(NOW).toISOString() };
-      },
-    });
-    expect(calls).toEqual({ probe: 1, proxy: 1 });
+    const c = collector();
+    const result = await runScheduler(fakeEnv(kv), NOW, c.deps);
+    expect(result).toEqual({ probe: true, discovery: true, proxyTest: true });
+    expect(c.types.sort()).toEqual(['discovery', 'probe', 'proxy-test']);
+    expect(c.dispatch).toBe(1);
     const state = JSON.parse(kv.map.get(SCHEDULER_STATE_KEY) ?? '{}');
     expect(state.probe.ok).toBe(true);
+    expect(state.discovery.ok).toBe(true);
     expect(state.proxyTest.ok).toBe(true);
   });
 
-  it('同一间隔内不重复派发，跨间隔后再次派发', async () => {
+  it('同一间隔内不重复建任务，跨间隔后再次建任务', async () => {
     const kv = fakeKv();
-    let probe = 0;
-    const deps = {
-      dispatchProbe: async () => {
-        probe += 1;
-        return { ok: true as const, dispatchedAt: new Date(NOW).toISOString() };
-      },
-      dispatchProxyTest: async () => ({ ok: true as const, dispatchedAt: new Date(NOW).toISOString() }),
-    };
-    await runScheduler(fakeEnv(kv), NOW, deps);
-    await runScheduler(fakeEnv(kv), NOW + 2 * HOUR, deps);
-    expect(probe).toBe(1);
-    await runScheduler(fakeEnv(kv), NOW + (PROBE_INTERVAL_HOURS + 1) * HOUR, deps);
-    expect(probe).toBe(2);
+    const c = collector();
+    await runScheduler(fakeEnv(kv), NOW, c.deps);
+    await runScheduler(fakeEnv(kv), NOW + 2 * HOUR, c.deps);
+    expect(c.types.filter((type) => type === 'probe')).toHaveLength(1);
+    await runScheduler(fakeEnv(kv), NOW + (PROBE_INTERVAL_HOURS + 1) * HOUR, c.deps);
+    expect(c.types.filter((type) => type === 'probe')).toHaveLength(2);
   });
 
   it('手动触发时间也参与间隔判断', async () => {
     const kv = fakeKv({ 'run:probe:last': new Date(NOW - 1 * HOUR).toISOString() });
-    let probe = 0;
-    await runScheduler(fakeEnv(kv), NOW, {
-      dispatchProbe: async () => {
-        probe += 1;
-        return { ok: true, dispatchedAt: new Date(NOW).toISOString() };
-      },
-      dispatchProxyTest: async () => ({ ok: true, dispatchedAt: new Date(NOW).toISOString() }),
-    });
-    expect(probe).toBe(0);
+    const c = collector();
+    const result = await runScheduler(fakeEnv(kv), NOW, c.deps);
+    expect(result.probe).toBe(false);
+    expect(c.types).not.toContain('probe');
   });
 
-  it('派发失败会记录错误，且不会在 5 分钟后反复重试', async () => {
+  it('建任务失败会记录错误，且不会在 5 分钟后反复重试', async () => {
     const kv = fakeKv();
-    let probe = 0;
+    let calls = 0;
     const deps = {
-      dispatchProbe: async () => {
-        probe += 1;
-        return { ok: false as const, status: 503, message: '未配置触发令牌' };
+      enqueue: async () => {
+        calls += 1;
+        return { ok: false, message: '未配置数据库' };
       },
-      dispatchProxyTest: async () => ({ ok: true as const, dispatchedAt: new Date(NOW).toISOString() }),
+      dispatchNext: async () => ({ dispatched: false, message: '跳过' }),
     };
     await runScheduler(fakeEnv(kv), NOW, deps);
     const state = JSON.parse(kv.map.get(SCHEDULER_STATE_KEY) ?? '{}');
-    expect(state.probe).toEqual({ at: new Date(NOW).toISOString(), ok: false, error: '未配置触发令牌' });
+    expect(state.probe).toEqual({ at: new Date(NOW).toISOString(), ok: false, error: '未配置数据库' });
     await runScheduler(fakeEnv(kv), NOW + 5 * 60_000, deps);
-    expect(probe).toBe(1);
+    expect(calls).toBe(3);
+  });
+
+  it('自动发现按自己的间隔独立触发', async () => {
+    const kv = fakeKv();
+    const c = collector();
+    const deps = {
+      ...c.deps,
+      settings: {
+        ...DEFAULT_SETTINGS,
+        probeIntervalHours: 24,
+        discoveryIntervalHours: 12,
+      },
+    };
+    await runScheduler(fakeEnv(kv), NOW, deps);
+    await runScheduler(fakeEnv(kv), NOW + 13 * HOUR, deps);
+    expect(c.types.filter((type) => type === 'discovery')).toHaveLength(2);
+    expect(c.types.filter((type) => type === 'probe')).toHaveLength(1);
   });
 });
 

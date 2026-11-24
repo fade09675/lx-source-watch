@@ -6,6 +6,7 @@ import {
   type EndpointRow,
   type EventItem,
   type PlatformDailyRow,
+  type RunMeta,
   type RunSummary,
   type Snapshot,
   type SourceStatus,
@@ -24,8 +25,19 @@ export interface WriteStats {
   candidates: number;
 }
 
+function deriveRunStatus(snapshot: Snapshot): 'success' | 'partial' | 'failed' {
+  const { total, available, partial, untested } = snapshot.summary;
+  if (total > 0 && available + partial === 0 && untested === 0) return 'failed';
+  if (snapshot.summary.unavailable > 0 || partial > 0 || untested > 0) return 'partial';
+  return 'success';
+}
+
 export async function alreadyIngested(db: D1Database, runId: string): Promise<boolean> {
-  const row = await db.prepare('SELECT 1 AS hit FROM runs WHERE run_id = ?').bind(runId).first<{ hit: number }>();
+  // 占位运行（派发时插入、status=running）不算已上报：真实上报要覆盖它并写明细。
+  const row = await db
+    .prepare("SELECT 1 AS hit FROM runs WHERE run_id = ? AND status <> 'running'")
+    .bind(runId)
+    .first<{ hit: number }>();
   return Boolean(row);
 }
 
@@ -77,23 +89,58 @@ export async function writeSnapshot(db: D1Database, input: {
   recent: Map<string, SourceStatus[]>;
   now?: string;
   retention?: RetentionOptions;
+  meta?: RunMeta;
 }): Promise<WriteStats> {
   const { snapshot, events, candidates, recent } = input;
+  const meta = input.meta;
   const now = input.now ?? new Date().toISOString();
   const day = toDay(snapshot.generatedAt);
+
+  const endpointsTotal = snapshot.sources.reduce((sum, source) => sum + source.endpoints.length, 0);
+  const endpointsOk = snapshot.sources.reduce(
+    (sum, source) => sum + source.endpoints.filter((endpoint) => endpoint.ok).length,
+    0,
+  );
+  const cnPlatforms = snapshot.sources.flatMap((source) => source.platforms).filter((platform) => platform.cn?.tested);
+  const cnTested = cnPlatforms.length;
+  const cnOk = cnPlatforms.filter((platform) => platform.cn?.ok).length;
+  const status = meta?.status ?? deriveRunStatus(snapshot);
+  const logKey = meta?.log ? `run:${snapshot.runId}:log` : null;
+  const candidatesAdded = meta?.counts?.candidatesAdded ?? candidates.length;
+  const candidatesPromoted = meta?.counts?.candidatesPromoted ?? 0;
 
   const statements: D1PreparedStatement[] = [];
 
   statements.push(
     db
       .prepare(
-        `INSERT INTO runs (run_id, generated_at, duration_ms, runner, check_scope, total, available, partial, unavailable, untested, platforms_ok, platforms_tested, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(run_id) DO NOTHING`,
+        `INSERT INTO runs (run_id, task_id, trigger, status, message, error, warnings, log_key, steps, generated_at, started_at, duration_ms, runner, check_scope, total, available, partial, unavailable, untested, platforms_ok, platforms_tested, endpoints_ok, endpoints_total, cn_tested, cn_ok, candidates_added, candidates_promoted, proxies_used, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(run_id) DO UPDATE SET
+           task_id = excluded.task_id, trigger = excluded.trigger, status = excluded.status,
+           message = excluded.message, error = excluded.error, warnings = excluded.warnings,
+           log_key = excluded.log_key, steps = excluded.steps, generated_at = excluded.generated_at,
+           started_at = excluded.started_at, duration_ms = excluded.duration_ms, runner = excluded.runner,
+           check_scope = excluded.check_scope, total = excluded.total, available = excluded.available,
+           partial = excluded.partial, unavailable = excluded.unavailable, untested = excluded.untested,
+           platforms_ok = excluded.platforms_ok, platforms_tested = excluded.platforms_tested,
+           endpoints_ok = excluded.endpoints_ok, endpoints_total = excluded.endpoints_total,
+           cn_tested = excluded.cn_tested, cn_ok = excluded.cn_ok,
+           candidates_added = excluded.candidates_added, candidates_promoted = excluded.candidates_promoted,
+           proxies_used = excluded.proxies_used`,
       )
       .bind(
         snapshot.runId,
+        meta?.taskId ?? null,
+        meta?.trigger ?? 'manual',
+        status,
+        meta?.message ?? '',
+        meta?.error ?? null,
+        JSON.stringify(meta?.warnings ?? []),
+        logKey,
+        JSON.stringify(meta?.steps ?? []),
         snapshot.generatedAt,
+        meta?.startedAt ?? null,
         snapshot.durationMs,
         snapshot.runner,
         snapshot.checkScope,
@@ -104,6 +151,13 @@ export async function writeSnapshot(db: D1Database, input: {
         snapshot.summary.untested,
         snapshot.summary.platformsOk,
         snapshot.summary.platformsTested,
+        endpointsOk,
+        endpointsTotal,
+        cnTested,
+        cnOk,
+        candidatesAdded,
+        candidatesPromoted,
+        meta?.counts?.proxiesUsed ?? 0,
         now,
       ),
   );
@@ -180,8 +234,8 @@ export async function writeSnapshot(db: D1Database, input: {
     statements.push(
       db
         .prepare(
-          `INSERT INTO source_runs (run_id, source_id, status, init_ok, init_error, ok, tested, total, duration_ms, checked_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO source_runs (run_id, source_id, status, init_ok, init_error, ok, tested, total, duration_ms, checked_at, version, script_sha, endpoints_ok, endpoints_total)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(run_id, source_id) DO NOTHING`,
         )
         .bind(
@@ -195,6 +249,10 @@ export async function writeSnapshot(db: D1Database, input: {
           source.stats.total,
           source.durationMs,
           source.checkedAt,
+          source.version ?? null,
+          source.scriptSha ?? null,
+          endpointsOk,
+          source.endpoints.length,
         ),
     );
 
@@ -391,6 +449,13 @@ interface RunRow {
   untested: number;
   platformsOk: number;
   platformsTested: number;
+  status?: string;
+  trigger?: string;
+  message?: string;
+  error?: string | null;
+  taskId?: string | null;
+  startedAt?: string | null;
+  logKey?: string | null;
 }
 
 function toRunSummary(row: RunRow): RunSummary {
@@ -405,10 +470,17 @@ function toRunSummary(row: RunRow): RunSummary {
     untested: row.untested,
     platformsOk: row.platformsOk,
     platformsTested: row.platformsTested,
+    status: row.status as RunSummary['status'],
+    trigger: row.trigger,
+    message: row.message,
+    error: row.error ?? null,
+    taskId: row.taskId ?? null,
+    startedAt: row.startedAt ?? null,
+    logKey: row.logKey ?? null,
   };
 }
 
-const RUN_COLUMNS = `run_id AS id, generated_at AS finishedAt, duration_ms AS durationMs, total, available, partial, unavailable, untested, platforms_ok AS platformsOk, platforms_tested AS platformsTested`;
+const RUN_COLUMNS = `run_id AS id, generated_at AS finishedAt, duration_ms AS durationMs, total, available, partial, unavailable, untested, platforms_ok AS platformsOk, platforms_tested AS platformsTested, status, trigger, message, error, task_id AS taskId, started_at AS startedAt, log_key AS logKey`;
 
 export async function getRuns(db: D1Database, limit = 50): Promise<RunSummary[]> {
   const rows = await db

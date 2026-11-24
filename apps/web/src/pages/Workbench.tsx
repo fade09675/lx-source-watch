@@ -5,56 +5,77 @@ import {
   formatDuration,
   formatRelative,
   type StatusEnvelope,
+  type RunSummary,
 } from '@lx/shared';
-import { ApiError, api, type UsageView, type WorkflowRunsResult, type WorkflowRunView } from '../api';
+import {
+  ApiError,
+  api,
+  type CreateTaskResult,
+  type SystemView,
+  type TaskListResult,
+  type TaskType,
+  type TaskView,
+  type UsageView,
+} from '../api';
 import { ErrorBox, Spinner } from '../components/Feedback';
 
-const ACTIVE = new Set(['queued', 'in_progress', 'waiting', 'requested', 'pending']);
+const TASK_TYPE_LABEL: Record<TaskType, string> = {
+  probe: '音源探测',
+  discovery: '自动发现',
+  'source-test': '单源测试',
+  'proxy-test': '代理测活',
+};
 
-const RUN_STATUS: Record<string, string> = {
+const TASK_STATUS_LABEL: Record<string, string> = {
   queued: '排队中',
-  in_progress: '运行中',
-  waiting: '等待中',
-  requested: '已请求',
-  pending: '等待中',
-  completed: '已完成',
-};
-
-const CONCLUSION: Record<string, string> = {
-  success: '成功',
-  failure: '失败',
+  running: '运行中',
+  succeeded: '成功',
+  failed: '失败',
   cancelled: '已取消',
-  skipped: '跳过',
-  timed_out: '超时',
-  action_required: '需处理',
 };
 
-function workflowLabel(workflow: string): string {
-  return workflow === 'proxy-test' ? '代理测活' : '音源探测';
-}
-
-function runDuration(run: WorkflowRunView): string {
-  const start = Date.parse(run.createdAt);
-  const end = Date.parse(run.updatedAt);
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return '—';
-  return formatDuration(end - start);
-}
-
-function nextProxyTestAt(now = new Date()): Date {
-  for (let day = 0; day < 8; day += 1) {
-    for (const hour of [0, 6, 12, 18]) {
-      const candidate = new Date(
-        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + day, hour, 23, 0, 0),
-      );
-      if (candidate.getTime() > now.getTime()) return candidate;
-    }
-  }
-  return new Date(now.getTime() + 6 * 3600_000);
-}
+const RUN_STATUS_LABEL: Record<string, string> = {
+  success: '成功',
+  partial: '部分成功',
+  failed: '失败',
+  running: '运行中',
+};
 
 function pct(value: number, max: number): number {
   if (!Number.isFinite(value) || max <= 0) return 0;
   return Math.max(2, Math.min(100, Math.round((value / max) * 100)));
+}
+
+function taskType(task: TaskView): string {
+  return TASK_TYPE_LABEL[task.type] ?? task.type;
+}
+
+function taskElapsed(task: TaskView): string {
+  const start = Date.parse(task.startedAt ?? task.createdAt);
+  const end = task.finishedAt ? Date.parse(task.finishedAt) : Date.now();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return '—';
+  return formatDuration(end - start);
+}
+
+function runStatus(run: RunSummary): string {
+  if (run.status) return run.status;
+  if (run.available > 0 && run.partial === 0 && run.unavailable === 0 && run.untested === 0) return 'success';
+  if (run.available > 0 || run.partial > 0) return 'partial';
+  return 'failed';
+}
+
+function runTone(status: string): string {
+  if (status === 'success') return 'ok';
+  if (status === 'partial' || status === 'running') return 'warn';
+  return 'bad';
+}
+
+function triggerLabel(trigger?: string): string {
+  if (trigger === 'schedule') return '定时';
+  if (trigger === 'manual') return '手动';
+  if (trigger === 'retry') return '重试';
+  if (trigger === 'local') return '本地';
+  return trigger ?? '—';
 }
 
 function usageCards(usage: UsageView) {
@@ -93,23 +114,29 @@ function usageCards(usage: UsageView) {
 export function WorkbenchPage() {
   const [status, setStatus] = useState<StatusEnvelope | null>(null);
   const [usage, setUsage] = useState<UsageView | null>(null);
-  const [workflows, setWorkflows] = useState<WorkflowRunsResult | null>(null);
+  const [system, setSystem] = useState<SystemView | null>(null);
+  const [tasks, setTasks] = useState<TaskListResult | null>(null);
+  const [runs, setRuns] = useState<RunSummary[]>([]);
   const [error, setError] = useState('');
   const [action, setAction] = useState('');
-  const [busy, setBusy] = useState<'probe' | 'proxy' | 'discovery' | 'usage' | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
   const load = useCallback(async () => {
     setError('');
     try {
-      const [statusResult, usageResult, workflowResult] = await Promise.all([
+      const [statusResult, usageResult, systemResult, taskResult, runResult] = await Promise.all([
         api.status(),
         api.usage(),
-        api.workflows(),
+        api.system(),
+        api.tasks(undefined, 40),
+        api.snapshots(12),
       ]);
       setStatus(statusResult);
       setUsage(usageResult.usage);
-      setWorkflows(workflowResult);
+      setSystem(systemResult);
+      setTasks(taskResult);
+      setRuns(runResult.runs);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '加载工作台失败');
     } finally {
@@ -121,21 +148,63 @@ export function WorkbenchPage() {
     void load();
   }, [load]);
 
-  async function run(kind: 'probe' | 'proxy' | 'discovery') {
-    setBusy(kind);
+  async function runTask(type: TaskType) {
+    setBusy(type);
     setAction('');
     try {
-      const result =
-        kind === 'probe'
-          ? await api.runProbe({ limit: '3', preferMirror: true })
-          : kind === 'proxy'
-            ? await api.runProxyTest({})
-            : await api.runDiscovery();
-      const label = kind === 'probe' ? '音源探测' : kind === 'proxy' ? '代理测活' : '自动发现';
-      setAction(`已触发${label}（${formatDateTime(result.dispatchedAt)}），约 1–2 分钟后刷新可看到状态。`);
-      window.setTimeout(() => void load(), 4000);
+      const payload =
+        type === 'probe'
+          ? { preferMirror: true }
+          : type === 'discovery'
+            ? { preferMirror: true, concurrency: 1 }
+            : {};
+      const result: CreateTaskResult = await api.createTask({ type, payload });
+      const message = result.dispatch.dispatched
+        ? `已派发${TASK_TYPE_LABEL[type]}任务，约 1–2 分钟后刷新可看到结果。`
+        : `任务已入队：${result.dispatch.message ?? '等待派发'}`;
+      setAction(message);
+      window.setTimeout(() => void load(), 3000);
     } catch (err) {
-      setAction(err instanceof ApiError ? err.message : '触发失败');
+      setAction(err instanceof ApiError ? err.message : '创建任务失败');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function cancel(task: TaskView) {
+    setBusy(task.id);
+    try {
+      await api.cancelTask(task.id);
+      setAction(`已取消${taskType(task)}任务。`);
+      await load();
+    } catch (err) {
+      setAction(err instanceof ApiError ? err.message : '取消失败');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function dispatchQueued() {
+    setBusy('dispatch');
+    try {
+      const result = await api.dispatchTasks();
+      setAction(result.dispatched ? '已派发一个排队任务。' : result.message ?? '当前没有可派发的任务。');
+      await load();
+    } catch (err) {
+      setAction(err instanceof ApiError ? err.message : '派发失败');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function reap() {
+    setBusy('reap');
+    try {
+      const result = await api.reapTasks();
+      setAction(result.reaped > 0 ? `已清理 ${result.reaped} 个卡死任务。` : '没有卡死任务。');
+      await load();
+    } catch (err) {
+      setAction(err instanceof ApiError ? err.message : '清理失败');
     } finally {
       setBusy(null);
     }
@@ -156,13 +225,10 @@ export function WorkbenchPage() {
   }
 
   const summary = status?.snapshot.summary;
-  const running = (workflows?.runs ?? []).filter((run) => ACTIVE.has(run.status));
-  const finished = (workflows?.runs ?? []).filter((run) => !ACTIVE.has(run.status)).slice(0, 8);
-  const scheduler = workflows?.scheduler;
-  const nextProbe = scheduler?.probe.nextAt ?? status?.snapshot.nextCheckAt;
-  const proxyNext = scheduler?.proxyTest.nextAt ?? nextProxyTestAt().toISOString();
-  const probeInterval = scheduler?.probe.intervalHours ?? 4;
-  const proxyInterval = scheduler?.proxyTest.intervalHours ?? 6;
+  const counts = tasks?.counts ?? { queued: 0, running: 0, succeeded: 0, failed: 0, cancelled: 0 };
+  const running = tasks?.state.running ?? [];
+  const queued = tasks?.state.queued ?? [];
+  const scheduler = system?.scheduler;
 
   return (
     <div className="page">
@@ -170,11 +236,18 @@ export function WorkbenchPage() {
         <div>
           <span className="eyebrow">WORKBENCH</span>
           <h1>工作台</h1>
-          <p className="muted">任务状态、最近运行和额度用量都在这页；Worker 每 5 分钟检查是否到点，探测和测活由 GitHub Actions 执行。</p>
+          <p className="muted">
+            所有会派发 Actions 的操作都先建任务；Worker 每 5 分钟检查一次，到点后按队列依次派发。
+          </p>
         </div>
-        <button type="button" className="ghost-button" onClick={() => void load()} disabled={!loaded}>
-          刷新
-        </button>
+        <div className="page-actions">
+          <button type="button" className="ghost-button" onClick={() => void dispatchQueued()} disabled={busy !== null}>
+            {busy === 'dispatch' ? '派发中…' : '派发排队任务'}
+          </button>
+          <button type="button" className="ghost-button" onClick={() => void load()} disabled={!loaded}>
+            刷新
+          </button>
+        </div>
       </div>
 
       {error && <ErrorBox message={error} />}
@@ -210,7 +283,35 @@ export function WorkbenchPage() {
       )}
 
       <section>
-        <h2>任务中心</h2>
+        <div className="panel-head">
+          <h2>任务中心</h2>
+          <span className="muted small">
+            运行 {counts.running} · 排队 {counts.queued} · 成功 {counts.succeeded} · 失败 {counts.failed}
+          </span>
+        </div>
+
+        <div className="task-actions">
+          <button type="button" className="primary-button" onClick={() => void runTask('probe')} disabled={busy !== null}>
+            {busy === 'probe' ? '创建中…' : '立即探测'}
+          </button>
+          <button type="button" className="ghost-button" onClick={() => void runTask('proxy-test')} disabled={busy !== null}>
+            {busy === 'proxy-test' ? '创建中…' : '立即测活'}
+          </button>
+          <button type="button" className="ghost-button" onClick={() => void runTask('discovery')} disabled={busy !== null}>
+            {busy === 'discovery' ? '创建中…' : '立即发现'}
+          </button>
+          <button type="button" className="ghost-button" onClick={() => void reap()} disabled={busy !== null}>
+            清理卡死
+          </button>
+        </div>
+
+        {summary && (
+          <p className="muted small">
+            最新快照：{summary.available} 可用 / {summary.partial} 部分 / {summary.unavailable} 失效 / {summary.untested} 未测，
+            共 {summary.total} 源；平台通过 {summary.platformsOk}/{summary.platformsTested}。
+          </p>
+        )}
+
         <div className="task-grid">
           <div className="panel task-panel">
             <div className="panel-head">
@@ -218,85 +319,117 @@ export function WorkbenchPage() {
               <span className="muted">{running.length > 0 ? `${running.length} 个` : '空闲'}</span>
             </div>
             {running.length === 0 ? (
-              <p className="muted">当前没有排队或运行中的任务。</p>
+              <p className="muted">当前没有运行中的任务。</p>
             ) : (
               <ul className="task-list">
-                {running.map((run) => (
-                  <li key={run.id}>
-                    <span className="pill run-in_progress">{RUN_STATUS[run.status] ?? run.status}</span>
-                    <div className="task-main">
-                      <strong>{workflowLabel(run.workflow)}</strong>
-                      <span className="muted">
-                        {run.event === 'workflow_dispatch' ? '手动触发' : run.event === 'schedule' ? '定时触发' : run.event} ·{' '}
-                        {formatRelative(run.createdAt)}
-                      </span>
-                    </div>
-                    {run.url && (
-                      <a href={run.url} target="_blank" rel="noreferrer">
-                        日志
-                      </a>
-                    )}
-                  </li>
-                ))}
+                {running.map((task) => {
+                  const percent = task.progress.total > 0 ? Math.round((task.progress.done / task.progress.total) * 100) : 0;
+                  return (
+                    <li key={task.id}>
+                      <span className="pill run-in_progress">{TASK_STATUS_LABEL[task.status] ?? task.status}</span>
+                      <div className="task-main">
+                        <strong>{taskType(task)}</strong>
+                        <span className="muted">
+                          {task.message || '已派发，等待 Actions 开始'} · {taskElapsed(task)}
+                        </span>
+                        {task.progress.total > 0 && (
+                          <div className="meter">
+                            <span style={{ width: `${percent}%` }} />
+                          </div>
+                        )}
+                      </div>
+                      <div className="task-side">
+                        {task.runId && <Link to={`/runs/${task.runId}`}>运行记录</Link>}
+                        <button type="button" className="link-button danger" onClick={() => void cancel(task)} disabled={busy !== null}>
+                          取消
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>
 
           <div className="panel task-panel">
             <div className="panel-head">
-              <h3>定时计划</h3>
-              <span className="muted">Worker 定时</span>
+              <h3>排队中</h3>
+              <span className="muted">{queued.length > 0 ? `${queued.length} 个` : '空'}</span>
             </div>
-            <div className="schedule-list">
-              <div className="schedule-item">
-                <div>
-                  <strong>音源探测</strong>
-                  <span className="muted">
-                    每 {probeInterval} 小时
-                    {nextProbe ? ` · 下次 ${formatDateTime(nextProbe)}` : ' · 马上触发'}
-                    {summary ? ` · 上轮 ${summary.available} 可用 / ${summary.total} 源` : ''}
-                  </span>
-                  {scheduler?.probe.lastOk === false && scheduler.probe.lastError && (
-                    <span className="text-bad small">上次触发失败：{scheduler.probe.lastError}</span>
-                  )}
-                </div>
-                <button type="button" className="primary-button" onClick={() => void run('probe')} disabled={busy !== null}>
-                  {busy === 'probe' ? '触发中…' : '立即运行'}
-                </button>
+            {queued.length === 0 ? (
+              <p className="muted">队列为空。</p>
+            ) : (
+              <ul className="task-list">
+                {queued.map((task) => (
+                  <li key={task.id}>
+                    <span className="pill run-queued">P{task.priority}</span>
+                    <div className="task-main">
+                      <strong>{taskType(task)}</strong>
+                      <span className="muted">
+                        {task.source === 'schedule' ? '定时入队' : '手动入队'} · {formatRelative(task.createdAt)}
+                        {task.payload.limit ? ` · 最多 ${task.payload.limit} 源` : ''}
+                      </span>
+                    </div>
+                    <div className="task-side">
+                      <button type="button" className="link-button danger" onClick={() => void cancel(task)} disabled={busy !== null}>
+                        取消
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+
+        <div className="panel task-panel">
+          <div className="panel-head">
+            <h3>定时计划</h3>
+            <span className="muted small">Worker 定时</span>
+          </div>
+          <div className="schedule-list">
+            <div className="schedule-item">
+              <div>
+                <strong>音源探测</strong>
+                <span className="muted">
+                  {scheduler?.probe.enabled === false ? '已关闭' : `每 ${scheduler?.probe.intervalHours ?? 4} 小时`}
+                  {scheduler?.probe.nextAt ? ` · 下次 ${formatDateTime(scheduler.probe.nextAt)}` : ''}
+                  {summary ? ` · 上轮 ${summary.available}/${summary.total} 可用` : ''}
+                </span>
+                {scheduler?.probe.lastOk === false && scheduler.probe.lastError && (
+                  <span className="text-bad small">上次入队失败：{scheduler.probe.lastError}</span>
+                )}
               </div>
-              <div className="schedule-item">
-                <div>
-                  <strong>自动发现</strong>
-                  <span className="muted">
-                    {scheduler?.discovery?.enabled === false
-                      ? '已关闭'
-                      : `每 ${scheduler?.discovery?.intervalHours ?? 12} 小时 · 下次 ${
-                          scheduler?.discovery?.nextAt ? formatDateTime(scheduler.discovery.nextAt) : '待定'
-                        }`}
-                  </span>
-                  {scheduler?.discovery?.lastError && <span className="text-bad small">上次失败：{scheduler.discovery.lastError}</span>}
-                </div>
-                <button type="button" className="ghost-button" onClick={() => void run('discovery')} disabled={busy !== null}>
-                  {busy === 'discovery' ? '触发中…' : '立即发现'}
-                </button>
+            </div>
+            <div className="schedule-item">
+              <div>
+                <strong>自动发现</strong>
+                <span className="muted">
+                  {scheduler?.discovery?.enabled === false
+                    ? '已关闭'
+                    : `每 ${scheduler?.discovery?.intervalHours ?? 12} 小时`}
+                  {scheduler?.discovery?.nextAt ? ` · 下次 ${formatDateTime(scheduler.discovery.nextAt)}` : ''}
+                </span>
+                {scheduler?.discovery?.lastOk === false && scheduler.discovery.lastError && (
+                  <span className="text-bad small">上次入队失败：{scheduler.discovery.lastError}</span>
+                )}
               </div>
-              <div className="schedule-item">
-                <div>
-                  <strong>代理测活</strong>
-                  <span className="muted">
-                    每 {proxyInterval} 小时 · 下次 {formatDateTime(proxyNext)}
-                  </span>
-                  {scheduler?.proxyTest.lastOk === false && scheduler.proxyTest.lastError && (
-                    <span className="text-bad small">上次触发失败：{scheduler.proxyTest.lastError}</span>
-                  )}
-                </div>
-                <button type="button" className="ghost-button" onClick={() => void run('proxy')} disabled={busy !== null}>
-                  {busy === 'proxy' ? '触发中…' : '立即测活'}
-                </button>
+            </div>
+            <div className="schedule-item">
+              <div>
+                <strong>代理测活</strong>
+                <span className="muted">
+                  {scheduler?.proxyTest.enabled === false ? '已关闭' : `每 ${scheduler?.proxyTest.intervalHours ?? 6} 小时`}
+                  {scheduler?.proxyTest.nextAt ? ` · 下次 ${formatDateTime(scheduler.proxyTest.nextAt)}` : ''}
+                </span>
+                {scheduler?.proxyTest.lastOk === false && scheduler.proxyTest.lastError && (
+                  <span className="text-bad small">上次入队失败：{scheduler.proxyTest.lastError}</span>
+                )}
               </div>
             </div>
           </div>
         </div>
+
         {action && <div className="form-message">{action}</div>}
       </section>
 
@@ -304,65 +437,57 @@ export function WorkbenchPage() {
         <div className="panel-head">
           <h2>最近运行</h2>
           <div className="panel-links">
-            <Link to="/runs">快照运行记录</Link>
+            <Link to="/runs">全部运行</Link>
             <a href="https://github.com/fade09675/lx-source-watch/actions" target="_blank" rel="noreferrer">
-              全部运行
+              GitHub Actions
             </a>
           </div>
         </div>
-        {!workflows ? (
-          <Spinner />
-        ) : finished.length === 0 ? (
-          <p className="muted">暂时没有已完成的运行记录。</p>
+        {runs.length === 0 ? (
+          <p className="muted">还没有运行记录。</p>
         ) : (
           <div className="table-wrap">
             <table className="data-table run-table">
               <thead>
                 <tr>
-                  <th>工作流</th>
+                  <th>时间</th>
                   <th>状态</th>
                   <th>触发</th>
-                  <th>开始</th>
+                  <th>源</th>
+                  <th>平台</th>
                   <th>耗时</th>
-                  <th>结果</th>
                   <th />
                 </tr>
               </thead>
               <tbody>
-                {finished.map((run) => (
-                  <tr key={run.id}>
-                    <td>{workflowLabel(run.workflow)}</td>
-                    <td>
-                      <span className={`pill run-${run.status}`}>{RUN_STATUS[run.status] ?? run.status}</span>
-                    </td>
-                    <td className="muted">
-                      {run.event === 'workflow_dispatch' ? '手动' : run.event === 'schedule' ? '定时' : run.event}
-                    </td>
-                    <td className="muted">{formatDateTime(run.createdAt)}</td>
-                    <td className="mono">{runDuration(run)}</td>
-                    <td>
-                      <span className={run.conclusion === 'success' ? 'text-ok' : 'text-bad'}>
-                        {run.conclusion ? (CONCLUSION[run.conclusion] ?? run.conclusion) : '—'}
-                      </span>
-                    </td>
-                    <td>
-                      {run.url && (
-                        <a href={run.url} target="_blank" rel="noreferrer">
-                          日志
-                        </a>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {runs.map((run) => {
+                  const state = runStatus(run);
+                  return (
+                    <tr key={run.id}>
+                      <td className="muted">{formatDateTime(run.finishedAt)}</td>
+                      <td>
+                        <span className={`pill tone-${runTone(state)}`}>{RUN_STATUS_LABEL[state] ?? state}</span>
+                      </td>
+                      <td className="muted">{triggerLabel(run.trigger)}</td>
+                      <td>
+                        <span className="text-ok">{run.available}</span> / {run.partial} /{' '}
+                        <span className="text-bad">{run.unavailable}</span> / {run.untested}
+                        <span className="muted small">（共 {run.total}）</span>
+                      </td>
+                      <td className="mono">
+                        {run.platformsOk}/{run.platformsTested}
+                      </td>
+                      <td className="mono">{formatDuration(run.durationMs)}</td>
+                      <td>
+                        <Link to={`/runs/${run.id}`}>{run.logKey ? '日志' : '详情'}</Link>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
-        {workflows?.errors?.map((item) => (
-          <p className="muted" key={item}>
-            {item}
-          </p>
-        ))}
       </section>
     </div>
   );

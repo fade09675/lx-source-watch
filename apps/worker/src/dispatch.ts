@@ -17,6 +17,9 @@ export interface ProbeDispatchInput {
   discover?: boolean;
   /** 强制国内补测使用指定代理节点；留空则自动挑选。 */
   proxyId?: string;
+  /** 关联的任务 id 与预分配的运行 id。 */
+  taskId?: string;
+  runId?: string;
 }
 
 export type DispatchResult =
@@ -74,6 +77,8 @@ export async function dispatchProbe(env: Env, input: ProbeDispatchInput): Promis
     cn: input.cn === false ? 'false' : 'true',
     discover: input.discover ? 'true' : 'false',
     proxy_id: clean(input.proxyId, 64),
+    task_id: clean(input.taskId, 64),
+    run_id: clean(input.runId, 64),
   });
 }
 

@@ -12,6 +12,7 @@ import {
 } from '@lx/shared';
 import { ApiError, api, type RunDetailResult } from '../api';
 import { ErrorBox, Spinner } from '../components/Feedback';
+import { RunLog } from '../components/RunLog';
 
 function errorLabel(kind: string | null): string {
   if (!kind) return '未知';
@@ -166,6 +167,8 @@ export function RunDetailPage() {
           </div>
         )}
       </section>
+
+      <RunLog runId={run.id} />
 
       <section>
         <div className="panel-head">

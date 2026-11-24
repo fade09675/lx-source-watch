@@ -7,9 +7,12 @@ import { diffEvents } from './events';
 import { verifySignature } from './hmac';
 import { mergeSnapshot } from './merge';
 import { loadSettings } from './settings';
+import { completeTaskForRun, dispatchNext, refreshTaskState } from './tasks';
 import { recordKvPut } from './usage';
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
+/** 运行日志与明细同寿命，由 KV TTL 自动清理，避免额外删除请求。 */
+const LOG_TTL_SECONDS = 14 * 24 * 3600;
 
 type Ctx = Context<{ Bindings: Env }>;
 
@@ -66,15 +69,26 @@ export async function handleIngest(c: Ctx): Promise<Response> {
     return fail(400, 'bad_payload', `载荷不合法：${issue?.path.join('.') ?? ''} ${issue?.message ?? ''}`.trim());
   }
 
-  const { snapshot, candidates = [] } = parsed.data;
+  const { snapshot, candidates = [], meta } = parsed.data;
   const now = new Date().toISOString();
 
   if (await alreadyIngested(env.DB, snapshot.runId)) {
     // 幂等：重复上报只刷新 KV 展示层，不再写明细。
     const prev = await readPrev(env);
     const merged = mergeSnapshot(prev, snapshot);
+    if (meta?.log) {
+      await recordKvPut(env);
+      await env.SNAPSHOT.put(`run:${snapshot.runId}:log`, meta.log, { expirationTtl: LOG_TTL_SECONDS });
+    }
     await recordKvPut(env);
     await env.SNAPSHOT.put(SNAPSHOT_KEY, JSON.stringify(merged));
+    await completeTaskForRun(env, snapshot.runId);
+    try {
+      await dispatchNext(env);
+    } catch {
+      // 队列派发失败不影响本次上报结果。
+    }
+    await refreshTaskState(env);
     return Response.json({ ok: true, duplicate: true, runId: snapshot.runId, sources: merged.sources.length });
   }
 
@@ -96,6 +110,7 @@ export async function handleIngest(c: Ctx): Promise<Response> {
     candidates,
     recent,
     now,
+    meta,
     retention: {
       detailDays: settings.retentionDetailDays,
       dailyDays: settings.retentionDailyDays,
@@ -103,11 +118,23 @@ export async function handleIngest(c: Ctx): Promise<Response> {
     },
   });
 
+  if (meta?.log) {
+    await recordKvPut(env);
+    await env.SNAPSHOT.put(`run:${snapshot.runId}:log`, meta.log, { expirationTtl: LOG_TTL_SECONDS });
+  }
+
   // 无人值守收录：初始化通过的新候选自动进入正式清单（数量受设置限制）。
   const promotion = await autoPromoteCandidates(env, now);
 
   await recordKvPut(env);
   await env.SNAPSHOT.put(SNAPSHOT_KEY, JSON.stringify(merged));
+  await completeTaskForRun(env, snapshot.runId);
+  try {
+    await dispatchNext(env);
+  } catch {
+    // 队列派发失败不影响本次上报结果。
+  }
+  await refreshTaskState(env);
 
   return Response.json({
     ok: true,

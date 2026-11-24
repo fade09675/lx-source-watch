@@ -49,6 +49,8 @@ export interface ProbeOptions {
   repoRoot?: string;
   rawBase?: string;
   repoVars?: { version?: string; author?: string; description?: string; expire?: string };
+  /** 由任务系统预分配的运行 id；本地直接跑时自动生成。 */
+  runId?: string;
 }
 
 export interface ProbeOutput {
@@ -191,7 +193,7 @@ export async function runProbe(opts: ProbeOptions): Promise<ProbeOutput> {
   const generatedAt = nowIso();
   const snapshot: Snapshot = {
     schemaVersion: SCHEMA_VERSION,
-    runId: randomId(6),
+    runId: opts.runId ?? randomId(6),
     generatedAt,
     nextCheckAt: nextCheckAt(generatedAt, INTERVAL_HOURS),
     intervalHours: INTERVAL_HOURS,

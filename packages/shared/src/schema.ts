@@ -162,10 +162,50 @@ export const CandidateFileSchema = z.object({
 });
 export type CandidateFile = z.infer<typeof CandidateFileSchema>;
 
+export const RunStepSchema = z.object({
+  key: z.string().min(1).max(40),
+  label: z.string().min(1).max(80),
+  status: z.enum(['pending', 'running', 'success', 'skipped', 'failed']),
+  startedAt: isoDateTime.optional(),
+  finishedAt: isoDateTime.optional(),
+  durationMs: z.number().int().nonnegative().optional(),
+  message: z.string().max(500).optional(),
+});
+export type RunStep = z.infer<typeof RunStepSchema>;
+
+export const RunCountsSchema = z.object({
+  endpointsOk: z.number().int().nonnegative().default(0),
+  endpointsTotal: z.number().int().nonnegative().default(0),
+  cnTested: z.number().int().nonnegative().default(0),
+  cnOk: z.number().int().nonnegative().default(0),
+  candidatesAdded: z.number().int().nonnegative().default(0),
+  candidatesPromoted: z.number().int().nonnegative().default(0),
+  proxiesUsed: z.number().int().nonnegative().default(0),
+});
+export type RunCounts = z.infer<typeof RunCountsSchema>;
+
+export const RunMetaSchema = z.object({
+  taskId: z.string().min(1).max(64).optional(),
+  trigger: z.enum(['schedule', 'manual', 'retry', 'local']).default('manual'),
+  /** 不传时由 Worker 按快照结果推导。 */
+  status: z.enum(['success', 'partial', 'failed']).optional(),
+  startedAt: isoDateTime.optional(),
+  message: z.string().max(500).default(''),
+  error: z.string().max(1000).optional(),
+  warnings: z.array(z.string().max(300)).max(50).default([]),
+  steps: z.array(RunStepSchema).max(30).default([]),
+  /** 本次运行的完整日志（通常几十 KB），由 Worker 写入 KV。 */
+  log: z.string().max(200_000).optional(),
+  counts: RunCountsSchema.optional(),
+});
+export type RunMeta = z.infer<typeof RunMetaSchema>;
+
 export const IngestPayloadSchema = z.object({
   snapshot: SnapshotSchema,
   /** 自动发现的新候选，只做静态元数据 + init 结果，不影响公开状态。 */
   candidates: z.array(CandidateSchema).max(200).optional(),
+  /** 任务、触发方式、步骤与日志；旧版 runner 可省略。 */
+  meta: RunMetaSchema.optional(),
 });
 export type IngestPayload = z.infer<typeof IngestPayloadSchema>;
 
@@ -310,6 +350,14 @@ export interface RunSummary {
   untested: number;
   platformsOk: number;
   platformsTested: number;
+  /** 1A 起写入；旧数据可能为空。 */
+  status?: 'success' | 'partial' | 'failed' | 'running';
+  trigger?: string;
+  message?: string;
+  error?: string | null;
+  taskId?: string | null;
+  startedAt?: string | null;
+  logKey?: string | null;
 }
 
 export interface EventItem {

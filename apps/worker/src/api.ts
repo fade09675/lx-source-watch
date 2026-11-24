@@ -57,6 +57,21 @@ import {
 import { getSchedulerStatus } from './scheduler';
 import { autoPromoteCandidates, promoteCandidate } from './candidatePromotion';
 import { loadSettings, resetSettings, saveSettings } from './settings';
+import {
+  cancelTask,
+  createTask,
+  dispatchNext,
+  getTask,
+  getTaskState,
+  listTasks,
+  reapStaleTasks,
+  refreshTaskState,
+  TASK_STATUS_LABEL,
+  TASK_TYPE_LABEL,
+  type TaskPayload,
+  type TaskStatus,
+  type TaskType,
+} from './tasks';
 
 type Ctx = { Bindings: Env };
 
@@ -406,6 +421,28 @@ export function createApi(): Hono<Ctx> {
     );
   });
 
+  // 运行日志：runner 在上报的 meta.log 里带上来，存 KV，详情页内嵌展示。
+  api.get('/admin/snapshots/:runId/log', async (c) => {
+    const runId = c.req.param('runId');
+    const run = await getRun(c.env.DB, runId);
+    if (!run) {
+      return Response.json(
+        { error: 'not_found', message: `未知运行记录：${runId}` },
+        { status: 404, headers: { 'cache-control': CACHE_PRIVATE } },
+      );
+    }
+    const log = await c.env.SNAPSHOT.get(`run:${runId}:log`);
+    return Response.json(
+      {
+        runId,
+        available: Boolean(log),
+        log: log ?? '',
+        bytes: log ? new TextEncoder().encode(log).byteLength : 0,
+      },
+      { headers: { 'cache-control': 'private, max-age=30' } },
+    );
+  });
+
   // 最近 N 天的失败聚合：按错误类型 / 平台 / 源统计，只算真正测过的。
   api.get('/admin/failures', async (c) => {
     const raw = Number(c.req.query('days') ?? 7);
@@ -629,6 +666,93 @@ export function createApi(): Hono<Ctx> {
       { ok: true, sourceId: id, dispatchedAt: outcome.dispatchedAt },
       { headers: { 'cache-control': CACHE_PRIVATE } },
     );
+  });
+
+  const TASK_TYPES: TaskType[] = ['probe', 'discovery', 'source-test', 'proxy-test'];
+  const TASK_STATUSES: TaskStatus[] = ['queued', 'running', 'succeeded', 'failed', 'cancelled'];
+
+  api.get('/admin/tasks', async (c) => {
+    const status = c.req.query('status');
+    const type = c.req.query('type');
+    if (status && !TASK_STATUSES.includes(status as TaskStatus)) {
+      return Response.json({ error: 'bad_status', message: `未知任务状态：${status}` }, { status: 400 });
+    }
+    if (type && !TASK_TYPES.includes(type as TaskType)) {
+      return Response.json({ error: 'bad_type', message: `未知任务类型：${type}` }, { status: 400 });
+    }
+    const limit = clampInt(c.req.query('limit'), 50, 1, 200);
+    const [tasks, state] = await Promise.all([
+      listTasks(c.env.DB, { status: status as TaskStatus | undefined, type: type as TaskType | undefined, limit }),
+      getTaskState(c.env.DB),
+    ]);
+    return Response.json(
+      {
+        tasks,
+        counts: state.counts,
+        state,
+        labels: { types: TASK_TYPE_LABEL, statuses: TASK_STATUS_LABEL },
+      },
+      { headers: { 'cache-control': CACHE_PRIVATE } },
+    );
+  });
+
+  api.post('/admin/tasks', async (c) => {
+    const body = (await c.req.json().catch(() => null)) as {
+      type?: string;
+      payload?: TaskPayload;
+      priority?: number;
+    } | null;
+    if (!body?.type || !TASK_TYPES.includes(body.type as TaskType)) {
+      return Response.json(
+        { error: 'bad_type', message: `任务类型必须是：${TASK_TYPES.join(' / ')}` },
+        { status: 400, headers: { 'cache-control': CACHE_PRIVATE } },
+      );
+    }
+    const type = body.type as TaskType;
+    const payload = body.payload ?? {};
+    if (type === 'source-test' && !payload.only) {
+      return Response.json(
+        { error: 'bad_payload', message: '单源测试需要 payload.only' },
+        { status: 400, headers: { 'cache-control': CACHE_PRIVATE } },
+      );
+    }
+    const task = await createTask(c.env.DB, {
+      type,
+      payload,
+      priority: body.priority,
+      source: 'manual',
+    });
+    const dispatch = await dispatchNext(c.env);
+    const state = await refreshTaskState(c.env);
+    const latest = (await getTask(c.env.DB, task.id)) ?? task;
+    return Response.json(
+      { ok: true, task: latest, dispatch, state },
+      { headers: { 'cache-control': CACHE_PRIVATE } },
+    );
+  });
+
+  api.post('/admin/tasks/dispatch', async (c) => {
+    const dispatch = await dispatchNext(c.env);
+    const state = await refreshTaskState(c.env);
+    return Response.json({ ...dispatch, state }, { headers: { 'cache-control': CACHE_PRIVATE } });
+  });
+
+  api.post('/admin/tasks/reap', async (c) => {
+    const reaped = await reapStaleTasks(c.env);
+    const state = await refreshTaskState(c.env);
+    return Response.json({ ok: true, reaped, state }, { headers: { 'cache-control': CACHE_PRIVATE } });
+  });
+
+  api.post('/admin/tasks/:id/cancel', async (c) => {
+    const task = await cancelTask(c.env, c.req.param('id'));
+    if (!task) {
+      return Response.json(
+        { error: 'not_found', message: '任务不存在或已结束' },
+        { status: 404, headers: { 'cache-control': CACHE_PRIVATE } },
+      );
+    }
+    const state = await refreshTaskState(c.env);
+    return Response.json({ ok: true, task, state }, { headers: { 'cache-control': CACHE_PRIVATE } });
   });
 
   api.get('/config/sources', async (c) => {

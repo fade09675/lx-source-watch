@@ -80,12 +80,14 @@ describe('probe.yml', () => {
     const step = namedStep(doc.jobs.probe, '探测');
     expect(step.run).toContain('pnpm probe');
     expect(step.run).toContain('--concurrency "${INPUT_CONCURRENCY:-4}"');
+    expect(step.run).toContain('tee out/run.log');
     expect(Object.keys(step.env ?? {}).sort()).toEqual([
       'INPUT_CONCURRENCY',
       'INPUT_DEEP',
       'INPUT_LIMIT',
       'INPUT_ONLY',
       'INPUT_PREFER_MIRROR',
+      'RUN_ID',
     ]);
   });
 
@@ -94,11 +96,13 @@ describe('probe.yml', () => {
     const upload = doc.jobs.probe.steps.find((s) => s.uses?.startsWith('actions/upload-artifact'));
     expect(upload?.with?.name).toBe('probe-result');
     expect(String(upload?.with?.path)).toContain('out/status.json');
+    expect(String(upload?.with?.path)).toContain('out/run.log');
 
     const publish = doc.jobs.publish;
     expect(publish.needs).toEqual(['probe', 'cn']);
     const downloads = publish.steps.filter((s) => s.uses?.startsWith('actions/download-artifact'));
     expect(downloads.map((step) => step.with?.name)).toEqual(['probe-result', 'cn-result', 'candidates-result']);
+    expect(namedStep(publish, '上报').run).toContain('--log out/run.log');
   });
 
   it('国内补测 job 不接触上报密钥，并缓存 mihomo 内核', async () => {
@@ -112,6 +116,9 @@ describe('probe.yml', () => {
 
     const cache = cn.steps.find((s) => s.uses?.startsWith('actions/cache'));
     expect(cache?.with?.key).toBe('mihomo-v1.19.9');
+
+    const cnUpload = cn.steps.find((s) => s.uses?.startsWith('actions/upload-artifact'));
+    expect(String(cnUpload?.with?.path)).toContain('out/cn.log');
 
     const download = cn.steps.find((s) => s.uses?.startsWith('actions/download-artifact'));
     expect(download?.with?.name).toBe('probe-result');

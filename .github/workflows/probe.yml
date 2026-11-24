@@ -43,6 +43,18 @@ on:
         required: false
         type: boolean
         default: false
+      task_id:
+        description: "任务系统：关联任务 id（由 Worker 传入）"
+        required: false
+        type: string
+      run_id:
+        description: "任务系统：预分配的运行 id（由 Worker 传入）"
+        required: false
+        type: string
+      trigger:
+        description: "任务系统：触发方式 schedule/manual/retry/local"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -102,14 +114,16 @@ jobs:
           INPUT_DEEP: ${{ inputs.deep }}
           INPUT_PREFER_MIRROR: ${{ inputs.prefer_mirror }}
           INPUT_CONCURRENCY: ${{ inputs.concurrency }}
+          RUN_ID: ${{ inputs.run_id }}
         run: |
           set -euo pipefail
           args=(--concurrency "${INPUT_CONCURRENCY:-4}")
+          if [ -n "${RUN_ID}" ]; then args+=(--run-id "${RUN_ID}"); fi
           if [ -n "${INPUT_ONLY}" ]; then args+=(--only "${INPUT_ONLY}"); fi
           if [ -n "${INPUT_LIMIT}" ]; then args+=(--limit "${INPUT_LIMIT}"); fi
           if [ "${INPUT_DEEP}" = "true" ]; then args+=(--deep); fi
           if [ "${INPUT_PREFER_MIRROR}" = "true" ]; then args+=(--prefer-mirror); fi
-          pnpm probe -- "${args[@]}"
+          pnpm probe -- "${args[@]}" 2>&1 | tee out/run.log
 
       - name: 校验产物
         run: pnpm validate
@@ -121,6 +135,7 @@ jobs:
           path: |
             out/status.json
             out/urls.json
+            out/run.log
           retention-days: 7
           if-no-files-found: error
 
@@ -182,7 +197,7 @@ jobs:
         run: |
           args=(--urls-in out/urls.json --out out/cn.json --endpoint "$INGEST_URL" --token "$RUNNER_TOKEN" --max-proxies 8 --concurrency 5)
           if [ -n "$PROXY_ID" ]; then args+=(--proxy-id "$PROXY_ID"); fi
-          pnpm cn -- "${args[@]}"
+          pnpm cn -- "${args[@]}" 2>&1 | tee out/cn.log
 
       - name: 未配置代理池
         if: env.RUNNER_TOKEN == ''
@@ -192,7 +207,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: cn-result
-          path: out/cn.json
+          path: |
+            out/cn.json
+            out/cn.log
           retention-days: 7
           if-no-files-found: ignore
 
@@ -247,13 +264,28 @@ jobs:
           path: out
         continue-on-error: true
 
+      - name: 合并运行日志
+        run: |
+          set -euo pipefail
+          touch out/run.log
+          if [ -f out/cn.log ]; then
+            printf '\n===== 国内补测 =====\n' >> out/run.log
+            cat out/cn.log >> out/run.log
+          fi
+
       - name: 上报
         if: env.INGEST_URL != ''
+        env:
+          TASK_ID: ${{ inputs.task_id }}
+          TRIGGER: ${{ inputs.trigger }}
         run: >-
           pnpm ingest --
           --snapshot out/status.json
           --cn out/cn.json
           --candidates out/candidates.json
+          --log out/run.log
+          --task-id "$TASK_ID"
+          --trigger "${TRIGGER:-manual}"
           --endpoint "$INGEST_URL"
           --secret "$INGEST_SECRET"
 

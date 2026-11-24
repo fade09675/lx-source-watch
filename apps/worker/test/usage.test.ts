@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../src/env';
-import { aggregateGithubRuns, collectCloudflare, collectGithub, pickStorageRow } from '../src/usage';
+import { aggregateGithubRuns, checkQuota, collectCloudflare, collectGithub, pickStorageRow } from '../src/usage';
 
 const TODAY = new Date().toISOString().slice(0, 10);
 const YESTERDAY = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
@@ -168,5 +168,44 @@ describe('collectCloudflare', () => {
     await expect(collectCloudflare({ CF_ANALYTICS_TOKEN: 't', CF_ACCOUNT_ID: 'a' } as Env, ['2026-11-23'])).rejects.toThrow(
       'not authorized',
     );
+  });
+});
+
+describe('checkQuota', () => {
+  const envWith = (writes: number, rowsWritten: number): Env => {
+    const snapshot = {
+      collectedAt: new Date().toISOString(),
+      kv: { day: TODAY, reads: 0, writes, lists: 0, deletes: 0, storageBytes: 0 },
+      d1: { day: TODAY, rowsRead: 0, rowsWritten },
+      github: { month: '2026-11', minutes: 0, runs: 0 },
+      history: [],
+    };
+    return {
+      SNAPSHOT: {
+        async get(key: string) {
+          return key === 'usage:state' ? JSON.stringify(snapshot) : null;
+        },
+        async put() {},
+      } as unknown as KVNamespace,
+    } as unknown as Env;
+  };
+
+  it('额度充足时允许派发', async () => {
+    const result = await checkQuota(envWith(10, 1000));
+    expect(result.ok).toBe(true);
+    expect(result.kvWrites).toBe(10);
+    expect(result.d1Writes).toBe(1000);
+  });
+
+  it('KV 写入接近上限时阻断', async () => {
+    const result = await checkQuota(envWith(930, 1000));
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain('KV 写入');
+  });
+
+  it('D1 写入接近上限时阻断', async () => {
+    const result = await checkQuota(envWith(10, 95_000));
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain('D1 写入');
   });
 });

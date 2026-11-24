@@ -126,6 +126,7 @@ probe:
   --prefer-mirror           下载脚本时先走镜像（国内网络建议开启）
   --config-url <url>        镜像模板接口（默认读 LX_CONFIG_URL，Actions 用 dash.dpdns.org）
   --mirror-timeout <ms>     镜像下载超时，默认 8000
+  --run-id <id>             任务系统预分配的运行 id（留空自动生成）
 
 discover:
   --config <path>           发现配置，默认 sources/discovery.json
@@ -162,6 +163,9 @@ publish:
   --candidates <path>       默认 out/candidates.json（存在才带）
   --endpoint <url>          默认读 INGEST_URL
   --secret <secret>         默认读 INGEST_SECRET
+  --task-id <id>            关联的任务 id
+  --trigger schedule|manual|retry|local  触发方式
+  --log <path>              运行日志文件（存在才上报）
   --dry-run                 只生成本地请求体
   --allow-private           允许上报到 127.0.0.1（仅本地联调）
 
@@ -191,6 +195,7 @@ async function cmdProbe(args: Args): Promise<void> {
     preferMirror: bool(args, 'prefer-mirror') || process.env.LX_PREFER_MIRROR === '1',
     configUrl: str(args, 'config-url') ?? process.env.LX_CONFIG_URL,
     mirrorTimeoutMs: num(args, 'mirror-timeout', 8_000),
+    runId: str(args, 'run-id') ?? process.env.LX_RUN_ID,
   });
 }
 
@@ -294,6 +299,14 @@ async function cmdPublish(args: Args): Promise<void> {
     endpoint,
     secret,
     dryRun,
+    taskId: str(args, 'task-id') ?? process.env.LX_TASK_ID,
+    trigger: (str(args, 'trigger') ?? process.env.LX_TRIGGER) as
+      | 'schedule'
+      | 'manual'
+      | 'retry'
+      | 'local'
+      | undefined,
+    logPath: str(args, 'log') ?? process.env.LX_RUN_LOG,
     allowPrivate: bool(args, 'allow-private') || process.env.INGEST_ALLOW_PRIVATE === '1',
   });
 }

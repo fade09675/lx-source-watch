@@ -268,6 +268,51 @@ export interface WorkflowRunsResult {
   scheduler?: SchedulerStatus;
 }
 
+/* ------------------------------- tasks ---------------------------------- */
+
+export type TaskType = 'probe' | 'discovery' | 'source-test' | 'proxy-test';
+export type TaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+
+export interface TaskView {
+  id: string;
+  type: TaskType;
+  source: string;
+  status: TaskStatus;
+  priority: number;
+  payload: { limit?: number; concurrency?: number; deep?: boolean; preferMirror?: boolean; cn?: boolean; only?: string };
+  progress: { done: number; total: number; unit: string };
+  message: string;
+  runId?: string;
+  githubRunId?: string;
+  retryCount: number;
+  lastHeartbeatAt?: string;
+  createdAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  error?: string;
+}
+
+export interface TaskStateSnapshot {
+  counts: Record<TaskStatus, number>;
+  running: TaskView[];
+  queued: TaskView[];
+  updatedAt: string;
+}
+
+export interface TaskListResult {
+  tasks: TaskView[];
+  counts: Record<TaskStatus, number>;
+  state: TaskStateSnapshot;
+  labels: { types: Record<string, string>; statuses: Record<string, string> };
+}
+
+export interface CreateTaskResult {
+  ok: boolean;
+  task: TaskView;
+  dispatch: { dispatched: boolean; message?: string };
+  state: TaskStateSnapshot;
+}
+
 export interface RunSourceDetail {
   sourceId: string;
   title: string;
@@ -310,6 +355,13 @@ export interface RunDetailResult {
   sources: RunSourceDetail[];
   platforms: RunPlatformDetail[];
   endpoints: RunEndpointStat[];
+}
+
+export interface RunLogResult {
+  runId: string;
+  available: boolean;
+  log: string;
+  bytes: number;
 }
 
 export interface FailureKind {
@@ -513,9 +565,18 @@ export const api = {
     }),
   workflowRuns: () => request<RunStatusResult>('/api/admin/runs'),
   workflows: () => request<WorkflowRunsResult>('/api/admin/workflows'),
+  tasks: (status?: TaskStatus, limit = 50) =>
+    request<TaskListResult>(`/api/admin/tasks?limit=${limit}${status ? `&status=${status}` : ''}`),
+  createTask: (input: { type: TaskType; payload?: TaskView['payload']; priority?: number }) =>
+    request<CreateTaskResult>('/api/admin/tasks', { method: 'POST', body: JSON.stringify(input) }),
+  cancelTask: (id: string) =>
+    request<{ ok: boolean; task: TaskView }>(`/api/admin/tasks/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
+  dispatchTasks: () => request<{ dispatched: boolean; message?: string; state: TaskStateSnapshot }>('/api/admin/tasks/dispatch', { method: 'POST' }),
+  reapTasks: () => request<{ ok: boolean; reaped: number; state: TaskStateSnapshot }>('/api/admin/tasks/reap', { method: 'POST' }),
   usage: (refresh = false) => request<{ usage: UsageView }>(`/api/admin/usage${refresh ? '?refresh=1' : ''}`),
   snapshots: (limit = 30) => request<{ runs: RunSummary[] }>(`/api/admin/snapshots?limit=${limit}`),
   snapshot: (runId: string) => request<RunDetailResult>(`/api/admin/snapshots/${encodeURIComponent(runId)}`),
+  runLog: (runId: string) => request<RunLogResult>(`/api/admin/snapshots/${encodeURIComponent(runId)}/log`),
   failures: (days = 7) => request<FailureAggregate>(`/api/admin/failures?days=${days}`),
 
   mirrors: () => request<MirrorConfigView>('/api/admin/mirrors'),
