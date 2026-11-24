@@ -89,7 +89,13 @@ describe('tasks 纯函数', () => {
     );
     expect(plan.workflow).toBe('proxy-test');
     expect(plan.probe).toBeUndefined();
-    expect(plan.proxy).toMatchObject({ proxyId: 'proxy-1', subscriptionId: 'sub-1', concurrency: 3 });
+    expect(plan.proxy).toMatchObject({
+      proxyId: 'proxy-1',
+      subscriptionId: 'sub-1',
+      concurrency: 3,
+      taskId: 'task-5',
+      runId: 'run-5',
+    });
   });
 
   it('任务 id 与运行 id 格式稳定且不重复', () => {

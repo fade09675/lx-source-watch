@@ -304,7 +304,13 @@ export function buildDispatch(
   if (type === 'proxy-test') {
     return {
       workflow: 'proxy-test',
-      proxy: { proxyId: payload.proxyId, subscriptionId: payload.subscriptionId, concurrency: payload.concurrency },
+      proxy: {
+        proxyId: payload.proxyId,
+        subscriptionId: payload.subscriptionId,
+        concurrency: payload.concurrency,
+        taskId,
+        runId,
+      },
     };
   }
   if (type === 'discovery') {

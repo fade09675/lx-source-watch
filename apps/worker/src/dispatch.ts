@@ -86,6 +86,8 @@ export interface ProxyTestDispatchInput {
   proxyId?: string;
   subscriptionId?: string;
   concurrency?: number;
+  taskId?: string;
+  runId?: string;
 }
 
 /** 触发代理测活工作流。 */
@@ -95,6 +97,8 @@ export async function dispatchProxyTest(env: Env, input: ProxyTestDispatchInput)
     proxy_id: clean(input.proxyId, 64),
     sub_id: clean(input.subscriptionId, 64),
     concurrency: String(concurrency),
+    task_id: clean(input.taskId, 64),
+    run_id: clean(input.runId, 64),
   });
 }
 
