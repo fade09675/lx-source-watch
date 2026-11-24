@@ -1,14 +1,16 @@
 import type { Env } from './env';
 import {
   dispatchProbe,
+  dispatchProxyFetchSub,
   dispatchProxyTest,
   type DispatchResult,
   type ProbeDispatchInput,
+  type ProxyFetchSubDispatchInput,
   type ProxyTestDispatchInput,
 } from './dispatch';
 import { checkQuota } from './usage';
 
-export type TaskType = 'probe' | 'discovery' | 'source-test' | 'proxy-test';
+export type TaskType = 'probe' | 'discovery' | 'source-test' | 'proxy-test' | 'proxy-fetch-sub';
 export type TaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 export type TaskSource = 'manual' | 'schedule' | 'api' | 'retry' | 'local';
 
@@ -17,6 +19,7 @@ export const TASK_TYPE_LABEL: Record<TaskType, string> = {
   discovery: '自动发现',
   'source-test': '单源测试',
   'proxy-test': '代理测活',
+  'proxy-fetch-sub': '拉取订阅',
 };
 
 export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
@@ -300,7 +303,18 @@ export function buildDispatch(
   payload: TaskPayload,
   taskId?: string,
   runId?: string,
-): { workflow: 'probe' | 'proxy-test'; probe?: ProbeDispatchInput; proxy?: ProxyTestDispatchInput } {
+): {
+  workflow: 'probe' | 'proxy-test' | 'proxy-fetch-sub';
+  probe?: ProbeDispatchInput;
+  proxy?: ProxyTestDispatchInput;
+  fetchSub?: ProxyFetchSubDispatchInput;
+} {
+  if (type === 'proxy-fetch-sub') {
+    return {
+      workflow: 'proxy-fetch-sub',
+      fetchSub: { subscriptionId: payload.subscriptionId ?? '', taskId, runId },
+    };
+  }
   if (type === 'proxy-test') {
     return {
       workflow: 'proxy-test',
@@ -395,11 +409,13 @@ export async function dispatchNext(
     now?: string;
     dispatchProbe?: (env: Env, input: ProbeDispatchInput) => Promise<DispatchResult>;
     dispatchProxyTest?: (env: Env, input: ProxyTestDispatchInput) => Promise<DispatchResult>;
+    dispatchProxyFetchSub?: (env: Env, input: ProxyFetchSubDispatchInput) => Promise<DispatchResult>;
   } = {},
 ): Promise<DispatchNextResult> {
   const now = deps.now ?? new Date().toISOString();
   const dispatchProbeFn = deps.dispatchProbe ?? dispatchProbe;
   const dispatchProxyTestFn = deps.dispatchProxyTest ?? dispatchProxyTest;
+  const dispatchProxyFetchSubFn = deps.dispatchProxyFetchSub ?? dispatchProxyFetchSub;
   const holder = crypto.randomUUID();
 
   const locked = await acquireDispatchLock(env.DB, holder, 120_000, Date.parse(now));
@@ -438,7 +454,9 @@ export async function dispatchNext(
       result =
         plan.workflow === 'proxy-test'
           ? await dispatchProxyTestFn(env, plan.proxy ?? {})
-          : await dispatchProbeFn(env, plan.probe ?? {});
+          : plan.workflow === 'proxy-fetch-sub'
+            ? await dispatchProxyFetchSubFn(env, plan.fetchSub ?? { subscriptionId: '' })
+            : await dispatchProbeFn(env, plan.probe ?? {});
     } catch (error) {
       result = { ok: false, status: 502, message: error instanceof Error ? error.message : String(error) };
     }

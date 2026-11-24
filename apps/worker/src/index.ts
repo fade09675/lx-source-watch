@@ -4,6 +4,7 @@ import { readCookie, SESSION_COOKIE, verifySessionToken } from './auth';
 import type { Env } from './env';
 import { createAdminProxyRoutes, createRunnerProxyRoutes } from './proxyRoutes';
 import { createRunnerProxyTestReportRoutes } from './proxyTestReport';
+import { createRunnerSubscriptionRoutes } from './proxySubRoutes';
 import { runScheduler } from './scheduler';
 import { reapStaleTasks, refreshTaskState } from './tasks';
 
@@ -80,6 +81,7 @@ app.use('*', async (c, next) => {
 app.route('/api/admin/proxies', createAdminProxyRoutes());
 app.route('/api/runner/proxies', createRunnerProxyRoutes());
 app.route('/api/runner', createRunnerProxyTestReportRoutes());
+app.route('/api/runner', createRunnerSubscriptionRoutes());
 app.route('/api', createApi());
 
 app.all('/api/*', (c) =>

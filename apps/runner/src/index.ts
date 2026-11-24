@@ -8,6 +8,7 @@ import {
 } from '@lx/shared';
 import { cnExecute, cnVerify } from './cn.js';
 import { runProxyTest } from './cn/proxyTest.js';
+import { runProxyFetch } from './cn/proxyFetch.js';
 import { cnRun } from './cn/run.js';
 import { enrichCandidates } from './candidates.js';
 import { discoverCandidates } from './discover.js';
@@ -102,6 +103,7 @@ lx-source-watch runner
   pnpm candidates [选项]   对候选脚本做初始化体检
   pnpm cn [选项]           国内代理补测（verify=只测已解析 URL / --execute 重跑脚本）
   pnpm proxy-test [选项]   代理池测活：出口、地区、成功率写回
+  pnpm proxy-fetch [选项]  Actions 侧拉取代理订阅并回传 Worker 解析
   pnpm publish [选项]      把快照 HMAC 签名后上报 Worker
   pnpm validate            校验清单/配置/快照/候选文件
 
@@ -142,6 +144,9 @@ cn:
   --token <token>           Runner Token（默认读 RUNNER_TOKEN）
   --proxy-id <id>           指定代理节点
   --max-proxies <n>         最多预检几个节点，默认 8
+  --all                     国内补测全部地址（默认只测海外未通过的地址）
+  --status-in <path>        探测快照，用来补测接入点，默认 out/status.json
+  --skip-endpoints          跳过接入点国内连通性补测
   --proxy <url>             直接指定代理，跳过代理池
   --execute                 走代理重新执行脚本（危险，仅 trusted 来源）
   --registry <path>
@@ -156,6 +161,14 @@ proxy-test:
   --max-hops <n>            内核节点最多试几个跳板，默认 5
   --limit <n>               最多测 n 个（调试用）
   --allow-private           允许访问 127.0.0.1（仅本地联调）
+
+proxy-fetch:
+  --endpoint <url>          默认读 INGEST_URL
+  --token <token>           默认读 RUNNER_TOKEN
+  --sub-id <id>             订阅 id（必填，或环境变量 LX_SUBSCRIPTION_ID）
+  --task-id <id>            关联任务 id
+  --run-id <id>             关联运行 id
+  --max-bytes <n>           订阅内容上限，默认 2MB
 
 publish:
   --snapshot <path>         默认 out/status.json
@@ -235,6 +248,9 @@ async function cmdCn(args: Args): Promise<void> {
       timeoutMs: num(args, 'timeout', 15_000),
       limit: num(args, 'limit'),
       platform: str(args, 'platform'),
+      scope: bool(args, 'all') ? 'all' : 'failed',
+      statusPath: str(args, 'status-in', 'out/status.json') as string,
+      skipEndpoints: bool(args, 'skip-endpoints'),
       allowPrivate: bool(args, 'allow-private') || process.env.INGEST_ALLOW_PRIVATE === '1',
     });
     return;
@@ -263,6 +279,9 @@ async function cmdCn(args: Args): Promise<void> {
     timeoutMs: num(args, 'timeout', 15_000),
     limit: num(args, 'limit'),
     platform: str(args, 'platform'),
+    scope: bool(args, 'all') ? 'all' : 'failed',
+    statusPath: str(args, 'status-in', 'out/status.json') as string,
+    skipEndpoints: bool(args, 'skip-endpoints'),
   });
 }
 
@@ -286,6 +305,24 @@ async function cmdProxyTest(args: Args): Promise<void> {
   log.success(
     `测活完成：${summary.ok}/${summary.total} 可用（内核 ${summary.kernelOk}），跳过 UDP ${summary.skippedUdp}，${Math.round(summary.durationMs / 1000)}s`,
   );
+}
+
+async function cmdProxyFetch(args: Args): Promise<void> {
+  const endpoint = str(args, 'endpoint') ?? process.env.INGEST_URL ?? '';
+  const token = str(args, 'token') ?? process.env.RUNNER_TOKEN ?? '';
+  const subscriptionId = str(args, 'sub-id') ?? process.env.LX_SUBSCRIPTION_ID ?? '';
+  if (!endpoint) throw new Error('缺少 --endpoint 或 INGEST_URL');
+  if (!token) throw new Error('缺少 --token 或 RUNNER_TOKEN');
+  if (!subscriptionId) throw new Error('缺少 --sub-id 或 LX_SUBSCRIPTION_ID');
+  const code = await runProxyFetch({
+    endpoint,
+    token,
+    subscriptionId,
+    taskId: str(args, 'task-id') ?? process.env.LX_TASK_ID,
+    runId: str(args, 'run-id') ?? process.env.LX_RUN_ID,
+    maxBytes: num(args, 'max-bytes'),
+  });
+  if (code !== 0) process.exitCode = code;
 }
 
 async function cmdPublish(args: Args): Promise<void> {
@@ -366,6 +403,9 @@ async function main(): Promise<void> {
       break;
     case 'proxy-test':
       await cmdProxyTest(args);
+      break;
+    case 'proxy-fetch':
+      await cmdProxyFetch(args);
       break;
     case 'publish':
       await cmdPublish(args);

@@ -311,6 +311,7 @@ export function RunDetailPage() {
                             <th>地址</th>
                             <th>角色</th>
                             <th>下载</th>
+                            <th>国内</th>
                             <th>版本</th>
                             <th>耗时</th>
                             <th>错误</th>
@@ -329,6 +330,18 @@ export function RunDetailPage() {
                                   <span className={`pill tone-${endpoint.ok ? 'ok' : 'bad'}`}>
                                     {endpoint.ok ? '成功' : '失败'}
                                   </span>
+                                </td>
+                                <td>
+                                  {endpoint.cn ? (
+                                    <span
+                                      className={`pill tone-${endpoint.cn.ok ? 'ok' : 'bad'}`}
+                                      title={endpoint.cn.error ?? ''}
+                                    >
+                                      {endpoint.cn.ok ? `可达 ${formatMs(endpoint.cn.ms)}` : '失败'}
+                                    </span>
+                                  ) : (
+                                    <span className="muted small">—</span>
+                                  )}
                                 </td>
                                 <td>
                                   {endpoint.version ?? '—'}{' '}

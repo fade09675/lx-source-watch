@@ -24,6 +24,7 @@ const TASK_TYPE_LABEL: Record<TaskType, string> = {
   discovery: '自动发现',
   'source-test': '单源测试',
   'proxy-test': '代理测活',
+  'proxy-fetch-sub': '拉取订阅',
 };
 
 const TASK_STATUS_LABEL: Record<string, string> = {

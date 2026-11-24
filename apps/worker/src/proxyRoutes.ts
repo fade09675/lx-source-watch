@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env } from './env';
 import { decryptSecret, encryptSecret } from './proxyCrypto';
 import { isKernelProtocol, parseProxyText, proxyKey, type ParseResult, type ParsedProxy } from './proxyImport';
+import { completeTaskForRun, dispatchNext, refreshTaskState } from './tasks';
 
 interface ProxyRow {
   id: string;
@@ -156,7 +157,7 @@ interface ImportSummary {
   warnings: string[];
 }
 
-async function applyParsedNodes(env: Env, parsed: ParseResult, subscriptionId: string | null = null): Promise<ImportSummary> {
+export async function applyParsedNodes(env: Env, parsed: ParseResult, subscriptionId: string | null = null): Promise<ImportSummary> {
   const existing = await listRows(env);
   const byKey = new Map(existing.map((row) => [proxyKey({ protocol: row.protocol, host: row.host, port: row.port, username: row.username }), row]));
   const now = new Date().toISOString();
@@ -197,6 +198,7 @@ function publicSubscription(row: SubscriptionItem) {
     name: row.name,
     url: row.url,
     userAgent: row.user_agent,
+    headers: row.headers,
     kind: row.kind,
     enabled: row.enabled === 1,
     lastFetchAt: row.last_fetch_at,
@@ -207,11 +209,34 @@ function publicSubscription(row: SubscriptionItem) {
   };
 }
 
-async function fetchSubscription(url: URL, userAgent: string): Promise<{ parsed: ParseResult; bytes: number }> {
+const DEFAULT_FETCH_UA = 'lx-source-watch/0.1 (+https://github.com/fade09675/lx-source-watch)';
+
+/** 订阅自定义请求头：每行 `Key: value`，最多 20 条，忽略 Host/Content-Length 等危险头。 */
+export function parseCustomHeaders(raw: string | null | undefined): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const blocked = new Set(['host', 'content-length', 'connection', 'transfer-encoding']);
+  for (const line of String(raw ?? '').split(/\r?\n/)) {
+    const index = line.indexOf(':');
+    if (index <= 0) continue;
+    const key = line.slice(0, index).trim().toLowerCase();
+    const value = line.slice(index + 1).trim();
+    if (!key || !value || blocked.has(key)) continue;
+    headers[key] = value.slice(0, 500);
+    if (Object.keys(headers).length >= 20) break;
+  }
+  return headers;
+}
+
+async function fetchSubscription(
+  url: URL,
+  userAgent: string,
+  customHeaders?: string | null,
+): Promise<{ parsed: ParseResult; bytes: number }> {
   const response = await fetch(url.toString(), {
     headers: {
-      'user-agent': userAgent || 'lx-source-watch/0.1 (+https://github.com/fade09675/lx-source-watch)',
       accept: 'text/plain,text/yaml,application/yaml,application/json,*/*',
+      ...parseCustomHeaders(customHeaders),
+      'user-agent': userAgent || DEFAULT_FETCH_UA,
     },
     redirect: 'follow',
     signal: AbortSignal.timeout(20_000),
@@ -256,7 +281,7 @@ async function refreshSubscription(env: Env, row: SubscriptionRow): Promise<Impo
   }
   try {
     const url = assertFetchable(row.url);
-    const { parsed } = await fetchSubscription(url, row.user_agent);
+    const { parsed } = await fetchSubscription(url, row.user_agent, row.headers);
     const summary = await applyParsedNodes(env, parsed, row.id);
     await touchSubscription(env, row.id, `成功：新增 ${summary.added}，更新 ${summary.updated}`);
     return summary;
@@ -603,7 +628,9 @@ export function createAdminProxyRoutes(): Hono<{ Bindings: Env }> {
 
   /** 从订阅地址拉取：创建/复用订阅源，再把节点挂在订阅下。 */
   api.post('/import-url', async (c) => {
-    const body = await c.req.json<{ url?: string; name?: string; userAgent?: string }>().catch(() => null);
+    const body = await c.req
+      .json<{ url?: string; name?: string; userAgent?: string; headers?: string }>()
+      .catch(() => null);
     const raw = typeof body?.url === 'string' ? body.url.trim() : '';
     if (!raw) return c.json({ error: 'empty_url', message: '请填写订阅地址' }, 400);
     let url: URL;
@@ -615,7 +642,7 @@ export function createAdminProxyRoutes(): Hono<{ Bindings: Env }> {
 
     let fetched: { parsed: ParseResult; bytes: number };
     try {
-      fetched = await fetchSubscription(url, clean(body?.userAgent, 200));
+      fetched = await fetchSubscription(url, clean(body?.userAgent, 200), clean(body?.headers, 2000));
     } catch (error) {
       return c.json({ error: 'fetch_failed', message: error instanceof Error ? error.message : '拉取订阅失败' }, 502);
     }
@@ -627,15 +654,25 @@ export function createAdminProxyRoutes(): Hono<{ Bindings: Env }> {
     let subscriptionId: string;
     if (existing) {
       subscriptionId = existing.id;
-      await c.env.DB.prepare('UPDATE proxy_subscriptions SET name = ?, user_agent = ?, updated_at = ? WHERE id = ?')
-        .bind(name, clean(body?.userAgent, 200), now, existing.id)
+      await c.env.DB.prepare(
+        'UPDATE proxy_subscriptions SET name = ?, user_agent = ?, headers = ?, updated_at = ? WHERE id = ?',
+      )
+        .bind(name, clean(body?.userAgent, 200), clean(body?.headers, 2000), now, existing.id)
         .run();
     } else {
       subscriptionId = crypto.randomUUID();
       await c.env.DB.prepare(
-        'INSERT INTO proxy_subscriptions (id, name, url, user_agent, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)',
+        'INSERT INTO proxy_subscriptions (id, name, url, user_agent, headers, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)',
       )
-        .bind(subscriptionId, name, url.toString(), clean(body?.userAgent, 200), now, now)
+        .bind(
+          subscriptionId,
+          name,
+          url.toString(),
+          clean(body?.userAgent, 200),
+          clean(body?.headers, 2000),
+          now,
+          now,
+        )
         .run();
     }
 
@@ -655,7 +692,9 @@ export function createAdminProxyRoutes(): Hono<{ Bindings: Env }> {
   });
 
   api.post('/subscriptions', async (c) => {
-    const body = await c.req.json<{ name?: string; url?: string; userAgent?: string }>().catch(() => null);
+    const body = await c.req
+      .json<{ name?: string; url?: string; userAgent?: string; headers?: string }>()
+      .catch(() => null);
     const raw = typeof body?.url === 'string' ? body.url.trim() : '';
     if (!raw) return c.json({ error: 'empty_url', message: '请填写订阅地址' }, 400);
     let url: URL;
@@ -672,9 +711,17 @@ export function createAdminProxyRoutes(): Hono<{ Bindings: Env }> {
     const now = new Date().toISOString();
     const name = clean(body?.name, 80) || url.hostname;
     await c.env.DB.prepare(
-      'INSERT INTO proxy_subscriptions (id, name, url, user_agent, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)',
+      'INSERT INTO proxy_subscriptions (id, name, url, user_agent, headers, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)',
     )
-      .bind(id, name, url.toString(), clean(body?.userAgent, 200), now, now)
+      .bind(
+        id,
+        name,
+        url.toString(),
+        clean(body?.userAgent, 200),
+        clean(body?.headers, 2000),
+        now,
+        now,
+      )
       .run();
     return c.json({
       ok: true,
@@ -684,6 +731,7 @@ export function createAdminProxyRoutes(): Hono<{ Bindings: Env }> {
         name,
         url: url.toString(),
         userAgent: clean(body?.userAgent, 200),
+        headers: clean(body?.headers, 2000),
         enabled: true,
         lastFetchAt: null,
         lastStatus: '未拉取',

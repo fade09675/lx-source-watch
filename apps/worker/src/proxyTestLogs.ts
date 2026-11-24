@@ -132,7 +132,8 @@ export async function getProxyTestRun(
               ok, latency_ms, country, asn, error, tested_at
          FROM proxy_test_results
         WHERE run_id = ?
-        ORDER BY ok ASC, latency_ms DESC, name ASC`,
+        ORDER BY ok ASC, latency_ms DESC, name ASC
+        LIMIT 500`,
     )
     .bind(runId)
     .all<ProxyTestResultRow>();

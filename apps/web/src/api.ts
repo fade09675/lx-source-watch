@@ -146,6 +146,7 @@ export interface SubscriptionItem {
   url: string;
   kind: 'url' | 'file';
   userAgent: string;
+  headers: string;
   enabled: boolean;
   lastFetchAt: string | null;
   lastStatus: string;
@@ -162,6 +163,7 @@ export interface SubscriptionInput {
   name?: string;
   url: string;
   userAgent?: string;
+  headers?: string;
 }
 
 export interface SubscriptionPatch {
@@ -169,6 +171,7 @@ export interface SubscriptionPatch {
   url?: string;
   enabled?: boolean;
   userAgent?: string;
+  headers?: string;
 }
 
 export interface ProxyList {
@@ -270,7 +273,7 @@ export interface WorkflowRunsResult {
 
 /* ------------------------------- tasks ---------------------------------- */
 
-export type TaskType = 'probe' | 'discovery' | 'source-test' | 'proxy-test';
+export type TaskType = 'probe' | 'discovery' | 'source-test' | 'proxy-test' | 'proxy-fetch-sub';
 export type TaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 
 export interface TaskView {
@@ -279,7 +282,15 @@ export interface TaskView {
   source: string;
   status: TaskStatus;
   priority: number;
-  payload: { limit?: number; concurrency?: number; deep?: boolean; preferMirror?: boolean; cn?: boolean; only?: string };
+  payload: {
+    limit?: number;
+    concurrency?: number;
+    deep?: boolean;
+    preferMirror?: boolean;
+    cn?: boolean;
+    only?: string;
+    subscriptionId?: string;
+  };
   progress: { done: number; total: number; unit: string };
   message: string;
   runId?: string;
@@ -372,6 +383,16 @@ export interface RunEndpointRow {
   bytes: number | null;
   ms: number;
   error: string | null;
+  /** 4B 国内连通性补测；旧数据为 null。 */
+  cn: {
+    tested: boolean;
+    ok: boolean;
+    ms?: number;
+    ttfbMs?: number;
+    error?: string;
+    httpStatus?: number;
+    proxy?: string;
+  } | null;
   checkedAt: string;
 }
 
@@ -648,10 +669,10 @@ export const api = {
   proxies: () => request<ProxyList>('/api/admin/proxies'),
   importProxies: (text: string) =>
     request<ProxyImportResult>('/api/admin/proxies/import', { method: 'POST', body: JSON.stringify({ text }) }),
-  importProxyUrl: (url: string, name?: string, userAgent?: string) =>
+  importProxyUrl: (url: string, name?: string, userAgent?: string, headers?: string) =>
     request<ProxyImportResult>('/api/admin/proxies/import-url', {
       method: 'POST',
-      body: JSON.stringify({ url, name, userAgent }),
+      body: JSON.stringify({ url, name, userAgent, headers }),
     }),
   createProxy: (input: ProxyInput) =>
     request<{ ok: boolean }>('/api/admin/proxies', { method: 'POST', body: JSON.stringify(input) }),

@@ -45,7 +45,7 @@ function snapshot(): Snapshot {
   } as Snapshot;
 }
 
-function cnFile(rows: CnFile['rows']): CnFile {
+function cnFile(rows: CnFile['rows'], endpoints?: CnFile['endpoints']): CnFile {
   return {
     version: 1,
     generatedAt: '2026-11-23T12:05:00.000Z',
@@ -53,6 +53,7 @@ function cnFile(rows: CnFile['rows']): CnFile {
     proxy: '上海电信',
     summary: { tested: rows.length, ok: rows.filter((row) => row.ok).length },
     rows,
+    ...(endpoints ? { endpoints } : {}),
   };
 }
 
@@ -85,6 +86,62 @@ describe('applyCnResults', () => {
     const doc = snapshot();
     applyCnResults(doc, cnFile([]));
     expect(doc.sources[0]?.platforms.find((item) => item.key === 'mg')?.cn).toBeUndefined();
+  });
+
+  it('接入点补测按 sourceId+url 合并，不存在的镜像保持未测', () => {
+    const doc = snapshot();
+    doc.sources[0]!.endpoints = [
+      { url: 'https://example.com/demo.js', role: 'primary', ok: true, ms: 80, checkedAt: '2026-11-23T12:00:00.000Z' },
+      { url: 'https://cdn.example.com/demo.js', role: 'candidate', ok: false, ms: 90, checkedAt: '2026-11-23T12:00:00.000Z' },
+    ];
+    applyCnResults(
+      doc,
+      cnFile(
+        [],
+        [
+          {
+            sourceId: 'demo',
+            url: 'https://example.com/demo.js',
+            role: 'primary',
+            ok: true,
+            status: 206,
+            ttfbMs: 120,
+            totalMs: 460,
+            bytes: 4096,
+          },
+        ],
+      ),
+    );
+    const [primary, mirror] = doc.sources[0]!.endpoints;
+    expect(primary?.cn).toMatchObject({ tested: true, ok: true, ms: 460, proxy: '上海电信' });
+    expect(mirror?.cn).toBeUndefined();
+  });
+
+  it('接入点全失败时写入国内错误', () => {
+    const doc = snapshot();
+    doc.sources[0]!.endpoints = [
+      { url: 'https://example.com/demo.js', role: 'primary', ok: true, ms: 80, checkedAt: '2026-11-23T12:00:00.000Z' },
+    ];
+    applyCnResults(
+      doc,
+      cnFile(
+        [],
+        [
+          {
+            sourceId: 'demo',
+            url: 'https://example.com/demo.js',
+            role: 'primary',
+            ok: false,
+            status: 0,
+            ttfbMs: 0,
+            totalMs: 15000,
+            bytes: 0,
+            error: '请求超时（15000ms）',
+          },
+        ],
+      ),
+    );
+    expect(doc.sources[0]!.endpoints[0]!.cn).toMatchObject({ tested: true, ok: false, error: '请求超时（15000ms）' });
   });
 });
 

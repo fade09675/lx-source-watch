@@ -88,3 +88,16 @@ describe('parseProxyText', () => {
     expect(noPort.nodes).toHaveLength(0);
   });
 });
+
+describe('parseClientLine', () => {
+  it('parses Surge/Loon line', () => {
+    const result = parseProxyText('HK-01 = socks5, 5.6.7.8, 1080, alice, secret');
+    expect(result.nodes).toHaveLength(1);
+    expect(result.nodes[0]).toMatchObject({ protocol: 'socks5', host: '5.6.7.8', port: 1080, username: 'alice', password: 'secret' });
+  });
+
+  it('parses Quantumult X line', () => {
+    const result = parseProxyText('socks5=9.9.9.9:1080, username=bob, password=pw, tag=SZ');
+    expect(result.nodes[0]).toMatchObject({ protocol: 'socks5', host: '9.9.9.9', port: 1080, username: 'bob', password: 'pw', name: 'SZ' });
+  });
+});

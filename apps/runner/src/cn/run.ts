@@ -1,4 +1,4 @@
-import { cnVerify, type CnFile } from '../cn.js';
+import { cnVerify, type CnFile, type CnScope } from '../cn.js';
 import { log } from '../logger.js';
 import { errorMessage } from '../util.js';
 import {
@@ -23,6 +23,9 @@ export interface CnRunOptions {
   timeoutMs?: number;
   limit?: number;
   platform?: string;
+  scope?: CnScope;
+  statusPath?: string;
+  skipEndpoints?: boolean;
   allowPrivate?: boolean;
 }
 
@@ -107,6 +110,9 @@ export async function cnRun(opts: CnRunOptions): Promise<CnFile> {
         timeoutMs: opts.timeoutMs ?? 15_000,
         limit: opts.limit,
         platform: opts.platform,
+        scope: opts.scope ?? 'failed',
+        statusPath: opts.statusPath,
+        skipEndpoints: opts.skipEndpoints,
       });
       await reportProxyCheck(
         opts.endpoint,

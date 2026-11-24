@@ -208,8 +208,8 @@ export async function writeSnapshot(db: D1Database, input: {
       statements.push(
         db
           .prepare(
-            `INSERT INTO source_endpoints (run_id, source_id, url, role, ok, status, sha, sha256, version, version_state, bytes, ms, error, checked_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `INSERT INTO source_endpoints (run_id, source_id, url, role, ok, status, sha, sha256, version, version_state, bytes, ms, error, checked_at, cn_ok, cn_ms, cn_ttfb_ms, cn_error, cn_proxy, cn_checked_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(run_id, source_id, url) DO NOTHING`,
           )
           .bind(
@@ -227,6 +227,12 @@ export async function writeSnapshot(db: D1Database, input: {
             endpoint.ms,
             endpoint.error ?? null,
             endpoint.checkedAt,
+            endpoint.cn?.tested ? (endpoint.cn.ok ? 1 : 0) : null,
+            endpoint.cn?.ms ?? null,
+            endpoint.cn?.ttfbMs ?? null,
+            endpoint.cn?.error ?? null,
+            endpoint.cn?.proxy ?? null,
+            endpoint.cn?.tested ? now : null,
           ),
       );
       endpoints += 1;
@@ -725,6 +731,24 @@ interface EndpointDbRow {
   ms: number;
   error: string | null;
   checked_at: string;
+  cn_ok: number | null;
+  cn_ms: number | null;
+  cn_ttfb_ms: number | null;
+  cn_error: string | null;
+  cn_proxy: string | null;
+  cn_checked_at: string | null;
+}
+
+function endpointCn(row: EndpointDbRow): EndpointRow['cn'] {
+  if (row.cn_ok == null && !row.cn_checked_at) return null;
+  return {
+    tested: true,
+    ok: row.cn_ok === 1,
+    ms: row.cn_ms ?? undefined,
+    ttfbMs: row.cn_ttfb_ms ?? undefined,
+    error: row.cn_error ?? undefined,
+    proxy: row.cn_proxy ?? undefined,
+  };
 }
 
 /** 取某个来源最近一轮的接入点检查结果（主地址排前面）。 */
@@ -741,7 +765,8 @@ export async function getSourceEndpoints(db: D1Database, sourceId: string, runId
 
   const rows = await db
     .prepare(
-      `SELECT url, role, ok, status, sha, sha256, version, version_state, bytes, ms, error, checked_at
+      `SELECT url, role, ok, status, sha, sha256, version, version_state, bytes, ms, error, checked_at,
+              cn_ok, cn_ms, cn_ttfb_ms, cn_error, cn_proxy, cn_checked_at
        FROM source_endpoints
        WHERE run_id = ? AND source_id = ?
        ORDER BY CASE role WHEN 'primary' THEN 0 ELSE 1 END, ok DESC, ms ASC`,
@@ -764,6 +789,7 @@ export async function getSourceEndpoints(db: D1Database, sourceId: string, runId
     bytes: row.bytes,
     ms: row.ms,
     error: row.error,
+    cn: endpointCn(row),
     checkedAt: row.checked_at,
   }));
 }
@@ -958,27 +984,14 @@ export interface RunEndpointRow extends EndpointRow {
 export async function getRunEndpointRows(db: D1Database, runId: string): Promise<RunEndpointRow[]> {
   const rows = await db
     .prepare(
-      `SELECT source_id AS sourceId, url, role, ok, status, sha, sha256, version, version_state, bytes, ms, error, checked_at
+      `SELECT source_id AS sourceId, url, role, ok, status, sha, sha256, version, version_state, bytes, ms, error, checked_at,
+              cn_ok, cn_ms, cn_ttfb_ms, cn_error, cn_proxy, cn_checked_at
        FROM source_endpoints
        WHERE run_id = ?
        ORDER BY source_id, CASE role WHEN 'primary' THEN 0 ELSE 1 END, ok DESC, ms ASC`,
     )
     .bind(runId)
-    .all<{
-      sourceId: string;
-      url: string;
-      role: string;
-      ok: number;
-      status: number | null;
-      sha: string | null;
-      sha256: string | null;
-      version: string | null;
-      version_state: string | null;
-      bytes: number | null;
-      ms: number;
-      error: string | null;
-      checked_at: string;
-    }>();
+    .all<EndpointDbRow & { sourceId: string }>();
 
   return rows.results.map((row) => ({
     sourceId: row.sourceId,
@@ -996,6 +1009,7 @@ export async function getRunEndpointRows(db: D1Database, runId: string): Promise
     bytes: row.bytes,
     ms: row.ms,
     error: row.error,
+    cn: endpointCn(row),
     checkedAt: row.checked_at,
   }));
 }

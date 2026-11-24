@@ -102,6 +102,24 @@ export async function dispatchProxyTest(env: Env, input: ProxyTestDispatchInput)
   });
 }
 
+export interface ProxyFetchSubDispatchInput {
+  subscriptionId: string;
+  taskId?: string;
+  runId?: string;
+}
+
+/** 403 兜底：让 Actions 去拉订阅，再回传文本。 */
+export async function dispatchProxyFetchSub(
+  env: Env,
+  input: ProxyFetchSubDispatchInput,
+): Promise<DispatchResult> {
+  return dispatchWorkflow(env, 'proxy-fetch-sub.yml', {
+    subscription_id: clean(input.subscriptionId, 64),
+    task_id: clean(input.taskId, 64),
+    run_id: clean(input.runId, 64),
+  });
+}
+
 async function dispatchWorkflow(
   env: Env,
   workflow: string,

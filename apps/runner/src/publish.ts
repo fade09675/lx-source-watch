@@ -67,6 +67,32 @@ export function applyCnResults(snapshot: Snapshot, cn: CnFile): void {
       };
     }
   }
+
+  const endpointRows = new Map<string, NonNullable<CnFile['endpoints']>>();
+  for (const row of cn.endpoints ?? []) {
+    const key = `${row.sourceId}\u0000${row.url}`;
+    const list = endpointRows.get(key) ?? [];
+    list.push(row);
+    endpointRows.set(key, list);
+  }
+  if (!endpointRows.size) return;
+  for (const source of snapshot.sources) {
+    for (const endpoint of source.endpoints) {
+      const rows = endpointRows.get(`${source.id}\u0000${endpoint.url}`);
+      if (!rows?.length) continue;
+      const okRow = rows.find((row) => row.ok);
+      const best = okRow ?? rows[0]!;
+      endpoint.cn = {
+        tested: true,
+        ok: Boolean(okRow),
+        ms: best.totalMs || undefined,
+        ttfbMs: best.ttfbMs || undefined,
+        error: okRow ? undefined : best.error ?? `国内不可达（HTTP ${best.status}）`,
+        httpStatus: best.status || undefined,
+        proxy: cn.proxy,
+      };
+    }
+  }
 }
 
 export function signPayload(body: string, secret: string): string {

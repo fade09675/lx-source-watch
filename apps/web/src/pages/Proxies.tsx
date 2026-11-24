@@ -26,6 +26,7 @@ export function ProxiesPage() {
   const [subUrl, setSubUrl] = useState('');
   const [subName, setSubName] = useState('');
   const [subUa, setSubUa] = useState('');
+  const [subHeaders, setSubHeaders] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
@@ -105,13 +106,19 @@ export function ProxiesPage() {
     setBusy(true);
     setMessage('');
     try {
-      const result = await api.importProxyUrl(subUrl.trim(), subName.trim() || undefined, subUa.trim() || undefined);
+      const result = await api.importProxyUrl(
+        subUrl.trim(),
+        subName.trim() || undefined,
+        subUa.trim() || undefined,
+        subHeaders.trim() || undefined,
+      );
       setMessage(
         `已添加订阅「${result.subscription?.name ?? subName.trim() ?? '订阅'}」：新增 ${result.added}，更新 ${result.updated}，共 ${result.total} 个节点${result.warnings.length ? `；${result.warnings[0]}` : ''}`,
       );
       setSubUrl('');
       setSubName('');
       setSubUa('');
+      setSubHeaders('');
       await load();
     } catch (e) {
       setMessage(e instanceof ApiError ? e.message : '订阅导入失败');
@@ -129,6 +136,19 @@ export function ProxiesPage() {
       await load();
     } catch (e) {
       setMessage(e instanceof ApiError ? e.message : '刷新失败');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function fetchSubViaActions(item: SubscriptionItem) {
+    setBusy(true);
+    setMessage('');
+    try {
+      await api.createTask({ type: 'proxy-fetch-sub', payload: { subscriptionId: item.id } });
+      setMessage(`已派发 Actions 拉取「${item.name}」，通常 30–60 秒内完成，之后刷新查看结果。`);
+    } catch (e) {
+      setMessage(e instanceof ApiError ? e.message : '派发失败');
     } finally {
       setBusy(false);
     }
@@ -250,6 +270,16 @@ export function ProxiesPage() {
               ))}
             </datalist>
           </label>
+          <label className="wide">
+            自定义请求头（可选，每行 Key: value）
+            <textarea
+              className="proxy-textarea"
+              rows={2}
+              value={subHeaders}
+              onChange={(event) => setSubHeaders(event.target.value)}
+              placeholder={'X-Client: clash\nX-Token: ...'}
+            />
+          </label>
           <div className="wide page-actions">
             <button type="button" className="primary-button" disabled={busy || !subUrl.trim()} onClick={() => void addSubscription()}>
               添加订阅并拉取
@@ -337,6 +367,15 @@ export function ProxiesPage() {
                             onClick={() => void refreshSub(item)}
                           >
                             刷新
+                          </button>
+                          <button
+                            type="button"
+                            className="ghost-button"
+                            disabled={busy || item.kind === 'file'}
+                            title={item.kind === 'file' ? '文件订阅不能派发 Actions 拉取' : 'Worker 拉取失败时，改让 GitHub Actions 拉取并回传'}
+                            onClick={() => void fetchSubViaActions(item)}
+                          >
+                            用 Actions 拉取
                           </button>
                           <button
                             type="button"

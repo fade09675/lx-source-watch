@@ -1,0 +1,67 @@
+name: 拉取代理订阅
+
+# 由 Worker 在订阅刷新返回 403/网络错误时派发；Actions 只负责下载文本，解析入库在 Worker。
+on:
+  workflow_dispatch:
+    inputs:
+      subscription_id:
+        description: "订阅 id（必填，Worker 派发时传入）"
+        required: true
+      task_id:
+        description: "任务 id（Worker 派发时传入）"
+        required: false
+        default: ""
+      run_id:
+        description: "占位运行 id（Worker 派发时传入）"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lx-proxy-fetch
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      INGEST_URL: ${{ secrets.INGEST_URL }}
+      RUNNER_TOKEN: ${{ secrets.RUNNER_TOKEN }}
+      SUBSCRIPTION_ID: ${{ inputs.subscription_id }}
+      TASK_ID: ${{ inputs.task_id }}
+      RUN_ID: ${{ inputs.run_id }}
+    steps:
+      - name: 检出代码（不保留凭据）
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.28.5
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 拉取订阅并回传
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${INGEST_URL}" ] || [ -z "${RUNNER_TOKEN}" ]; then
+            echo "未配置 INGEST_URL / RUNNER_TOKEN，跳过订阅拉取。"
+            exit 0
+          fi
+          args=(--endpoint "$INGEST_URL" --token "$RUNNER_TOKEN" --sub-id "$SUBSCRIPTION_ID")
+          if [ -n "${TASK_ID}" ]; then args+=(--task-id "$TASK_ID"); fi
+          if [ -n "${RUN_ID}" ]; then args+=(--run-id "$RUN_ID"); fi
+          pnpm proxy-fetch -- "${args[@]}"

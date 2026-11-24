@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import type { SourceResult } from '@lx/shared';
+import { SnapshotSchema, type SourceResult } from '@lx/shared';
 import { log } from './logger.js';
 import { httpRequest, type ProxyConfig } from './net/http.js';
 import { loadRegistry } from './registry.js';
@@ -25,6 +25,18 @@ export interface CnRow {
   error?: string;
 }
 
+export interface CnEndpointRow {
+  sourceId: string;
+  url: string;
+  role: 'primary' | 'candidate';
+  ok: boolean;
+  status: number;
+  ttfbMs: number;
+  totalMs: number;
+  bytes: number;
+  error?: string;
+}
+
 export interface CnFile {
   version: 1;
   generatedAt: string;
@@ -32,6 +44,8 @@ export interface CnFile {
   proxy: string;
   summary: { tested: number; ok: number };
   rows: CnRow[];
+  /** 接入点（主地址/镜像）的国内连通性；4B 起写入。 */
+  endpoints?: CnEndpointRow[];
 }
 
 export interface CnVerifyOptions {
@@ -44,6 +58,23 @@ export interface CnVerifyOptions {
   timeoutMs?: number;
   limit?: number;
   platform?: string;
+  /** failed=只补测海外未通过的地址（默认）；all=全部重测。 */
+  scope?: CnScope;
+  /** 探测产物 status.json，用来补测每个接入点；缺省 out/status.json。 */
+  statusPath?: string;
+  /** 跳过接入点补测（只测平台播放地址）。 */
+  skipEndpoints?: boolean;
+}
+
+export type CnScope = 'failed' | 'all';
+
+/**
+ * 国内补测只挑“海外没跑通”的地址，避免每轮重复测可用链接。
+ * 与 IPTV 的 cn-probe 选择口径一致；all 仅用于手动排查。
+ */
+export function selectCnUrls(urls: UrlRecord[], scope: CnScope): UrlRecord[] {
+  if (scope === 'all') return urls;
+  return urls.filter((url) => url.ok !== true);
 }
 
 const CN_MAX_BYTES = 262_144;
@@ -112,11 +143,115 @@ async function probeUrl(record: UrlRecord, proxy: ProxyConfig, timeoutMs: number
   };
 }
 
+/** 接入点国内连通性：经代理拉脚本前 64KB，失败再回退整段（上限 512KB）。 */
+async function probeEndpoint(
+  record: { sourceId: string; url: string; role: 'primary' | 'candidate' },
+  proxy: ProxyConfig,
+  timeoutMs: number,
+): Promise<CnEndpointRow> {
+  const started = Date.now();
+  const base: CnEndpointRow = {
+    sourceId: record.sourceId,
+    url: record.url,
+    role: record.role,
+    ok: false,
+    status: 0,
+    ttfbMs: 0,
+    totalMs: 0,
+    bytes: 0,
+  };
+  let res;
+  try {
+    res = await httpRequest(record.url, {
+      headers: { range: 'bytes=0-65535', accept: '*/*', 'user-agent': CN_USER_AGENT },
+      timeoutMs,
+      maxBytes: 65_536,
+      proxy,
+      maxRedirects: 5,
+    });
+    if ([400, 405, 416, 501].includes(res.status)) {
+      res = await httpRequest(record.url, {
+        headers: { accept: '*/*', 'user-agent': CN_USER_AGENT },
+        timeoutMs,
+        maxBytes: 524_288,
+        proxy,
+        maxRedirects: 5,
+      });
+    }
+  } catch (e) {
+    return { ...base, totalMs: Date.now() - started, error: errorMessage(e).slice(0, 300) };
+  }
+
+  const elapsed = Math.max(1, Date.now() - started);
+  const reachable = (res.status === 200 || res.status === 206) && res.body.length > 0;
+  return {
+    ...base,
+    ok: reachable,
+    status: res.status,
+    ttfbMs: Math.round(res.firstByteMs),
+    totalMs: elapsed,
+    bytes: res.body.length,
+    error: reachable ? undefined : `HTTP ${res.status}`,
+  };
+}
+
+interface EndpointRecord {
+  sourceId: string;
+  url: string;
+  role: 'primary' | 'candidate';
+}
+
+async function loadEndpointRecords(path: string): Promise<EndpointRecord[]> {
+  try {
+    const parsed = SnapshotSchema.safeParse(JSON.parse(await readFile(path, 'utf8')));
+    if (!parsed.success) {
+      log.warn(`接入点补测跳过：${path} 无法识别（${parsed.error.issues[0]?.message ?? ''}）`);
+      return [];
+    }
+    return parsed.data.sources.flatMap((source) =>
+      source.endpoints.map((endpoint) => ({
+        sourceId: source.id,
+        url: endpoint.url,
+        role: endpoint.role,
+      })),
+    );
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    log.warn(`接入点补测跳过：读取 ${path} 失败（${errorMessage(e)}）`);
+    return [];
+  }
+}
+
+/** 同一 URL 只测一次，再按来源展开；镜像 URL 基本各不相同，去重收益有限但无害。 */
+async function probeEndpoints(
+  path: string,
+  proxy: ProxyConfig,
+  concurrency: number,
+  timeoutMs: number,
+): Promise<CnEndpointRow[]> {
+  const records = await loadEndpointRecords(path);
+  if (!records.length) return [];
+  const unique = new Map<string, EndpointRecord>();
+  for (const record of records) if (!unique.has(record.url)) unique.set(record.url, record);
+  const probed = new Map<string, CnEndpointRow>();
+  await mapLimit([...unique.values()], Math.max(1, concurrency), async (record) => {
+    const row = await probeEndpoint(record, proxy, timeoutMs);
+    probed.set(record.url, row);
+  });
+  return records.map((record) => {
+    const row = probed.get(record.url);
+    return row
+      ? { ...row, sourceId: record.sourceId, role: record.role }
+      : { ...record, ok: false, status: 0, ttfbMs: 0, totalMs: 0, bytes: 0, error: '未测' };
+  });
+}
+
 /** 国内补测（只测已解析 URL，不执行脚本，避免代理凭据暴露给第三方脚本）。 */
 export async function cnVerify(opts: CnVerifyOptions): Promise<CnFile> {
   const raw = JSON.parse(await readFile(opts.urlsPath, 'utf8')) as UrlsFile;
   let urls = raw.urls ?? [];
   if (opts.platform) urls = urls.filter((u) => u.platform === opts.platform);
+  urls = selectCnUrls(urls, opts.scope ?? 'failed');
   if (opts.limit) urls = urls.slice(0, opts.limit);
 
   // 同一 URL 只测一次，但保留 sourceId/platform 归属。
@@ -133,6 +268,18 @@ export async function cnVerify(opts: CnVerifyOptions): Promise<CnFile> {
     probeUrl(u, opts.proxy as ProxyConfig, opts.timeoutMs ?? 15_000, label),
   );
   const ok = rows.filter((r) => r.ok).length;
+  const endpoints = opts.skipEndpoints
+    ? undefined
+    : await probeEndpoints(
+        opts.statusPath ?? 'out/status.json',
+        opts.proxy as ProxyConfig,
+        opts.concurrency ?? 5,
+        opts.timeoutMs ?? 15_000,
+      );
+  if (endpoints?.length) {
+    const cnOk = endpoints.filter((row) => row.ok).length;
+    log.success(`接入点补测完成：${cnOk}/${endpoints.length} 国内可达`);
+  }
   const file: CnFile = {
     version: 1,
     generatedAt: nowIso(),
@@ -140,6 +287,7 @@ export async function cnVerify(opts: CnVerifyOptions): Promise<CnFile> {
     proxy: label,
     summary: { tested: rows.length, ok },
     rows,
+    ...(endpoints?.length ? { endpoints } : {}),
   };
   await mkdir(dirname(opts.outPath), { recursive: true });
   await writeFile(opts.outPath, `${JSON.stringify(file, null, 2)}\n`, 'utf8');

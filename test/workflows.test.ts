@@ -47,6 +47,32 @@ function namedStep(job: Job, name: string): Step {
   return step;
 }
 
+describe('proxy-fetch-sub.yml', () => {
+  const path = `${root}/.github/workflows/proxy-fetch-sub.yml`;
+
+  async function load(): Promise<Workflow> {
+    return parse(await readFile(path, 'utf8')) as Workflow;
+  }
+
+  it('可由 Worker 派发并调用 runner 拉取订阅', async () => {
+    const doc = await load();
+    expect(doc.on?.schedule).toBeUndefined();
+    const dispatch = doc.on?.workflow_dispatch as { inputs?: Record<string, unknown> } | undefined;
+    expect(dispatch?.inputs?.subscription_id).toBeDefined();
+    expect(dispatch?.inputs?.task_id).toBeDefined();
+    expect(dispatch?.inputs?.run_id).toBeDefined();
+    const fetch = doc.jobs.fetch;
+    expect(fetch).toBeDefined();
+    expect(fetch['timeout-minutes']).toBeLessThanOrEqual(10);
+    expect(JSON.stringify(fetch)).toContain('secrets.RUNNER_TOKEN');
+    expect(JSON.stringify(fetch)).toContain('secrets.INGEST_URL');
+    const run = namedStep(fetch, '拉取订阅并回传').run ?? '';
+    expect(run).toContain('pnpm proxy-fetch');
+    expect(run).toContain('--sub-id');
+    expect(checkoutStep(fetch).with?.['persist-credentials']).toBe(false);
+  });
+});
+
 describe('probe.yml', () => {
   it('由 Worker 定时触发，支持手动触发', async () => {
     const doc = await loadWorkflow();

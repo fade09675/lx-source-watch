@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from 'node:fs';
 import { log } from '../logger.js';
 import { httpRequest, parseProxy, type ProxyConfig } from '../net/http.js';
 import { errorMessage } from '../util.js';
@@ -197,6 +198,22 @@ export async function testRunnerProxy(proxy: RunnerProxy, options: TestProxyOpti
       const result = await probeThrough(client, options.allowPrivate ?? false, deadline);
       if (result.ok) return result;
       last = result;
+
+      // 内核冷启动时第一次 TLS 连接常被复位；等 1.5 秒再试一次（照 IPTV 的 probeKernelOnce）。
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      const retryDeadline = Date.now() + 15_000;
+      const retry = await probeThrough(client, options.allowPrivate ?? false, retryDeadline);
+      if (retry.ok) return retry;
+      last = retry;
+      if (existsSync(handle.logPath)) {
+        const tail = readFileSync(handle.logPath, 'utf8')
+          .trim()
+          .split('\n')
+          .slice(-6)
+          .join(' | ')
+          .slice(-500);
+        if (tail) last = { ...retry, error: `${retry.error ?? '不可用'}；内核日志：${tail}`.slice(0, 900) };
+      }
     } catch (e) {
       last = fail(errorMessage(e).slice(0, 300));
     } finally {

@@ -80,6 +80,58 @@ export function parseProxyUri(raw: string): ParsedProxy | null {
   }
 }
 
+/**
+ * Surge / Loon / Quantumult X 单行格式：
+ * - `名字 = socks5, 1.2.3.4, 1080, user, pass`
+ * - `socks5=1.2.3.4:1080, username=user, password=pass, tag=名字`
+ * 只解析可直接测活的 http/socks5；内核协议保留原文，避免字段丢失。
+ */
+export function parseClientLine(raw: string): ParsedProxy | null {
+  const text = raw.trim();
+  if (!text || text.includes('://') || !text.includes('=')) return null;
+
+  const qx = /^(http|https|socks5)\s*=\s*([^,]+)\s*,\s*(.*)$/i.exec(text);
+  if (qx) {
+    const address = qx[2]?.trim() ?? '';
+    const [host, portText] = address.split(':');
+    const port = Number(portText);
+    if (!host || !Number.isFinite(port) || port <= 0) return null;
+    const pairs = Object.fromEntries(
+      (qx[3] ?? '')
+        .split(',')
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .map((part) => {
+          const index = part.indexOf('=');
+          return index > 0 ? [part.slice(0, index).trim().toLowerCase(), part.slice(index + 1).trim()] : ['', part];
+        })
+        .filter(([key]) => key),
+    ) as Record<string, string>;
+    const node = emptyNode(qx[1]!.toLowerCase(), pairs.tag || pairs.name || host);
+    node.host = host;
+    node.port = port;
+    node.username = pairs.username || pairs.user || '';
+    node.password = pairs.password || pairs.pass || '';
+    return node;
+  }
+
+  const surge = /^([^=]+?)\s*=\s*(http|https|socks5)\s*,\s*(.+)$/i.exec(text);
+  if (surge) {
+    const parts = (surge[3] ?? '').split(',').map((part) => part.trim());
+    const host = parts[0] ?? '';
+    const port = Number(parts[1]);
+    if (!host || !Number.isFinite(port) || port <= 0) return null;
+    const node = emptyNode(surge[2]!.toLowerCase(), surge[1]!.trim() || host);
+    node.host = host;
+    node.port = port;
+    node.username = parts[2] ?? '';
+    node.password = parts[3] ?? '';
+    return node;
+  }
+
+  return null;
+}
+
 export function parseHostPortLine(raw: string): ParsedProxy | null {
   const text = raw.trim();
   if (!text || text.includes('://')) return null;
@@ -218,7 +270,7 @@ export function parseProxyText(text: string): ParseResult {
   for (const line of trimmed.split(/\r?\n/)) {
     const raw = line.trim();
     if (!raw || raw.startsWith('#')) continue;
-    const node = parseProxyUri(raw) ?? parseHostPortLine(raw);
+    const node = parseProxyUri(raw) ?? parseClientLine(raw) ?? parseHostPortLine(raw);
     if (node) nodes.push(node);
     else warnings.push(`无法识别：${raw.slice(0, 60)}`);
   }

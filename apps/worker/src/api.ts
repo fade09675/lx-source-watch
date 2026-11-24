@@ -606,7 +606,7 @@ export function createApi(): Hono<Ctx> {
         { status: 404, headers: { 'cache-control': CACHE_PRIVATE } },
       );
     }
-    return Response.json(detail, { headers: { 'cache-control': CACHE_PRIVATE } });
+    return Response.json(detail, { headers: { 'cache-control': 'private, max-age=15' } });
   });
 
   api.get('/admin/failures', async (c) => {
@@ -841,7 +841,7 @@ export function createApi(): Hono<Ctx> {
     );
   });
 
-  const TASK_TYPES: TaskType[] = ['probe', 'discovery', 'source-test', 'proxy-test'];
+  const TASK_TYPES: TaskType[] = ['probe', 'discovery', 'source-test', 'proxy-test', 'proxy-fetch-sub'];
   const TASK_STATUSES: TaskStatus[] = ['queued', 'running', 'succeeded', 'failed', 'cancelled'];
 
   api.get('/admin/tasks', async (c) => {
@@ -886,6 +886,12 @@ export function createApi(): Hono<Ctx> {
     if (type === 'source-test' && !payload.only) {
       return Response.json(
         { error: 'bad_payload', message: '单源测试需要 payload.only' },
+        { status: 400, headers: { 'cache-control': CACHE_PRIVATE } },
+      );
+    }
+    if (type === 'proxy-fetch-sub' && !payload.subscriptionId) {
+      return Response.json(
+        { error: 'bad_payload', message: '拉取订阅需要 payload.subscriptionId' },
         { status: 400, headers: { 'cache-control': CACHE_PRIVATE } },
       );
     }

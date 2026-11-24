@@ -15,6 +15,7 @@
     "candidates": "tsx apps/runner/src/index.ts candidates",
     "cn": "tsx apps/runner/src/index.ts cn",
     "proxy-test": "tsx apps/runner/src/index.ts proxy-test",
+    "proxy-fetch": "tsx apps/runner/src/index.ts proxy-fetch",
     "ingest": "tsx apps/runner/src/index.ts publish",
     "validate": "tsx apps/runner/src/index.ts validate",
     "test": "vitest run",

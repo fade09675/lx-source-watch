@@ -84,6 +84,8 @@ export const EndpointResultSchema = z.object({
   versionState: z.enum(['synced', 'lagging', 'unknown']).optional(),
   ms: z.number().int().nonnegative(),
   error: z.string().max(300).optional(),
+  /** 国内代理补测结果；独立于海外下载是否成功。 */
+  cn: CnResultSchema.optional(),
   checkedAt: isoDateTime,
 });
 export type EndpointResult = z.infer<typeof EndpointResultSchema>;
@@ -373,6 +375,8 @@ export interface EndpointRow {
   bytes: number | null;
   ms: number;
   error: string | null;
+  /** 国内代理补测结果（4B）；旧数据为 null。 */
+  cn: CnResult | null;
   checkedAt: string;
 }
 

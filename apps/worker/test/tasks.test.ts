@@ -98,6 +98,12 @@ describe('tasks 纯函数', () => {
     });
   });
 
+  it('proxy-fetch-sub 走订阅拉取工作流', () => {
+    const plan = buildDispatch('proxy-fetch-sub', { subscriptionId: 'sub-9' }, 'task-6', 'run-6');
+    expect(plan.workflow).toBe('proxy-fetch-sub');
+    expect(plan.fetchSub).toEqual({ subscriptionId: 'sub-9', taskId: 'task-6', runId: 'run-6' });
+  });
+
   it('任务 id 与运行 id 格式稳定且不重复', () => {
     const a = newTaskId();
     const b = newTaskId();
@@ -107,7 +113,7 @@ describe('tasks 纯函数', () => {
   });
 
   it('类型与状态都有中文标签', () => {
-    expect(Object.keys(TASK_TYPE_LABEL).sort()).toEqual(['discovery', 'probe', 'proxy-test', 'source-test']);
+    expect(Object.keys(TASK_TYPE_LABEL).sort()).toEqual(['discovery', 'probe', 'proxy-fetch-sub', 'proxy-test', 'source-test']);
     expect(Object.keys(TASK_STATUS_LABEL).sort()).toEqual(['cancelled', 'failed', 'queued', 'running', 'succeeded']);
   });
 });
