@@ -79,6 +79,7 @@ describe('probe.yml', () => {
     const doc = await loadWorkflow();
     const step = namedStep(doc.jobs.probe, '探测');
     expect(step.run).toContain('pnpm probe');
+    expect(step.run).toContain('mkdir -p out');
     expect(step.run).toContain('--concurrency "${INPUT_CONCURRENCY:-4}"');
     expect(step.run).toContain('tee out/run.log');
     expect(Object.keys(step.env ?? {}).sort()).toEqual([

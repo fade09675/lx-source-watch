@@ -117,6 +117,7 @@ jobs:
           RUN_ID: ${{ inputs.run_id }}
         run: |
           set -euo pipefail
+          mkdir -p out
           args=(--concurrency "${INPUT_CONCURRENCY:-4}")
           if [ -n "${RUN_ID}" ]; then args+=(--run-id "${RUN_ID}"); fi
           if [ -n "${INPUT_ONLY}" ]; then args+=(--only "${INPUT_ONLY}"); fi
@@ -195,6 +196,8 @@ jobs:
       - name: 国内补测
         if: env.RUNNER_TOKEN != ''
         run: |
+          set -euo pipefail
+          mkdir -p out
           args=(--urls-in out/urls.json --out out/cn.json --endpoint "$INGEST_URL" --token "$RUNNER_TOKEN" --max-proxies 8 --concurrency 5)
           if [ -n "$PROXY_ID" ]; then args+=(--proxy-id "$PROXY_ID"); fi
           pnpm cn -- "${args[@]}" 2>&1 | tee out/cn.log
