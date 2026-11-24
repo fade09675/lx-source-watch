@@ -53,6 +53,7 @@ export async function checkEndpoints(
         role: endpoint.role,
         ok: true,
         sha: loaded.sha,
+        sha256: loaded.sha256,
         bytes: loaded.bytes,
         version: meta.version?.slice(0, 40),
         ms: Date.now() - started,

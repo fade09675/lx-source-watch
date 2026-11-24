@@ -128,6 +128,7 @@ export async function runProbe(opts: ProbeOptions): Promise<ProbeOutput> {
         code: chosen.check.code,
         bytes: chosen.check.bytes ?? Buffer.byteLength(chosen.check.code),
         sha: chosen.check.sha ?? '',
+        sha256: chosen.check.sha256 ?? '',
         fromMirror: chosen.check.role === 'candidate',
         url: chosen.check.url,
       };

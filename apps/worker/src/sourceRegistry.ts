@@ -14,6 +14,8 @@ export interface SourceRegistryRow {
   path: string;
   homepage: string;
   mirrors: string[];
+  /** 主地址内容的完整 sha256；用于跨 URL 判重，旧数据可能为空。 */
+  contentSha256: string | null;
   enabled: boolean;
   trusted: boolean;
   notes: string;
@@ -29,6 +31,7 @@ export interface SourceInput {
   url?: string;
   homepage?: string;
   mirrors?: string[];
+  contentSha256?: string | null;
   enabled?: boolean;
   trusted?: boolean;
   notes?: string;
@@ -49,6 +52,7 @@ interface RawRow {
   path: string;
   homepage: string;
   mirrors: string;
+  content_sha256: string | null;
   enabled: number;
   trusted: number;
   notes: string;
@@ -78,6 +82,7 @@ export function fromRow(row: RawRow): SourceRegistryRow {
     path: row.path,
     homepage: row.homepage,
     mirrors: parseMirrors(row.mirrors),
+    contentSha256: row.content_sha256 ?? null,
     enabled: row.enabled === 1,
     trusted: row.trusted === 1,
     notes: row.notes,
@@ -166,6 +171,7 @@ export function validateSourceInput(input: SourceInput, base?: SourceRegistryRow
       path: '',
       homepage,
       mirrors,
+      contentSha256: input.contentSha256 ?? base?.contentSha256 ?? null,
       enabled: input.enabled ?? base?.enabled ?? true,
       trusted: input.trusted ?? base?.trusted ?? false,
       notes,
@@ -176,7 +182,7 @@ export function validateSourceInput(input: SourceInput, base?: SourceRegistryRow
   };
 }
 
-const COLUMNS = `id, title, category, storage, url, path, homepage, mirrors, enabled, trusted, notes, sort_order, created_at, updated_at`;
+const COLUMNS = `id, title, category, storage, url, path, homepage, mirrors, content_sha256, enabled, trusted, notes, sort_order, created_at, updated_at`;
 
 export async function listSourceRegistry(db: D1Database): Promise<SourceRegistryRow[]> {
   const result = await db.prepare(`SELECT ${COLUMNS} FROM source_registry ORDER BY sort_order ASC, title ASC`).all<RawRow>();
@@ -222,7 +228,7 @@ export async function createSourceRegistry(
 
   await db
     .prepare(
-      `INSERT INTO source_registry (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO source_registry (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id,
@@ -233,6 +239,7 @@ export async function createSourceRegistry(
       source.path,
       source.homepage,
       JSON.stringify(source.mirrors),
+      source.contentSha256 ?? null,
       source.enabled ? 1 : 0,
       source.trusted ? 1 : 0,
       source.notes,
@@ -264,6 +271,7 @@ export async function updateSourceRegistry(
     .prepare(
       `UPDATE source_registry
          SET title = ?, category = ?, storage = ?, url = ?, path = ?, homepage = ?, mirrors = ?,
+             content_sha256 = COALESCE(?, content_sha256),
              enabled = ?, trusted = ?, notes = ?, updated_at = ?
        WHERE id = ?`,
     )
@@ -275,6 +283,7 @@ export async function updateSourceRegistry(
       value.path,
       value.homepage,
       JSON.stringify(value.mirrors),
+      value.contentSha256 ?? null,
       value.enabled ? 1 : 0,
       value.trusted ? 1 : 0,
       value.notes,

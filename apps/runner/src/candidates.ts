@@ -10,7 +10,7 @@ import { loadLxSource } from './lx/sandbox.js';
 import { log } from './logger.js';
 import type { ProxyConfig } from './net/http.js';
 import { loadScript } from './script.js';
-import { errorMessage, mapLimit, nowIso } from './util.js';
+import { errorMessage, mapLimit, nowIso, sha256Hex } from './util.js';
 
 export interface EnrichOptions {
   candidatesPath: string;
@@ -77,6 +77,7 @@ export async function enrichCandidates(opts: EnrichOptions): Promise<CandidateFi
         description: clip(meta.description ?? candidate.description, 300),
         platforms: platforms.slice(0, 24).map((key) => clip(key, 32) ?? key),
         bytes: script.bytes,
+        sha256: sha256Hex(script.code),
         initOk: true,
         initError: undefined,
         state: 'qualified',

@@ -9,6 +9,7 @@ const EVENT_LABEL: Record<EventItem['type'], string> = {
   failed: '持续失效',
   new: '新源',
   updated: '版本更新',
+  merged: '重复合并',
 };
 
 const RUN_STATUS: Record<string, string> = {

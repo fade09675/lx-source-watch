@@ -6,6 +6,7 @@ import { ThemeProvider } from './theme';
 import { AboutPage } from './pages/About';
 import { AdminPage } from './pages/Admin';
 import { CandidatesPage } from './pages/Candidates';
+import { DuplicatesPage } from './pages/Duplicates';
 import { LoginPage } from './pages/Login';
 import { ManageSourcesPage } from './pages/ManageSources';
 import { OverviewPage } from './pages/Overview';
@@ -52,6 +53,7 @@ export function App() {
               <Route path="/sources" element={<OverviewPage />} />
               <Route path="/s/:id" element={<SourceDetailPage />} />
               <Route path="/candidates" element={<CandidatesPage />} />
+              <Route path="/admin/duplicates" element={<DuplicatesPage />} />
               <Route path="/runs" element={<RunsPage />} />
               <Route path="/runs/:runId" element={<RunDetailPage />} />
               <Route path="/admin" element={<AdminPage />} />

@@ -43,6 +43,7 @@ function baseResult(src: ResolvedSource, script: LoadedScript, started: number):
     category: src.category,
     storage: src.storage,
     scriptSha: script.sha,
+    sha256: script.sha256,
     endpoints: [],
     status: 'untested',
     initOk: false,

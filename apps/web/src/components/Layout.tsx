@@ -19,6 +19,7 @@ const GROUPS: Array<{ title: string; items: NavItem[] }> = [
       { to: '/sources', label: '音源总览', icon: '◎' },
       { to: '/admin/sources', label: '音源管理', icon: '☰' },
       { to: '/candidates', label: '候选源', icon: '＋' },
+    { to: '/admin/duplicates', label: '重复与别名', icon: '⧉' },
     ],
   },
   {

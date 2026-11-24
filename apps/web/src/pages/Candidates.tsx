@@ -10,6 +10,7 @@ const STATE_META: Record<string, { label: string; tone: string; hint: string }> 
   qualified: { label: '可收录', tone: 'ok', hint: '初始化通过，等自动或手动收录' },
   rejected: { label: '已拒绝', tone: 'bad', hint: '不会自动收录' },
   promoted: { label: '已收录', tone: 'idle', hint: '已进入正式音源清单' },
+  duplicate: { label: '重复', tone: 'idle', hint: '与已有音源内容相同，已自动合并为别名' },
 };
 
 const STATE_TABS: Array<{ value: string; label: string }> = [
@@ -17,6 +18,7 @@ const STATE_TABS: Array<{ value: string; label: string }> = [
   { value: 'new', label: '待验证' },
   { value: 'qualified', label: '可收录' },
   { value: 'promoted', label: '已收录' },
+  { value: 'duplicate', label: '重复' },
   { value: 'rejected', label: '已拒绝' },
 ];
 

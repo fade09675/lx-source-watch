@@ -18,6 +18,7 @@ import {
   countCandidates,
   countCandidatesByState,
   deleteCandidatesByState,
+  getCandidate,
   getCandidates,
   getEvents,
   getFailureAggregate,
@@ -59,6 +60,9 @@ import {
 import { getSchedulerStatus } from './scheduler';
 import { autoPromoteCandidates, promoteCandidate } from './candidatePromotion';
 import { loadSettings, resetSettings, saveSettings } from './settings';
+import { listDuplicateOverview } from './dedup';
+import { markCandidateDuplicate, mergeIntoCanonical } from './mergeSources';
+import { listAliases, setAliasState } from './aliases';
 import {
   cancelTask,
   createTask,
@@ -80,7 +84,7 @@ type Ctx = { Bindings: Env };
 // 整站需要登录，任何响应都不允许被共享缓存保存。
 const CACHE_PRIVATE = 'private, no-store';
 
-const CANDIDATE_STATES = ['new', 'qualified', 'rejected', 'promoted'];
+const CANDIDATE_STATES = ['new', 'qualified', 'rejected', 'promoted', 'duplicate'];
 
 function isSecure(requestUrl: string): boolean {
   return new URL(requestUrl).protocol === 'https:';
@@ -338,6 +342,145 @@ export function createApi(): Hono<Ctx> {
     const updated = await setCandidateState(c.env.DB, id, state, new Date().toISOString());
     if (!updated) return c.json({ error: 'not_found', message: `未知候选源：${id}` }, 404);
     return c.json({ ok: true, id, state }, 200, { 'cache-control': CACHE_PRIVATE });
+  });
+
+  // 重复内容与别名：只读总览。
+  api.get('/admin/duplicates', async (c) => {
+    const overview = await listDuplicateOverview(c.env.DB);
+    return c.json(overview, 200, { 'cache-control': CACHE_PRIVATE });
+  });
+
+  // 确认重复后执行合并：主源追加镜像、写别名、停用重复源（不删除）。
+  api.post('/admin/duplicates/merge', async (c) => {
+    let body: { canonicalId?: unknown; duplicates?: unknown } = {};
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'bad_request', message: '请求格式错误' }, 400);
+    }
+    const canonicalId = typeof body.canonicalId === 'string' ? body.canonicalId.trim() : '';
+    if (!canonicalId) return c.json({ error: 'bad_request', message: '缺少主源 id' }, 400);
+
+    const canonical = await getSourceRegistry(c.env.DB, canonicalId);
+    if (!canonical) return c.json({ error: 'not_found', message: `主源不存在：${canonicalId}` }, 404);
+    const canonicalSha = canonical.contentSha256?.trim() ?? '';
+    if (!canonicalSha) {
+      return c.json({ error: 'missing_sha', message: '主源还没有内容指纹，等下一轮探测完成后再合并' }, 400);
+    }
+
+    const rawDuplicates = Array.isArray(body.duplicates) ? body.duplicates : [];
+    if (rawDuplicates.length === 0) return c.json({ error: 'bad_request', message: '缺少要合并的重复项' }, 400);
+    if (rawDuplicates.length > 50) return c.json({ error: 'bad_request', message: '一次最多合并 50 项' }, 400);
+
+    const now = new Date().toISOString();
+    const registryDuplicates: { url: string; sourceId: string; sha256: string }[] = [];
+    const candidateDuplicates: { url: string; id: string; sha256: string }[] = [];
+    const errors: string[] = [];
+
+    for (const raw of rawDuplicates) {
+      const item = (raw ?? {}) as { url?: unknown; sourceId?: unknown };
+      const url = typeof item.url === 'string' ? item.url.trim() : '';
+      const sourceId = typeof item.sourceId === 'string' ? item.sourceId.trim() : '';
+      if (!url) {
+        errors.push('存在没有地址的重复项');
+        continue;
+      }
+      if (sourceId) {
+        const registryRow = await getSourceRegistry(c.env.DB, sourceId);
+        if (registryRow) {
+          if ((registryRow.contentSha256 ?? '') !== canonicalSha) {
+            errors.push(`${sourceId} 的内容指纹与主源不一致`);
+            continue;
+          }
+          if (sourceId !== canonicalId) registryDuplicates.push({ url, sourceId, sha256: canonicalSha });
+          continue;
+        }
+        const candidate = await getCandidate(c.env.DB, sourceId);
+        if (!candidate) {
+          errors.push(`${sourceId} 不存在`);
+          continue;
+        }
+        if ((candidate.sha256 ?? '') !== canonicalSha) {
+          errors.push(`${sourceId} 的内容指纹与主源不一致`);
+          continue;
+        }
+        candidateDuplicates.push({ url, id: candidate.id, sha256: canonicalSha });
+        continue;
+      }
+      errors.push(`${url} 缺少来源 id，无法确认内容一致`);
+    }
+
+    if (errors.length > 0) {
+      return c.json({ error: 'sha_mismatch', message: '没有通过内容校验，未执行合并', errors }, 400, {
+        'cache-control': CACHE_PRIVATE,
+      });
+    }
+    if (registryDuplicates.length === 0 && candidateDuplicates.length === 0) {
+      return c.json({ error: 'bad_request', message: '没有可合并的重复项' }, 400);
+    }
+
+    const merge = await mergeIntoCanonical(
+      c.env.DB,
+      canonicalId,
+      [
+        ...registryDuplicates.map((item) => ({ url: item.url, sourceId: item.sourceId, sha256: item.sha256 })),
+        ...candidateDuplicates.map((item) => ({ url: item.url, sha256: item.sha256 })),
+      ],
+      now,
+    );
+
+    const markedCandidates: string[] = [];
+    for (const item of candidateDuplicates) {
+      if (await markCandidateDuplicate(c.env.DB, item.id, canonicalId, now)) markedCandidates.push(item.id);
+    }
+
+    return c.json(
+      {
+        ok: merge.ok,
+        canonicalId,
+        aliases: merge.aliases,
+        addedMirrors: merge.addedMirrors,
+        disabled: merge.disabled,
+        candidatesMarked: markedCandidates,
+        errors: merge.errors,
+      },
+      200,
+      { 'cache-control': CACHE_PRIVATE },
+    );
+  });
+
+  api.get('/admin/aliases', async (c) => {
+    const sourceId = c.req.query('sourceId')?.trim();
+    const aliases = await listAliases(c.env.DB, { canonicalSourceId: sourceId || undefined, limit: 1000 });
+    return c.json({ aliases, count: aliases.length }, 200, { 'cache-control': CACHE_PRIVATE });
+  });
+
+  api.post('/admin/aliases/ignore', async (c) => {
+    let url = '';
+    try {
+      const body = await c.req.json<{ url?: unknown }>();
+      url = typeof body.url === 'string' ? body.url.trim() : '';
+    } catch {
+      return c.json({ error: 'bad_request', message: '请求格式错误' }, 400);
+    }
+    if (!url) return c.json({ error: 'bad_request', message: '缺少别名地址' }, 400);
+    const ok = await setAliasState(c.env.DB, url, 'ignored');
+    if (!ok) return c.json({ error: 'not_found', message: '别名不存在' }, 404);
+    return c.json({ ok: true, url, state: 'ignored' }, 200, { 'cache-control': CACHE_PRIVATE });
+  });
+
+  api.post('/admin/aliases/restore', async (c) => {
+    let url = '';
+    try {
+      const body = await c.req.json<{ url?: unknown }>();
+      url = typeof body.url === 'string' ? body.url.trim() : '';
+    } catch {
+      return c.json({ error: 'bad_request', message: '请求格式错误' }, 400);
+    }
+    if (!url) return c.json({ error: 'bad_request', message: '缺少别名地址' }, 400);
+    const ok = await setAliasState(c.env.DB, url, 'active');
+    if (!ok) return c.json({ error: 'not_found', message: '别名不存在' }, 404);
+    return c.json({ ok: true, url, state: 'active' }, 200, { 'cache-control': CACHE_PRIVATE });
   });
 
   // 网页触发一次探测，避免每次都去 GitHub 手动点。

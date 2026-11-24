@@ -366,6 +366,7 @@ export interface RunEndpointRow {
   ok: boolean;
   status: number | null;
   sha: string | null;
+  sha256: string | null;
   version: string | null;
   versionState: 'synced' | 'lagging' | 'unknown' | null;
   bytes: number | null;
@@ -480,6 +481,7 @@ export interface AdminSource {
   path: string;
   homepage: string;
   mirrors: string[];
+  contentSha256?: string | null;
   enabled: boolean;
   trusted: boolean;
   notes: string;
@@ -510,6 +512,60 @@ export interface SourceInputPayload {
   enabled?: boolean;
   trusted?: boolean;
   notes?: string;
+}
+
+export interface DuplicateEntryView {
+  kind: 'registry' | 'candidate';
+  id: string;
+  url: string;
+  sha256: string;
+  title: string;
+  author: string;
+  version: string;
+  enabled: boolean;
+  state: string;
+  official: boolean;
+  firstSeen: string;
+}
+
+export interface DuplicateGroup {
+  sha256: string;
+  canonical: DuplicateEntryView;
+  entries: DuplicateEntryView[];
+  merged: boolean;
+}
+
+export interface SimilarGroup {
+  title: string;
+  author: string;
+  entries: DuplicateEntryView[];
+}
+
+export interface AliasView {
+  url: string;
+  canonicalSourceId: string;
+  canonicalTitle: string;
+  sha256: string | null;
+  source: string;
+  state: string;
+  updatedAt: string;
+}
+
+export interface DuplicateOverview {
+  groups: DuplicateGroup[];
+  similar: SimilarGroup[];
+  aliases: AliasView[];
+  counts: { groups: number; duplicateUrls: number; mergedUrls: number; aliases: number; similar: number };
+}
+
+export interface MergeDuplicatesResult {
+  ok: boolean;
+  canonicalId: string;
+  aliases: string[];
+  addedMirrors: string[];
+  disabled: string[];
+  candidatesMarked: string[];
+  errors: string[];
 }
 
 export const api = {
@@ -649,4 +705,21 @@ export const api = {
       `/api/admin/sources/${encodeURIComponent(id)}/test`,
       { method: 'POST' },
     ),
+
+  duplicates: () => request<DuplicateOverview>('/api/admin/duplicates'),
+  mergeDuplicates: (canonicalId: string, duplicates: { url: string; sourceId?: string }[]) =>
+    request<MergeDuplicatesResult>('/api/admin/duplicates/merge', {
+      method: 'POST',
+      body: JSON.stringify({ canonicalId, duplicates }),
+    }),
+  ignoreAlias: (url: string) =>
+    request<{ ok: boolean; url: string; state: string }>('/api/admin/aliases/ignore', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    }),
+  restoreAlias: (url: string) =>
+    request<{ ok: boolean; url: string; state: string }>('/api/admin/aliases/restore', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    }),
 };

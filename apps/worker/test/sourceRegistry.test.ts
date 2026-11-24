@@ -17,6 +17,7 @@ function row(patch: Partial<SourceRegistryRow> = {}): SourceRegistryRow {
     path: '',
     homepage: '',
     mirrors: [],
+    contentSha256: null,
     enabled: true,
     trusted: false,
     notes: '',

@@ -8,7 +8,10 @@ export const MAX_SCRIPT_BYTES = 2 * 1024 * 1024;
 export interface LoadedScript {
   code: string;
   bytes: number;
+  /** 兼容旧字段：sha256 前 16 位。 */
   sha: string;
+  /** 完整 sha256，用于跨地址判重。 */
+  sha256: string;
   fromMirror: boolean;
   url: string;
   contentType?: string;
@@ -57,6 +60,7 @@ export async function fetchScriptText(url: string, opts: LoadScriptOptions): Pro
     code,
     bytes: Buffer.byteLength(code),
     sha: sha256Hex(code).slice(0, 16),
+    sha256: sha256Hex(code),
     fromMirror: false,
     url,
     contentType: contentType || undefined,
@@ -74,6 +78,7 @@ export async function readRepoScript(src: ResolvedSource): Promise<LoadedScript>
     code,
     bytes,
     sha: sha256Hex(code).slice(0, 16),
+    sha256: sha256Hex(code),
     fromMirror: false,
     url: src.resolvedUrl,
   };

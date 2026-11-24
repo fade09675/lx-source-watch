@@ -2032,3 +2032,15 @@ a:hover {
   vertical-align: top;
 }
 
+
+/* ---- duplicates & aliases ---- */
+.dup-list { display: grid; gap: 14px; }
+.dup-group { border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel-2); overflow: hidden; }
+.dup-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.dup-head > div { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.dup-sha { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted); border: 1px solid var(--border-soft); border-radius: 999px; padding: 2px 8px; }
+.dup-group .data-table { border: 0; }
+.alias-table td { vertical-align: middle; }
+@media (max-width: 760px) {
+  .dup-head { align-items: flex-start; }
+}

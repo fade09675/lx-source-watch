@@ -73,6 +73,11 @@ export const EndpointResultSchema = z.object({
   ok: z.boolean(),
   status: z.number().int().optional(),
   sha: z.string().max(64).optional(),
+  /** 完整 sha256（十六进制），用于跨地址的内容去重；sha 是兼容用的短指纹。 */
+  sha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
   bytes: z.number().int().nonnegative().optional(),
   version: z.string().max(40).optional(),
   /** synced=与主地址同 sha；lagging=可下载但内容不同；unknown=主地址不可用无法比对。 */
@@ -97,6 +102,11 @@ export const SourceResultSchema = z.object({
   expire: z.string().max(40).optional(),
   /** 脚本内容的 sha256 前 16 位，用于发现“同源换皮”。 */
   scriptSha: z.string().max(64).optional(),
+  /** 完整 sha256，用于跨音源判重。 */
+  sha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
   /** 所有接入点（主地址 + 镜像/加速候选）的下载检查结果。 */
   endpoints: z.array(EndpointResultSchema).max(16).default([]),
   status: SourceStatusSchema,
@@ -141,6 +151,11 @@ export const CandidateSchema = z.object({
   path: z.string().min(1).max(300),
   url: httpUrl,
   sha: z.string().min(6).max(64),
+  /** 完整 sha256；下载体检后写入，用于跨仓库内容去重。 */
+  sha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
   title: z.string().max(160).optional(),
   version: z.string().max(40).optional(),
   author: z.string().max(80).optional(),
@@ -149,7 +164,7 @@ export const CandidateSchema = z.object({
   bytes: z.number().int().nonnegative().optional(),
   initOk: z.boolean().optional(),
   initError: z.string().max(300).optional(),
-  state: z.enum(['new', 'qualified', 'rejected', 'promoted']).default('new'),
+  state: z.enum(['new', 'qualified', 'rejected', 'promoted', 'duplicate']).default('new'),
   firstSeen: isoDateTime.optional(),
   lastSeen: isoDateTime.optional(),
 });
@@ -321,6 +336,8 @@ export interface EndpointRow {
   ok: boolean;
   status: number | null;
   sha: string | null;
+  /** 完整内容指纹（sha256 hex），用于跨 URL 判重；历史数据可能为空。 */
+  sha256: string | null;
   version: string | null;
   versionState: 'synced' | 'lagging' | 'unknown' | null;
   bytes: number | null;
@@ -369,7 +386,7 @@ export interface RunSummary {
 export interface EventItem {
   id: string;
   at: string;
-  type: 'recovered' | 'degraded' | 'failed' | 'new' | 'updated';
+  type: 'recovered' | 'degraded' | 'failed' | 'new' | 'updated' | 'merged';
   sourceId: string;
   title: string;
   message: string;

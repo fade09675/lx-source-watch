@@ -208,8 +208,8 @@ export async function writeSnapshot(db: D1Database, input: {
       statements.push(
         db
           .prepare(
-            `INSERT INTO source_endpoints (run_id, source_id, url, role, ok, status, sha, version, version_state, bytes, ms, error, checked_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `INSERT INTO source_endpoints (run_id, source_id, url, role, ok, status, sha, sha256, version, version_state, bytes, ms, error, checked_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(run_id, source_id, url) DO NOTHING`,
           )
           .bind(
@@ -220,6 +220,7 @@ export async function writeSnapshot(db: D1Database, input: {
             endpoint.ok ? 1 : 0,
             endpoint.status ?? null,
             endpoint.sha ?? null,
+            endpoint.sha256 ?? null,
             endpoint.version ?? null,
             endpoint.versionState ?? null,
             endpoint.bytes ?? null,
@@ -234,8 +235,8 @@ export async function writeSnapshot(db: D1Database, input: {
     statements.push(
       db
         .prepare(
-          `INSERT INTO source_runs (run_id, source_id, status, init_ok, init_error, ok, tested, total, duration_ms, checked_at, version, script_sha, endpoints_ok, endpoints_total)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO source_runs (run_id, source_id, status, init_ok, init_error, ok, tested, total, duration_ms, checked_at, version, script_sha, content_sha256, endpoints_ok, endpoints_total)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(run_id, source_id) DO NOTHING`,
         )
         .bind(
@@ -251,6 +252,7 @@ export async function writeSnapshot(db: D1Database, input: {
           source.checkedAt,
           source.version ?? null,
           source.scriptSha ?? null,
+          source.sha256 ?? null,
           endpointsOk,
           source.endpoints.length,
         ),
@@ -340,11 +342,12 @@ export async function writeSnapshot(db: D1Database, input: {
     statements.push(
       db
         .prepare(
-          `INSERT INTO candidates (id, repo, path, url, sha, title, version, author, description, platforms, bytes, init_ok, init_error, state, first_seen, last_seen)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO candidates (id, repo, path, url, sha, sha256, title, version, author, description, platforms, bytes, init_ok, init_error, state, first_seen, last_seen)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
              title = excluded.title, version = excluded.version, author = excluded.author, description = excluded.description,
              platforms = excluded.platforms, bytes = excluded.bytes, init_ok = excluded.init_ok,
+             sha256 = COALESCE(excluded.sha256, candidates.sha256),
              init_error = excluded.init_error, state = excluded.state, last_seen = excluded.last_seen`,
         )
         .bind(
@@ -353,6 +356,7 @@ export async function writeSnapshot(db: D1Database, input: {
           candidate.path,
           candidate.url,
           candidate.sha,
+          candidate.sha256 ?? null,
           candidate.title ?? null,
           candidate.version ?? null,
           candidate.author ?? null,
@@ -607,6 +611,7 @@ interface CandidateRow {
   path: string;
   url: string;
   sha: string;
+  sha256: string | null;
   title: string | null;
   version: string | null;
   author: string | null;
@@ -620,7 +625,7 @@ interface CandidateRow {
   lastSeen: string | null;
 }
 
-const CANDIDATE_COLUMNS = `id, repo, path, url, sha, title, version, author, description, platforms, bytes,  init_ok AS initOk, init_error AS initError, state, first_seen AS firstSeen, last_seen AS lastSeen`;
+const CANDIDATE_COLUMNS = `id, repo, path, url, sha, sha256, title, version, author, description, platforms, bytes,  init_ok AS initOk, init_error AS initError, state, first_seen AS firstSeen, last_seen AS lastSeen`;
 
 export async function getCandidates(
   db: D1Database,
@@ -644,6 +649,7 @@ function toCandidate(row: CandidateRow): Candidate {
     path: row.path,
     url: row.url,
     sha: row.sha,
+    sha256: row.sha256 ?? undefined,
     title: row.title ?? undefined,
     version: row.version ?? undefined,
     author: row.author ?? undefined,
@@ -712,6 +718,7 @@ interface EndpointDbRow {
   ok: number;
   status: number | null;
   sha: string | null;
+  sha256: string | null;
   version: string | null;
   version_state: string | null;
   bytes: number | null;
@@ -734,7 +741,7 @@ export async function getSourceEndpoints(db: D1Database, sourceId: string, runId
 
   const rows = await db
     .prepare(
-      `SELECT url, role, ok, status, sha, version, version_state, bytes, ms, error, checked_at
+      `SELECT url, role, ok, status, sha, sha256, version, version_state, bytes, ms, error, checked_at
        FROM source_endpoints
        WHERE run_id = ? AND source_id = ?
        ORDER BY CASE role WHEN 'primary' THEN 0 ELSE 1 END, ok DESC, ms ASC`,
@@ -748,6 +755,7 @@ export async function getSourceEndpoints(db: D1Database, sourceId: string, runId
     ok: Boolean(row.ok),
     status: row.status,
     sha: row.sha,
+    sha256: row.sha256 ?? null,
     version: row.version,
     versionState:
       row.version_state === 'synced' || row.version_state === 'lagging' || row.version_state === 'unknown'
@@ -950,7 +958,7 @@ export interface RunEndpointRow extends EndpointRow {
 export async function getRunEndpointRows(db: D1Database, runId: string): Promise<RunEndpointRow[]> {
   const rows = await db
     .prepare(
-      `SELECT source_id AS sourceId, url, role, ok, status, sha, version, version_state, bytes, ms, error, checked_at
+      `SELECT source_id AS sourceId, url, role, ok, status, sha, sha256, version, version_state, bytes, ms, error, checked_at
        FROM source_endpoints
        WHERE run_id = ?
        ORDER BY source_id, CASE role WHEN 'primary' THEN 0 ELSE 1 END, ok DESC, ms ASC`,
@@ -963,6 +971,7 @@ export async function getRunEndpointRows(db: D1Database, runId: string): Promise
       ok: number;
       status: number | null;
       sha: string | null;
+      sha256: string | null;
       version: string | null;
       version_state: string | null;
       bytes: number | null;
@@ -978,6 +987,7 @@ export async function getRunEndpointRows(db: D1Database, runId: string): Promise
     ok: Boolean(row.ok),
     status: row.status,
     sha: row.sha,
+    sha256: row.sha256 ?? null,
     version: row.version,
     versionState:
       row.version_state === 'synced' || row.version_state === 'lagging' || row.version_state === 'unknown'

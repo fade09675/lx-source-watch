@@ -4,6 +4,8 @@ import { getCandidate, getCandidates, setCandidateState } from './db';
 import { getMirrorTemplates } from './mirrors';
 import { createSourceRegistry, findSourceRegistryByUrl } from './sourceRegistry';
 import { loadSettings } from './settings';
+import { decideDuplicate } from './dedup';
+import { markCandidateDuplicate, mergeIntoCanonical } from './mergeSources';
 
 export interface PromotionResult {
   promoted: string[];
@@ -46,6 +48,27 @@ async function promoteOne(
     await setCandidateState(env.DB, candidate.id, 'promoted', now);
     return { ok: true, id: existing.id, existing: true };
   }
+
+  // 内容指纹相同视为重复：并入主源、写别名、把候选标为 duplicate，不再新建源。
+  if (candidate.sha256) {
+    const decision = await decideDuplicate(env.DB, {
+      kind: 'candidate',
+      url: candidate.url,
+      sha256: candidate.sha256,
+      title: candidate.title ?? '',
+      author: candidate.author ?? '',
+    });
+    const canonical = decision.canonical;
+    if (canonical && canonical.id !== candidate.id && decision.action === 'alias' && canonical.kind === 'registry') {
+      await markCandidateDuplicate(env.DB, candidate.id, canonical.id, now);
+      await mergeIntoCanonical(env.DB, canonical.id, [{ url: candidate.url, sha256: candidate.sha256 }], now);
+      return { ok: true, id: canonical.id, existing: true };
+    }
+    if (canonical && canonical.id !== candidate.id && decision.action === 'merge_candidates' && canonical.kind === 'candidate') {
+      await markCandidateDuplicate(env.DB, candidate.id, canonical.id, now);
+      return { ok: true, id: canonical.id, existing: true };
+    }
+  }
   const created = await createSourceRegistry(
     env.DB,
     {
@@ -55,6 +78,7 @@ async function promoteOne(
       url: candidate.url,
       homepage: '',
       mirrors: await suggestedMirrors(env.DB, candidate.url),
+      contentSha256: candidate.sha256 ?? null,
       enabled: true,
       trusted: false,
       notes: `自动收录：${candidate.repo}/${candidate.path}`,
