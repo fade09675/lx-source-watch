@@ -28,6 +28,7 @@ import {
   getSourceDaily,
   getSourceEndpoints,
   getSourceHistory,
+  getSourceMetas,
   getSourcePlatformDaily,
   setCandidateState,
   touchSetting,
@@ -40,6 +41,16 @@ import { isStale } from './merge';
 import { dispatchProbe, dispatchProxyTest, listAllRuns, listProbeRuns } from './dispatch';
 import { getUsage, recordKvPut, refreshUsage } from './usage';
 import { getMirrorTemplates, resetMirrorTemplates, saveMirrorTemplates, MirrorConfigError } from './mirrors';
+import {
+  buildRegistryLinks,
+  createSourceRegistry,
+  deleteSourceRegistry,
+  getSourceRegistry,
+  listSourceRegistry,
+  toPublicRegistry,
+  updateSourceRegistry,
+  type SourceInput,
+} from './sourceRegistry';
 import { getSchedulerStatus } from './scheduler';
 
 type Ctx = { Bindings: Env };
@@ -422,6 +433,127 @@ export function createApi(): Hono<Ctx> {
   api.post('/admin/mirrors/reset', async (c) => {
     const config = await resetMirrorTemplates(c.env.DB);
     return Response.json(config, { headers: { 'cache-control': CACHE_PRIVATE } });
+  });
+
+  // 音源注册表：网页增删改查，探测任务通过公开接口读取启用的音源。
+  api.get('/admin/sources', async (c) => {
+    const [rows, metas, config] = await Promise.all([
+      listSourceRegistry(c.env.DB),
+      getSourceMetas(c.env.DB),
+      getMirrorTemplates(c.env.DB),
+    ]);
+    const sources = rows.map((row) => {
+      const meta = metas.get(row.id);
+      return {
+        ...row,
+        status: meta?.status ?? 'untested',
+        version: meta?.version ?? '',
+        sha: meta?.scriptSha ?? '',
+        endpointsOk: meta?.endpointsOk ?? 0,
+        endpointsTotal: meta?.endpointsTotal ?? 0,
+        lastChangeAt: meta?.lastChangeAt ?? '',
+        lastCheckedAt: meta?.updatedAt ?? '',
+        links: buildRegistryLinks(row.url, row.mirrors, config.templates),
+      };
+    });
+    return Response.json(
+      { sources, mirrorTemplates: config.templates },
+      { headers: { 'cache-control': CACHE_PRIVATE } },
+    );
+  });
+
+  api.post('/admin/sources', async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return Response.json(
+        { error: 'bad_request', message: '请求体不是合法 JSON' },
+        { status: 400, headers: { 'cache-control': CACHE_PRIVATE } },
+      );
+    }
+    const result = await createSourceRegistry(c.env.DB, body as SourceInput);
+    if (!result.ok) {
+      return Response.json(
+        { error: 'bad_source', message: result.errors.join('；'), errors: result.errors },
+        { status: 400, headers: { 'cache-control': CACHE_PRIVATE } },
+      );
+    }
+    return Response.json({ source: result.row }, { status: 201, headers: { 'cache-control': CACHE_PRIVATE } });
+  });
+
+  api.patch('/admin/sources/:id', async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return Response.json(
+        { error: 'bad_request', message: '请求体不是合法 JSON' },
+        { status: 400, headers: { 'cache-control': CACHE_PRIVATE } },
+      );
+    }
+    const result = await updateSourceRegistry(c.env.DB, c.req.param('id'), body as SourceInput);
+    if (!result.ok) {
+      return Response.json(
+        { error: result.status === 404 ? 'not_found' : 'bad_source', message: result.errors.join('；'), errors: result.errors },
+        { status: result.status ?? 400, headers: { 'cache-control': CACHE_PRIVATE } },
+      );
+    }
+    return Response.json({ source: result.row }, { headers: { 'cache-control': CACHE_PRIVATE } });
+  });
+
+  api.delete('/admin/sources/:id', async (c) => {
+    const id = c.req.param('id');
+    const existing = await getSourceRegistry(c.env.DB, id);
+    if (!existing) {
+      return Response.json(
+        { error: 'not_found', message: '音源不存在' },
+        { status: 404, headers: { 'cache-control': CACHE_PRIVATE } },
+      );
+    }
+    await deleteSourceRegistry(c.env.DB, id);
+    return Response.json({ ok: true, id }, { headers: { 'cache-control': CACHE_PRIVATE } });
+  });
+
+  api.post('/admin/sources/:id/test', async (c) => {
+    const id = c.req.param('id');
+    const existing = await getSourceRegistry(c.env.DB, id);
+    if (!existing) {
+      return Response.json(
+        { error: 'not_found', message: '音源不存在' },
+        { status: 404, headers: { 'cache-control': CACHE_PRIVATE } },
+      );
+    }
+    const last = await c.env.SNAPSHOT.get('run:source-test:last');
+    if (last) {
+      const age = Date.now() - Date.parse(last);
+      if (Number.isFinite(age) && age < 30_000) {
+        return Response.json(
+          { error: 'rate_limited', message: '刚触发过，请 30 秒后再试' },
+          { status: 429, headers: { 'cache-control': CACHE_PRIVATE } },
+        );
+      }
+    }
+    const outcome = await dispatchProbe(c.env, { only: id, limit: '1', preferMirror: true });
+    if (!outcome.ok) {
+      return Response.json(
+        { error: 'dispatch_failed', message: outcome.message },
+        { status: outcome.status, headers: { 'cache-control': CACHE_PRIVATE } },
+      );
+    }
+    await recordKvPut(c.env);
+    await c.env.SNAPSHOT.put('run:source-test:last', outcome.dispatchedAt, { expirationTtl: 60 });
+    return Response.json(
+      { ok: true, sourceId: id, dispatchedAt: outcome.dispatchedAt },
+      { headers: { 'cache-control': CACHE_PRIVATE } },
+    );
+  });
+
+  api.get('/config/sources', async (c) => {
+    const rows = await listSourceRegistry(c.env.DB);
+    return Response.json(toPublicRegistry(rows), {
+      headers: { 'cache-control': 'public, max-age=60, s-maxage=300' },
+    });
   });
 
   api.get('/config/mirrors', async (c) => {

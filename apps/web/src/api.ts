@@ -327,6 +327,53 @@ export interface MirrorConfigView {
   custom: boolean;
 }
 
+export interface SourceLink {
+  url: string;
+  label: string;
+  primary: boolean;
+}
+
+export interface AdminSource {
+  id: string;
+  title: string;
+  category: string;
+  storage: 'remote' | 'repo';
+  url: string;
+  path: string;
+  homepage: string;
+  mirrors: string[];
+  enabled: boolean;
+  trusted: boolean;
+  notes: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+  status: string;
+  version: string;
+  sha: string;
+  endpointsOk: number;
+  endpointsTotal: number;
+  lastChangeAt: string;
+  lastCheckedAt: string;
+  links: SourceLink[];
+}
+
+export interface SourceListResult {
+  sources: AdminSource[];
+  mirrorTemplates: MirrorTemplate[];
+}
+
+export interface SourceInputPayload {
+  title?: string;
+  category?: string;
+  url?: string;
+  homepage?: string;
+  mirrors?: string[];
+  enabled?: boolean;
+  trusted?: boolean;
+  notes?: string;
+}
+
 export const api = {
   me: () => request<{ ok: boolean; site: string }>('/api/auth/me'),
   login: (password: string) =>
@@ -419,4 +466,20 @@ export const api = {
       body: JSON.stringify({ templates }),
     }),
   resetMirrors: () => request<MirrorConfigView>('/api/admin/mirrors/reset', { method: 'POST' }),
+
+  sources: () => request<SourceListResult>('/api/admin/sources'),
+  createSource: (input: SourceInputPayload) =>
+    request<{ source: AdminSource }>('/api/admin/sources', { method: 'POST', body: JSON.stringify(input) }),
+  updateSource: (id: string, patch: SourceInputPayload) =>
+    request<{ source: AdminSource }>(`/api/admin/sources/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  deleteSource: (id: string) =>
+    request<{ ok: boolean; id: string }>(`/api/admin/sources/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  testSource: (id: string) =>
+    request<{ ok: boolean; sourceId: string; dispatchedAt: string }>(
+      `/api/admin/sources/${encodeURIComponent(id)}/test`,
+      { method: 'POST' },
+    ),
 };

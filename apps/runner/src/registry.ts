@@ -103,22 +103,10 @@ function resolveEndpoints(primary: string, explicit: string[], suggested: string
   return endpoints;
 }
 
-export async function loadRegistry(
-  registryPath: string,
+export async function loadRegistryFromJson(
+  json: unknown,
   opts: LoadRegistryOptions = {},
 ): Promise<ResolvedSource[]> {
-  let raw: string;
-  try {
-    raw = await readFile(registryPath, 'utf8');
-  } catch {
-    throw new Error(`读取来源清单失败：${registryPath}`);
-  }
-  let json: unknown;
-  try {
-    json = JSON.parse(raw);
-  } catch (e) {
-    throw new Error(`来源清单不是合法 JSON：${registryPath}（${(e as Error).message}）`);
-  }
   const parsed = RegistrySchema.safeParse(json);
   if (!parsed.success) {
     throw new Error(`来源清单校验失败：${formatIssues(parsed.error)}`);
@@ -178,6 +166,51 @@ export async function loadRegistry(
     throw new Error('来源清单为空（检查 enabled / --only 过滤条件）');
   }
   return resolved;
+}
+
+export async function loadRegistry(
+  registryPath: string,
+  opts: LoadRegistryOptions = {},
+): Promise<ResolvedSource[]> {
+  let raw: string;
+  try {
+    raw = await readFile(registryPath, 'utf8');
+  } catch {
+    throw new Error(`读取来源清单失败：${registryPath}`);
+  }
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch (e) {
+    throw new Error(`来源清单不是合法 JSON：${registryPath}（${(e as Error).message}）`);
+  }
+  return loadRegistryFromJson(json, opts);
+}
+
+/** 从 Worker 的公开接口读取音源清单；用于 Actions 探测（任务本身仍零密钥）。 */
+export async function fetchRegistry(
+  url: string,
+  opts: LoadRegistryOptions & { timeoutMs?: number } = {},
+): Promise<ResolvedSource[]> {
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 10_000),
+      headers: { accept: 'application/json', 'user-agent': 'lx-source-watch/1.0' },
+    });
+  } catch (e) {
+    throw new Error(`从接口读取来源清单失败：${url}（${(e as Error).message}）`);
+  }
+  if (!response.ok) {
+    throw new Error(`从接口读取来源清单失败：${url}（HTTP ${response.status}）`);
+  }
+  let json: unknown;
+  try {
+    json = await response.json();
+  } catch (e) {
+    throw new Error(`接口返回的不是合法 JSON：${url}（${(e as Error).message}）`);
+  }
+  return loadRegistryFromJson(json, opts);
 }
 
 export { encodePath };

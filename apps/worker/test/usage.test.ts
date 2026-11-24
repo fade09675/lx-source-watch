@@ -2,6 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../src/env';
 import { aggregateGithubRuns, collectCloudflare, collectGithub, pickStorageRow } from '../src/usage';
 
+const TODAY = new Date().toISOString().slice(0, 10);
+const YESTERDAY = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -43,8 +46,8 @@ describe('pickStorageRow', () => {
   it('returns the newest date', () => {
     const picked = pickStorageRow([
       { dimensions: { date: '2026-11-20' }, max: { byteCount: 1 } },
-      { dimensions: { date: '2026-11-23' }, max: { byteCount: 3 } },
-      { dimensions: { date: '2026-11-22' }, max: { byteCount: 2 } },
+      { dimensions: { date: TODAY }, max: { byteCount: 3 } },
+      { dimensions: { date: YESTERDAY }, max: { byteCount: 2 } },
     ]);
     expect(picked?.max.byteCount).toBe(3);
   });
@@ -120,19 +123,19 @@ describe('collectCloudflare', () => {
               accounts: [
                 {
                   kvOperationsAdaptiveGroups: [
-                    { dimensions: { date: '2026-11-23', actionType: 'read' }, sum: { requests: 10 } },
-                    { dimensions: { date: '2026-11-23', actionType: 'write' }, sum: { requests: 3 } },
-                    { dimensions: { date: '2026-11-22', actionType: 'write' }, sum: { requests: 4 } },
-                    { dimensions: { date: '2026-11-23', actionType: 'list' }, sum: { requests: 2 } },
-                    { dimensions: { date: '2026-11-23', actionType: 'delete' }, sum: { requests: 1 } },
+                    { dimensions: { date: TODAY, actionType: 'read' }, sum: { requests: 10 } },
+                    { dimensions: { date: TODAY, actionType: 'write' }, sum: { requests: 3 } },
+                    { dimensions: { date: YESTERDAY, actionType: 'write' }, sum: { requests: 4 } },
+                    { dimensions: { date: TODAY, actionType: 'list' }, sum: { requests: 2 } },
+                    { dimensions: { date: TODAY, actionType: 'delete' }, sum: { requests: 1 } },
                   ],
                   kvStorageAdaptiveGroups: [
-                    { dimensions: { date: '2026-11-22' }, max: { byteCount: 100 } },
-                    { dimensions: { date: '2026-11-23' }, max: { byteCount: 200 } },
+                    { dimensions: { date: YESTERDAY }, max: { byteCount: 100 } },
+                    { dimensions: { date: TODAY }, max: { byteCount: 200 } },
                   ],
                   d1AnalyticsAdaptiveGroups: [
-                    { dimensions: { date: '2026-11-23', databaseId: 'db-1' }, sum: { rowsRead: 20, rowsWritten: 5 } },
-                    { dimensions: { date: '2026-11-23', databaseId: 'other' }, sum: { rowsRead: 99, rowsWritten: 99 } },
+                    { dimensions: { date: TODAY, databaseId: 'db-1' }, sum: { rowsRead: 20, rowsWritten: 5 } },
+                    { dimensions: { date: TODAY, databaseId: 'other' }, sum: { rowsRead: 99, rowsWritten: 99 } },
                   ],
                 },
               ],
@@ -144,7 +147,7 @@ describe('collectCloudflare', () => {
     });
     const result = await collectCloudflare(
       { CF_ANALYTICS_TOKEN: 't', CF_ACCOUNT_ID: 'a', D1_ID: 'db-1' } as Env,
-      ['2026-11-22', '2026-11-23'],
+      [YESTERDAY, TODAY],
     );
     expect(result).not.toBeNull();
     expect(result?.kv.reads).toBe(10);
@@ -152,10 +155,10 @@ describe('collectCloudflare', () => {
     expect(result?.kv.lists).toBe(2);
     expect(result?.kv.deletes).toBe(1);
     expect(result?.kv.storageBytes).toBe(200);
-    expect(result?.kvWritesByDay.get('2026-11-22')).toBe(4);
+    expect(result?.kvWritesByDay.get(YESTERDAY)).toBe(4);
     expect(result?.d1.rowsRead).toBe(20);
     expect(result?.d1.rowsWritten).toBe(5);
-    expect(result?.d1WritesByDay.get('2026-11-23')).toBe(5);
+    expect(result?.d1WritesByDay.get(TODAY)).toBe(5);
   });
 
   it('throws a readable error on GraphQL errors', async () => {

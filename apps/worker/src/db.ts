@@ -418,6 +418,30 @@ export async function getSourceHistory(db: D1Database, sourceId: string, limit =
   return rows.results;
 }
 
+export interface SourceMeta {
+  id: string;
+  version: string;
+  scriptSha: string;
+  status: string;
+  endpointsOk: number;
+  endpointsTotal: number;
+  lastChangeAt: string;
+  updatedAt: string;
+}
+
+/** 每个音源最新一轮的版本、接入点统计与状态，供网页管理列表合并。 */
+export async function getSourceMetas(db: D1Database): Promise<Map<string, SourceMeta>> {
+  const rows = await db
+    .prepare(
+      `SELECT id, version, script_sha AS scriptSha, last_status AS status,
+              endpoints_ok AS endpointsOk, endpoints_total AS endpointsTotal,
+              last_change_at AS lastChangeAt, updated_at AS updatedAt
+         FROM sources`,
+    )
+    .all<SourceMeta>();
+  return new Map(rows.results.map((row) => [row.id, row]));
+}
+
 export async function getSourceDaily(db: D1Database, sourceId: string, days = 180): Promise<DailyRow[]> {
   const rows = await db
     .prepare(

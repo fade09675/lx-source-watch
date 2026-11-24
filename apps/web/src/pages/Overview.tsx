@@ -190,6 +190,8 @@ export function OverviewPage() {
                 .map((source) => {
                   const keys = sortPlatformKeys(source.platforms.filter((item) => item.declared).map((item) => item.key));
                   const byKey = new Map(source.platforms.map((item) => [item.key, item]));
+                  const endpointsOk = source.endpoints.filter((item) => item.ok).length;
+                  const lagging = source.endpoints.some((item) => item.versionState === 'lagging');
                   return (
                     <tr key={source.id} onClick={() => navigate(`/s/${encodeURIComponent(source.id)}`)} className="matrix-row">
                       <td>
@@ -198,6 +200,12 @@ export function OverviewPage() {
                           <span className="mono">{source.id}</span>
                           {source.version && <span>v{source.version}</span>}
                           {source.author && <span>{source.author}</span>}
+                          {source.endpoints.length > 0 && (
+                            <span className={endpointsOk > 0 ? 'text-ok' : 'text-bad'}>
+                              接入点 {endpointsOk}/{source.endpoints.length}
+                            </span>
+                          )}
+                          {lagging && <span className="pill pill-warn">镜像版本落后</span>}
                         </div>
                       </td>
                       <td>

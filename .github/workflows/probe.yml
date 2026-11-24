@@ -42,6 +42,9 @@ jobs:
     name: 探测（无密钥）
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      # 音源清单由网页管理，探测任务从这里读取；读不到会自动回退仓库内清单。
+      LX_REGISTRY_URL: https://dash.dpdns.org/api/config/sources
     steps:
       - name: 检出
         uses: actions/checkout@v4

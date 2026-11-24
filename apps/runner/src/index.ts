@@ -122,6 +122,7 @@ probe:
   --platform-timeout <ms>   单平台总超时，默认 20000
   --stream-timeout <ms>     拉流超时，默认 12000
   --proxy <url>             出口代理（http/socks）
+  --registry-url <url>      从接口读取音源清单（默认读 LX_REGISTRY_URL，失败回退本地文件）
   --prefer-mirror           下载脚本时先走镜像（国内网络建议开启）
   --config-url <url>        镜像模板接口（默认读 LX_CONFIG_URL，Actions 用 dash.dpdns.org）
   --mirror-timeout <ms>     镜像下载超时，默认 8000
@@ -173,6 +174,7 @@ async function cmdProbe(args: Args): Promise<void> {
   const mode = bool(args, 'deep') ? 'deep' : bool(args, 'skip-verify') ? 'skip-verify' : (str(args, 'mode') as 'default' | 'deep' | 'skip-verify' | undefined) ?? 'default';
   await runProbe({
     registryPath: str(args, 'registry', 'sources/registry.json') as string,
+    registryUrl: str(args, 'registry-url') ?? process.env.LX_REGISTRY_URL,
     outPath: str(args, 'out', 'out/status.json') as string,
     urlsPath: str(args, 'urls', 'out/urls.json') as string,
     mergeFrom: str(args, 'merge'),

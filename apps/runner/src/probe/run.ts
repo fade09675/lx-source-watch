@@ -14,7 +14,7 @@ import {
 import { parseScriptMeta } from '../lx/meta.js';
 import { log } from '../logger.js';
 import type { ProxyConfig } from '../net/http.js';
-import { loadRegistry, type ResolvedSource } from '../registry.js';
+import { fetchRegistry, loadRegistry, type ResolvedSource } from '../registry.js';
 import { loadMirrorTemplates } from '../mirrors.js';
 import type { LoadedScript } from '../script.js';
 import { errorMessage, mapLimit, nowIso, randomId } from '../util.js';
@@ -24,6 +24,8 @@ import type { ProbeMode, UrlRecord } from './platform.js';
 
 export interface ProbeOptions {
   registryPath: string;
+  /** 从 Worker 公开接口读取音源清单；失败回退 registryPath。 */
+  registryUrl?: string;
   outPath: string;
   urlsPath: string;
   mergeFrom?: string;
@@ -75,13 +77,25 @@ async function readSnapshot(path: string): Promise<Snapshot | undefined> {
 export async function runProbe(opts: ProbeOptions): Promise<ProbeOutput> {
   const started = Date.now();
   const mirrorTemplates = await loadMirrorTemplates({ configUrl: opts.configUrl });
-  const sources = await loadRegistry(opts.registryPath, {
+  const registryOpts = {
     only: opts.only,
     limit: opts.limit,
     repoRoot: opts.repoRoot,
     rawBase: opts.rawBase,
     mirrorTemplates,
-  });
+  };
+  let sources: ResolvedSource[];
+  if (opts.registryUrl) {
+    try {
+      sources = await fetchRegistry(opts.registryUrl, registryOpts);
+      log.info(`来源清单：从接口读取 ${sources.length} 个（${opts.registryUrl}）`);
+    } catch (e) {
+      log.warn(`${errorMessage(e)}，回退本地清单 ${opts.registryPath}`);
+      sources = await loadRegistry(opts.registryPath, registryOpts);
+    }
+  } else {
+    sources = await loadRegistry(opts.registryPath, registryOpts);
+  }
   const partial = Boolean(opts.only?.length || opts.limit);
   log.step(
     `来源 ${sources.length} 个 · 模式 ${opts.mode} · 音质 ${opts.quality ?? '128k'} · 源并发 ${opts.sourceConcurrency ?? 2}`,
