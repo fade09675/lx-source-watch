@@ -20,6 +20,14 @@ export interface EnrichOptions {
   proxy?: ProxyConfig;
   initTimeoutMs?: number;
   scriptTimeoutMs?: number;
+  /** 仅本地联调使用；默认禁止访问内网。 */
+  allowPrivate?: boolean;
+}
+
+// 脚本头部的元数据不受控，写入候选文件前先按 schema 上限截断。
+function clip(value: string | undefined, max: number): string | undefined {
+  if (!value) return undefined;
+  return value.length > max ? value.slice(0, max) : value;
 }
 
 /**
@@ -49,7 +57,7 @@ export async function enrichCandidates(opts: EnrichOptions): Promise<CandidateFi
           resolvedUrl: candidate.url,
           endpoints: [{ url: candidate.url, role: 'primary' }],
         },
-        { proxy: opts.proxy, timeoutMs: 20_000 },
+        { proxy: opts.proxy, timeoutMs: 20_000, allowPrivate: opts.allowPrivate },
       );
       const meta = parseScriptMeta(script.code, `${candidate.id}.js`);
       const loaded = await loadLxSource({
@@ -63,11 +71,11 @@ export async function enrichCandidates(opts: EnrichOptions): Promise<CandidateFi
       loaded.dispose();
       const next: Candidate = {
         ...candidate,
-        title: meta.name ?? candidate.title,
-        version: meta.version ?? candidate.version,
-        author: meta.author ?? candidate.author,
-        description: meta.description ?? candidate.description,
-        platforms,
+        title: clip(meta.name ?? candidate.title, 160),
+        version: clip(meta.version ?? candidate.version, 40),
+        author: clip(meta.author ?? candidate.author, 80),
+        description: clip(meta.description ?? candidate.description, 300),
+        platforms: platforms.slice(0, 24).map((key) => clip(key, 32) ?? key),
         bytes: script.bytes,
         initOk: true,
         initError: undefined,
