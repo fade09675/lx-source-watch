@@ -145,7 +145,11 @@ export async function publishIngest(opts: PublishOptions): Promise<{ status: num
     const cn = await readCnFile(opts.cnPath);
     if (cn) {
       applyCnResults(snapshot, cn);
-      log.info(`已合并国内补测：${cn.summary.ok}/${cn.summary.tested} 可达（${cn.proxy}）`);
+      const platformCn = snapshot.sources.reduce((n, source) => n + source.platforms.filter((p) => p.cn?.tested).length, 0);
+      const endpointCn = snapshot.sources.reduce((n, source) => n + source.endpoints.filter((e) => e.cn?.tested).length, 0);
+      log.info(
+        `已合并国内补测：${cn.summary.ok}/${cn.summary.tested} 条地址可达，命中 ${platformCn} 个平台、${endpointCn} 个接入点（${cn.proxy}）`,
+      );
     }
   }
   const candidates = await readCandidates(opts.candidatesPath, opts.maxCandidates ?? 100);
