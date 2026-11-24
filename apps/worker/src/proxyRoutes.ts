@@ -287,7 +287,7 @@ function assertFetchable(raw: string): URL {
   return url;
 }
 
-function authRunner(env: Env, header: string | undefined): boolean {
+export function authRunner(env: Env, header: string | undefined): boolean {
   const expected = env.RUNNER_TOKEN ?? '';
   if (!expected) return false;
   const match = /^Bearer\s+(.+)$/i.exec(header ?? '');

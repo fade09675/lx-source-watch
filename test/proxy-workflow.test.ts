@@ -31,4 +31,14 @@ describe('proxy-test workflow', () => {
     expect(text).toContain('pnpm proxy-test');
     expect(text).toContain('--max-hops 5');
   });
+
+  it('任务派发时把 task_id/run_id 传给 runner，测完能回写', () => {
+    const text = JSON.stringify(workflow);
+    expect(text).toContain('task_id');
+    expect(text).toContain('run_id');
+    expect(text).toContain('--task-id');
+    expect(text).toContain('--run-id');
+    expect(text).toContain('TASK_ID');
+    expect(text).toContain('RUN_ID');
+  });
 });

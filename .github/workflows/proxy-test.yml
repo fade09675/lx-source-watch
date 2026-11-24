@@ -16,6 +16,14 @@ on:
         description: "并发数（1-10）"
         required: false
         default: "5"
+      task_id:
+        description: "任务 id（Worker 派发时传入）"
+        required: false
+        default: ""
+      run_id:
+        description: "占位运行 id（Worker 派发时传入）"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -34,6 +42,8 @@ jobs:
       PROXY_ID: ${{ inputs.proxy_id }}
       SUB_ID: ${{ inputs.sub_id }}
       CONCURRENCY: ${{ inputs.concurrency || '5' }}
+      TASK_ID: ${{ inputs.task_id }}
+      RUN_ID: ${{ inputs.run_id }}
     steps:
       - name: 检出代码（不保留凭据）
         uses: actions/checkout@v4
@@ -77,4 +87,6 @@ jobs:
           args=(--endpoint "$INGEST_URL" --token "$RUNNER_TOKEN" --concurrency "$CONCURRENCY" --max-hops 5)
           if [ -n "${PROXY_ID}" ]; then args+=(--proxy-id "$PROXY_ID"); fi
           if [ -n "${SUB_ID}" ]; then args+=(--sub-id "$SUB_ID"); fi
+          if [ -n "${TASK_ID}" ]; then args+=(--task-id "$TASK_ID"); fi
+          if [ -n "${RUN_ID}" ]; then args+=(--run-id "$RUN_ID"); fi
           pnpm proxy-test -- "${args[@]}"

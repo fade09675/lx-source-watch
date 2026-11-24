@@ -26,6 +26,7 @@ const GROUPS: Array<{ title: string; items: NavItem[] }> = [
     title: '运行',
     items: [
       { to: '/admin/proxies', label: '国内代理', icon: '⇄' },
+      { to: '/admin/proxy-tests', label: '测活日志', icon: '⌁' },
       { to: '/runs', label: '运行与日志', icon: '▤' },
     ],
   },

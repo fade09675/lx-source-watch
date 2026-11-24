@@ -11,6 +11,7 @@ import { LoginPage } from './pages/Login';
 import { ManageSourcesPage } from './pages/ManageSources';
 import { OverviewPage } from './pages/Overview';
 import { ProxiesPage } from './pages/Proxies';
+import { ProxyTestsPage } from './pages/ProxyTests';
 import { RunDetailPage } from './pages/RunDetail';
 import { RunsPage } from './pages/Runs';
 import { SettingsPage } from './pages/Settings';
@@ -60,6 +61,7 @@ export function App() {
               <Route path="/admin/sources" element={<ManageSourcesPage />} />
               <Route path="/admin/settings" element={<SettingsPage />} />
               <Route path="/admin/proxies" element={<ProxiesPage />} />
+              <Route path="/admin/proxy-tests" element={<ProxyTestsPage />} />
               <Route path="/about" element={<AboutPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

@@ -1,5 +1,6 @@
+import type { ProxyTestReport, ProxyTestRow } from '@lx/shared';
 import { log } from '../logger.js';
-import { errorMessage } from '../util.js';
+import { errorMessage, nowIso } from '../util.js';
 import type { ChainHop } from './mihomo.js';
 import {
   fetchRunnerProxies,
@@ -37,6 +38,9 @@ export function selectHops(proxies: RunnerProxy[], maxHops = 5): ChainHop[] {
 export interface ProxyTestOptions {
   endpoint: string;
   token: string;
+  /** 由任务派发时传入：测完回写任务与占位运行。 */
+  taskId?: string;
+  runId?: string;
   /** 只测这一个节点。 */
   proxyId?: string;
   /** 只测这个订阅下的节点。 */
@@ -56,6 +60,41 @@ export interface ProxyTestSummary {
   kernelOk: number;
   skippedUdp: number;
   durationMs: number;
+}
+
+function apiBase(endpoint: string): string {
+  return endpoint.replace(/\/api\/ingest\/?$/, '').replace(/\/+$/, '');
+}
+
+/** 把测活结果回写 Worker，让任务和占位运行真正结束，而不是等看门狗。 */
+async function reportProxyTestResult(
+  options: ProxyTestOptions,
+  report: ProxyTestReport,
+): Promise<void> {
+  const url = `${apiBase(options.endpoint)}/api/runner/proxy-test-result`;
+  let lastError = '';
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${options.token}`,
+        },
+        body: JSON.stringify(report),
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (response.ok) {
+        log.info('测活结果已回写');
+        return;
+      }
+      lastError = `HTTP ${response.status}：${(await response.text()).slice(0, 200)}`;
+    } catch (error) {
+      lastError = errorMessage(error);
+    }
+    if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  throw new Error(`测活结果回写失败：${lastError}`);
 }
 
 /** 逐个测活所有启用节点，结果通过 runner 接口写回成功/失败次数与出口信息。 */
@@ -87,6 +126,7 @@ export async function runProxyTest(options: ProxyTestOptions): Promise<ProxyTest
   let ok = 0;
   let kernelOk = 0;
   const queue = [...testable];
+  const rows: ProxyTestRow[] = [];
 
   log.step(`开始代理测活：${total} 个，并发 ${concurrency}，跳板 ${hops.length} 个`);
 
@@ -116,6 +156,21 @@ export async function runProxyTest(options: ProxyTestOptions): Promise<ProxyTest
         if (proxy.kernelOnly) kernelOk += 1;
       }
       await reportProxyCheck(options.endpoint, options.token, proxy.id, check, options.allowPrivate);
+      rows.push({
+        id: proxy.id,
+        name: proxy.name,
+        protocol: proxy.protocol,
+        host: proxy.host,
+        port: proxy.port,
+        subscriptionId: proxy.subscriptionId ?? null,
+        kernelOnly: proxy.kernelOnly,
+        ok: check.ok,
+        latencyMs: check.latencyMs,
+        country: check.country,
+        asn: check.asn,
+        error: check.error,
+        testedAt: nowIso(),
+      });
       done += 1;
       const label = proxy.name || proxy.id;
       if (check.ok) {
@@ -127,11 +182,22 @@ export async function runProxyTest(options: ProxyTestOptions): Promise<ProxyTest
   });
   await Promise.all(workers);
 
-  return {
+  const summary: ProxyTestSummary = {
     total,
     ok,
     kernelOk,
     skippedUdp: udp.length,
     durationMs: Date.now() - startedMs,
   };
+
+  if (options.taskId && options.runId) {
+    await reportProxyTestResult(options, {
+      runId: options.runId,
+      taskId: options.taskId,
+      ...summary,
+      results: rows,
+    });
+  }
+
+  return summary;
 }

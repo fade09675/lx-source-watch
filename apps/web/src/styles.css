@@ -2044,3 +2044,25 @@ a:hover {
 @media (max-width: 760px) {
   .dup-head { align-items: flex-start; }
 }
+
+/* ---- proxy test logs ---- */
+.proxy-log-layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px; align-items: start; }
+.proxy-run-list { padding: 0; overflow: hidden; max-height: 74vh; overflow-y: auto; }
+.proxy-run-list .panel-head { padding: 12px 14px; margin: 0; }
+.proxy-run-item { display: block; width: 100%; border: 0; border-top: 1px solid var(--border-soft); background: transparent; color: var(--text); text-align: left; padding: 10px 14px; cursor: pointer; font: inherit; }
+.proxy-run-item:hover { background: var(--panel-2); }
+.proxy-run-item.is-active { background: var(--panel-2); box-shadow: inset 3px 0 0 var(--accent); }
+.proxy-run-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 5px; }
+.proxy-run-nums { display: flex; align-items: baseline; gap: 5px; font-size: 13px; margin-bottom: 4px; }
+.proxy-run-nums strong { font-size: 17px; }
+.proxy-run-item .mono { font-size: 11px; }
+.proxy-log-detail { padding: 14px; min-height: 320px; }
+.proxy-log-detail .run-filter-bar { margin: 12px 0; }
+.check { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; cursor: pointer; }
+.proxy-log-table td { vertical-align: top; }
+.proxy-log-table tr.row-failed td { background: color-mix(in srgb, var(--bad) 7%, transparent); }
+.error-cell { max-width: 320px; color: var(--bad); font-size: 12px; word-break: break-word; }
+@media (max-width: 980px) {
+  .proxy-log-layout { grid-template-columns: 1fr; }
+  .proxy-run-list { max-height: 300px; }
+}

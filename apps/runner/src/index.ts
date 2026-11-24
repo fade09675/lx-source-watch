@@ -274,6 +274,8 @@ async function cmdProxyTest(args: Args): Promise<void> {
   const summary = await runProxyTest({
     endpoint,
     token,
+    taskId: str(args, 'task-id') ?? process.env.LX_TASK_ID,
+    runId: str(args, 'run-id') ?? process.env.LX_RUN_ID,
     proxyId: str(args, 'proxy-id'),
     subscriptionId: str(args, 'sub-id'),
     concurrency: num(args, 'concurrency', 5),

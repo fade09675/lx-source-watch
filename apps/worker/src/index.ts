@@ -3,6 +3,7 @@ import { createApi } from './api';
 import { readCookie, SESSION_COOKIE, verifySessionToken } from './auth';
 import type { Env } from './env';
 import { createAdminProxyRoutes, createRunnerProxyRoutes } from './proxyRoutes';
+import { createRunnerProxyTestReportRoutes } from './proxyTestReport';
 import { runScheduler } from './scheduler';
 import { reapStaleTasks, refreshTaskState } from './tasks';
 
@@ -37,8 +38,8 @@ export function isPublicPath(pathname: string): boolean {
   return (
     PUBLIC_PATHS.has(pathname) ||
     pathname.startsWith('/assets/') ||
-    pathname === '/api/runner/proxies' ||
-    pathname.startsWith('/api/runner/proxies/')
+    pathname === '/api/runner' ||
+    pathname.startsWith('/api/runner/')
   );
 }
 
@@ -78,6 +79,7 @@ app.use('*', async (c, next) => {
 
 app.route('/api/admin/proxies', createAdminProxyRoutes());
 app.route('/api/runner/proxies', createRunnerProxyRoutes());
+app.route('/api/runner', createRunnerProxyTestReportRoutes());
 app.route('/api', createApi());
 
 app.all('/api/*', (c) =>

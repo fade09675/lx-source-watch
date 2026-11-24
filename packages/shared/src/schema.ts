@@ -224,6 +224,36 @@ export const IngestPayloadSchema = z.object({
 });
 export type IngestPayload = z.infer<typeof IngestPayloadSchema>;
 
+/** 代理测活单节点结果，runner 回传给 Worker 用于任务完成与运行记录。 */
+export const ProxyTestRowSchema = z.object({
+  id: z.string().min(1).max(64),
+  name: z.string().max(120).optional(),
+  protocol: z.string().max(24).optional(),
+  host: z.string().max(255).optional(),
+  port: z.number().int().nonnegative().max(65535).optional(),
+  subscriptionId: z.string().max(64).nullable().optional(),
+  kernelOnly: z.boolean().default(false),
+  ok: z.boolean(),
+  latencyMs: z.number().int().nonnegative().max(3_600_000),
+  country: z.string().max(40).optional(),
+  asn: z.string().max(40).optional(),
+  error: z.string().max(300).optional(),
+  testedAt: isoDateTime.optional(),
+});
+export type ProxyTestRow = z.infer<typeof ProxyTestRowSchema>;
+
+export const ProxyTestReportSchema = z.object({
+  runId: z.string().min(6).max(64),
+  taskId: z.string().min(1).max(64).optional(),
+  total: z.number().int().nonnegative().max(5000),
+  ok: z.number().int().nonnegative().max(5000),
+  kernelOk: z.number().int().nonnegative().max(5000).default(0),
+  skippedUdp: z.number().int().nonnegative().max(5000).default(0),
+  durationMs: z.number().int().nonnegative().max(24 * 3600 * 1000),
+  results: z.array(ProxyTestRowSchema).max(5000).default([]),
+});
+export type ProxyTestReport = z.infer<typeof ProxyTestReportSchema>;
+
 /* ------------------------------- registry -------------------------------- */
 
 export const RegistrySourceSchema = z

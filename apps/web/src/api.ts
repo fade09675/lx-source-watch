@@ -443,6 +443,40 @@ export interface FailureAggregate {
   recentRuns: RunSummary[];
 }
 
+export interface ProxyTestRunView {
+  runId: string;
+  taskId: string | null;
+  trigger: string;
+  startedAt: string | null;
+  finishedAt: string;
+  total: number;
+  ok: number;
+  kernelOk: number;
+  skippedUdp: number;
+  durationMs: number;
+}
+
+export interface ProxyTestResultView {
+  proxyId: string;
+  name: string;
+  protocol: string;
+  host: string;
+  port: number | null;
+  subscriptionId: string | null;
+  kernelOnly: boolean;
+  ok: boolean;
+  latencyMs: number;
+  country: string;
+  asn: string;
+  error: string | null;
+  testedAt: string;
+}
+
+export interface ProxyTestRunDetail {
+  run: ProxyTestRunView;
+  results: ProxyTestResultView[];
+}
+
 export interface RunProbeInput {
   only?: string;
   limit?: string;
@@ -680,6 +714,10 @@ export const api = {
   snapshot: (runId: string) => request<RunDetailResult>(`/api/admin/snapshots/${encodeURIComponent(runId)}`),
   runLog: (runId: string) => request<RunLogResult>(`/api/admin/snapshots/${encodeURIComponent(runId)}/log`),
   failures: (days = 7) => request<FailureAggregate>(`/api/admin/failures?days=${days}`),
+  proxyTests: (days = 7) =>
+    request<{ days: number; runs: ProxyTestRunView[] }>(`/api/admin/proxy-tests?days=${days}`),
+  proxyTest: (runId: string) =>
+    request<ProxyTestRunDetail>(`/api/admin/proxy-tests/${encodeURIComponent(runId)}`),
   platforms: (days = 7) => request<PlatformSummary>(`/api/admin/platforms?days=${days}`),
 
   mirrors: () => request<MirrorConfigView>('/api/admin/mirrors'),

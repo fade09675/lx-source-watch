@@ -43,6 +43,7 @@ import type { Env } from './env';
 import { ADMIN_PASSWORD_SETTING, SNAPSHOT_KEY } from './env';
 import { filterSnapshot, parseList } from './filter';
 import { handleIngest } from './ingest';
+import { getProxyTestRun, listProxyTestRuns } from './proxyTestLogs';
 import { isStale } from './merge';
 import { dispatchProbe, dispatchProxyTest, listAllRuns, listProbeRuns } from './dispatch';
 import { getUsage, recordKvPut, refreshUsage } from './usage';
@@ -590,6 +591,24 @@ export function createApi(): Hono<Ctx> {
   });
 
   // 最近 N 天的失败聚合：按错误类型 / 平台 / 源统计，只算真正测过的。
+  api.get('/admin/proxy-tests', async (c) => {
+    const days = clampInt(c.req.query('days'), 7, 1, 90);
+    const limit = clampInt(c.req.query('limit'), 50, 1, 200);
+    const runs = await listProxyTestRuns(c.env.DB, { days, limit });
+    return Response.json({ days, runs }, { headers: { 'cache-control': CACHE_PRIVATE } });
+  });
+
+  api.get('/admin/proxy-tests/:runId', async (c) => {
+    const detail = await getProxyTestRun(c.env.DB, c.req.param('runId'));
+    if (!detail) {
+      return Response.json(
+        { error: 'not_found', message: '测活记录不存在' },
+        { status: 404, headers: { 'cache-control': CACHE_PRIVATE } },
+      );
+    }
+    return Response.json(detail, { headers: { 'cache-control': CACHE_PRIVATE } });
+  });
+
   api.get('/admin/failures', async (c) => {
     const raw = Number(c.req.query('days') ?? 7);
     const days = Number.isFinite(raw) ? Math.max(1, Math.min(30, Math.trunc(raw))) : 7;
