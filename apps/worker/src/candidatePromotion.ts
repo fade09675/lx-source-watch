@@ -44,14 +44,15 @@ async function promoteOne(
   candidate: Candidate,
   now: string,
 ): Promise<SinglePromotion> {
+  // 老候选没有指纹：收录前自动下载补算，避免重复内容被当成新源。
+  // 放在“同地址已存在”判断之前，保证这类候选也会补上指纹。
+  const sha256 = candidate.sha256 ?? (await ensureCandidateSha(env.DB, candidate));
+
   const existing = await findSourceRegistryByUrl(env.DB, candidate.url);
   if (existing) {
     await setCandidateState(env.DB, candidate.id, 'promoted', now);
     return { ok: true, id: existing.id, existing: true };
   }
-
-  // 老候选没有指纹：收录前自动下载补算，避免重复内容被当成新源。
-  const sha256 = candidate.sha256 ?? (await ensureCandidateSha(env.DB, candidate));
 
   // 内容指纹相同视为重复：并入主源、写别名、把候选标为 duplicate，不再新建源。
   if (sha256) {
