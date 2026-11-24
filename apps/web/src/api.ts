@@ -12,12 +12,15 @@ import type {
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
+  /** 订阅 403：Worker 建议改派 GitHub Actions 拉取。 */
+  readonly needsRunner: boolean;
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, needsRunner = false) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
+    this.needsRunner = needsRunner;
   }
 }
 
@@ -50,7 +53,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const error = (body ?? {}) as Partial<ApiErrorBody>;
-    throw new ApiError(response.status, error.error ?? 'http_error', error.message ?? `请求失败（HTTP ${response.status}）`);
+    throw new ApiError(
+      response.status,
+      error.error ?? 'http_error',
+      error.message ?? `请求失败（HTTP ${response.status}）`,
+      error.needsRunner === true,
+    );
   }
   return body as T;
 }

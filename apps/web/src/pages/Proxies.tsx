@@ -34,6 +34,7 @@ export function ProxiesPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [fetchFallbackId, setFetchFallbackId] = useState<string | null>(null);
   const [filterSub, setFilterSub] = useState('');
   const [form, setForm] = useState({ name: '', protocol: 'http', host: '', port: '', username: '', password: '', config: '' });
 
@@ -121,7 +122,11 @@ export function ProxiesPage() {
       setSubHeaders('');
       await load();
     } catch (e) {
-      setMessage(e instanceof ApiError ? e.message : '订阅导入失败');
+      if (e instanceof ApiError && e.needsRunner) {
+        setMessage('Worker 被 403 拦截：请把订阅内容粘贴到下方「批量导入」，或下载后上传文件。');
+      } else {
+        setMessage(e instanceof ApiError ? e.message : '订阅导入失败');
+      }
     } finally {
       setBusy(false);
     }
@@ -132,10 +137,16 @@ export function ProxiesPage() {
     setMessage('');
     try {
       const result = await api.refreshSubscription(item.id);
+      setFetchFallbackId(null);
       setMessage(`刷新「${item.name}」完成：新增 ${result.added}，更新 ${result.updated}，共 ${result.total} 个节点`);
       await load();
     } catch (e) {
-      setMessage(e instanceof ApiError ? e.message : '刷新失败');
+      if (e instanceof ApiError && e.needsRunner) {
+        setFetchFallbackId(item.id);
+        setMessage(`Worker 被 403 拦截：「${item.name}」请点这一行的「用 Actions 拉取」，由 GitHub Actions 拉取后回传。`);
+      } else {
+        setMessage(e instanceof ApiError ? e.message : '刷新失败');
+      }
     } finally {
       setBusy(false);
     }
@@ -146,6 +157,7 @@ export function ProxiesPage() {
     setMessage('');
     try {
       await api.createTask({ type: 'proxy-fetch-sub', payload: { subscriptionId: item.id } });
+      setFetchFallbackId(null);
       setMessage(`已派发 Actions 拉取「${item.name}」，通常 30–60 秒内完成，之后刷新查看结果。`);
     } catch (e) {
       setMessage(e instanceof ApiError ? e.message : '派发失败');
@@ -343,6 +355,11 @@ export function ProxiesPage() {
                       <div className="muted" title={item.lastStatus}>
                         {item.lastStatus.length > 34 ? `${item.lastStatus.slice(0, 34)}…` : item.lastStatus}
                       </div>
+                      {fetchFallbackId === item.id ? (
+                        <div className="small" style={{ color: 'var(--bad)' }}>
+                          Worker 返回 403，请用 Actions 拉取
+                        </div>
+                      ) : null}
                     </td>
                     <td className="row-actions">
                       {deletingId === item.id ? (
@@ -370,7 +387,7 @@ export function ProxiesPage() {
                           </button>
                           <button
                             type="button"
-                            className="ghost-button"
+                            className={fetchFallbackId === item.id ? 'primary-button' : 'ghost-button'}
                             disabled={busy || item.kind === 'file'}
                             title={item.kind === 'file' ? '文件订阅不能派发 Actions 拉取' : 'Worker 拉取失败时，改让 GitHub Actions 拉取并回传'}
                             onClick={() => void fetchSubViaActions(item)}

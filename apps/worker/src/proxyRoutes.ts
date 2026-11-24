@@ -211,6 +211,17 @@ function publicSubscription(row: SubscriptionItem) {
 
 const DEFAULT_FETCH_UA = 'lx-source-watch/0.1 (+https://github.com/fade09675/lx-source-watch)';
 
+type SubscriptionFetchFailure = Error & { status?: number; needsRunner?: boolean };
+
+/** Worker 拉订阅被 401/403 拦截：前端可改派 Actions 拉取。 */
+export function isNeedsRunnerError(error: unknown): error is SubscriptionFetchFailure {
+  return error instanceof Error && (error as SubscriptionFetchFailure).needsRunner === true;
+}
+
+function subscriptionFetchFailure(message: string, status: number): SubscriptionFetchFailure {
+  return Object.assign(new Error(message), { status, needsRunner: status === 401 || status === 403 });
+}
+
 /** 订阅自定义请求头：每行 `Key: value`，最多 20 条，忽略 Host/Content-Length 等危险头。 */
 export function parseCustomHeaders(raw: string | null | undefined): Record<string, string> {
   const headers: Record<string, string> = {};
@@ -227,7 +238,7 @@ export function parseCustomHeaders(raw: string | null | undefined): Record<strin
   return headers;
 }
 
-async function fetchSubscription(
+export async function fetchSubscription(
   url: URL,
   userAgent: string,
   customHeaders?: string | null,
@@ -243,8 +254,9 @@ async function fetchSubscription(
   });
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) {
-      throw new Error(
-        `订阅返回 HTTP ${response.status}：机场可能限制海外/机房 IP，或要求 Clash/Shadowrocket 等特定 UA。可换一个 UA 重试；仍不行就把订阅内容粘贴或上传导入。`,
+      throw subscriptionFetchFailure(
+        `订阅返回 HTTP ${response.status}：机场可能限制海外/机房 IP，或要求 Clash/Shadowrocket 等特定 UA。可换一个 UA 重试；仍不行就用「用 Actions 拉取」让 GitHub Actions 拉取，或把内容粘贴/上传导入。`,
+        response.status,
       );
     }
     if (response.status === 404) {
@@ -644,6 +656,9 @@ export function createAdminProxyRoutes(): Hono<{ Bindings: Env }> {
     try {
       fetched = await fetchSubscription(url, clean(body?.userAgent, 200), clean(body?.headers, 2000));
     } catch (error) {
+      if (isNeedsRunnerError(error)) {
+        return c.json({ error: 'fetch_forbidden', message: error.message, needsRunner: true }, 502);
+      }
       return c.json({ error: 'fetch_failed', message: error instanceof Error ? error.message : '拉取订阅失败' }, 502);
     }
 
@@ -805,6 +820,9 @@ export function createAdminProxyRoutes(): Hono<{ Bindings: Env }> {
       const summary = await refreshSubscription(c.env, row);
       return c.json({ ok: true, ...summary });
     } catch (error) {
+      if (isNeedsRunnerError(error)) {
+        return c.json({ error: 'fetch_forbidden', message: error.message, needsRunner: true }, 502);
+      }
       return c.json({ error: 'fetch_failed', message: error instanceof Error ? error.message : '刷新失败' }, 502);
     }
   });

@@ -438,6 +438,8 @@ export interface HealthResponse {
 export interface ApiErrorBody {
   error: string;
   message: string;
+  /** 订阅源 403：可改用 GitHub Actions 拉取。 */
+  needsRunner?: boolean;
 }
 
 export interface ExportItem {
