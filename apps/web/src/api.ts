@@ -95,8 +95,13 @@ export interface AppSettingsView {
   cnEnabled: boolean;
   cnMaxProxies: number;
   cnConcurrency: number;
+  cnMaxHops: number;
+  cnAutoSwitch: boolean;
+  proxyFetchUserAgent: string;
   proxyTestEnabled: boolean;
   proxyTestIntervalHours: number;
+  proxyTestConcurrency: number;
+  proxyTestTimeoutMs: number;
   discoveryEnabled: boolean;
   discoveryIntervalHours: number;
   autoPromoteCandidates: boolean;
@@ -197,6 +202,17 @@ export interface ProxyImportResult {
   source?: string;
   fetchedBytes?: number;
   subscription?: SubscriptionItem;
+}
+
+export interface ProxyImportPreview {
+  ok: boolean;
+  total: number;
+  added: number;
+  duplicates: number;
+  kernelOnly: number;
+  protocols: Array<{ protocol: string; count: number }>;
+  sample: Array<{ name: string; protocol: string; host: string; port: number; kernelOnly: boolean }>;
+  warnings: string[];
 }
 
 export interface ProxyInput {
@@ -677,6 +693,8 @@ export const api = {
     }),
 
   proxies: () => request<ProxyList>('/api/admin/proxies'),
+  previewProxies: (text: string) =>
+    request<ProxyImportPreview>('/api/admin/proxies/preview', { method: 'POST', body: JSON.stringify({ text }) }),
   importProxies: (text: string) =>
     request<ProxyImportResult>('/api/admin/proxies/import', { method: 'POST', body: JSON.stringify({ text }) }),
   importProxyUrl: (url: string, name?: string, userAgent?: string, headers?: string) =>

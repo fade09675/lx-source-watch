@@ -14,8 +14,13 @@ const EMPTY_DRAFT: Draft = {
   cnEnabled: true,
   cnMaxProxies: 8,
   cnConcurrency: 5,
+  cnMaxHops: 5,
+  cnAutoSwitch: true,
+  proxyFetchUserAgent: '',
   proxyTestEnabled: true,
   proxyTestIntervalHours: 6,
+  proxyTestConcurrency: 5,
+  proxyTestTimeoutMs: 20_000,
   discoveryEnabled: true,
   discoveryIntervalHours: 12,
   autoPromoteCandidates: true,
@@ -51,6 +56,31 @@ function NumberField({ label, hint, value, min, max, onChange }: NumberFieldProp
         max={max}
         value={value}
         onChange={(event) => onChange(Number(event.target.value))}
+      />
+      {hint ? <span className="field-hint">{hint}</span> : null}
+    </label>
+  );
+}
+
+interface TextFieldProps {
+  label: string;
+  hint?: string;
+  value: string;
+  placeholder?: string;
+  maxLength?: number;
+  onChange: (value: string) => void;
+}
+
+function TextField({ label, hint, value, placeholder, maxLength, onChange }: TextFieldProps) {
+  return (
+    <label className="field">
+      <span className="field-label">{label}</span>
+      <input
+        type="text"
+        value={value}
+        placeholder={placeholder}
+        maxLength={maxLength}
+        onChange={(event) => onChange(event.target.value)}
       />
       {hint ? <span className="field-hint">{hint}</span> : null}
     </label>
@@ -271,6 +301,23 @@ export function SettingsPage() {
 
         <section className="panel">
           <div className="panel-head">
+            <h2>订阅拉取</h2>
+            <span className="muted">Worker 与 Actions 共用</span>
+          </div>
+          <div className="settings-body">
+            <TextField
+              label="默认 User-Agent"
+              hint="订阅没单独设置 UA 时使用；留空用内置 UA"
+              value={draft.proxyFetchUserAgent}
+              placeholder="ClashforWindows/0.20.39"
+              maxLength={200}
+              onChange={(value) => update('proxyFetchUserAgent', value)}
+            />
+          </div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-head">
             <h2>国内补测</h2>
             <span className="muted">独立标记，不影响整体可用状态</span>
           </div>
@@ -295,6 +342,20 @@ export function SettingsPage() {
               value={draft.cnConcurrency}
               onChange={(value) => update('cnConcurrency', value)}
             />
+            <NumberField
+              label="内核跳板数"
+              hint="内核节点最多试几个普通代理作为跳板"
+              min={1}
+              max={5}
+              value={draft.cnMaxHops}
+              onChange={(value) => update('cnMaxHops', value)}
+            />
+            <SwitchField
+              label="失败自动换节点"
+              hint="关闭后首个代理失败就停止，不再尝试下一个"
+              checked={draft.cnAutoSwitch}
+              onChange={(value) => update('cnAutoSwitch', value)}
+            />
           </div>
         </section>
 
@@ -315,6 +376,21 @@ export function SettingsPage() {
               max={72}
               value={draft.proxyTestIntervalHours}
               onChange={(value) => update('proxyTestIntervalHours', value)}
+            />
+            <NumberField
+              label="测活并发"
+              min={1}
+              max={10}
+              value={draft.proxyTestConcurrency}
+              onChange={(value) => update('proxyTestConcurrency', value)}
+            />
+            <NumberField
+              label="单节点超时（毫秒）"
+              hint="5000–90000"
+              min={5_000}
+              max={90_000}
+              value={draft.proxyTestTimeoutMs}
+              onChange={(value) => update('proxyTestTimeoutMs', value)}
             />
           </div>
           {scheduler ? <div className="schedule-list"><JobStatus title="代理测活" job={scheduler.proxyTest} /></div> : null}

@@ -10,6 +10,7 @@ import {
   type RunnerProxy,
 } from './proxyPool.js';
 import { selectHops } from './proxyTest.js';
+import { fetchRunnerConfig } from './runnerConfig.js';
 
 export interface CnRunOptions {
   urlsPath: string;
@@ -21,6 +22,10 @@ export interface CnRunOptions {
   maxProxies?: number;
   concurrency?: number;
   timeoutMs?: number;
+  /** 内核节点最多试几个跳板；未指定时用 Worker 设置。 */
+  maxHops?: number;
+  /** 失败后是否自动换下一个代理；未指定时用 Worker 设置。 */
+  autoSwitch?: boolean;
   limit?: number;
   platform?: string;
   scope?: CnScope;
@@ -59,9 +64,16 @@ export async function cnRun(opts: CnRunOptions): Promise<CnFile> {
   );
   if (!usable.length) throw new Error('代理池里只有 UDP 节点（hy2/tuic），当前环境不可测');
 
+  const config = await fetchRunnerConfig(opts.endpoint, opts.token);
   const maxProxies = Math.max(1, opts.maxProxies ?? 8);
   const candidates = rankProxies(usable, opts.preferredId).slice(0, maxProxies);
-  const hops = selectHops(proxies, 5);
+  const maxHops = Math.max(
+    1,
+    Math.min(5, opts.maxHops && opts.maxHops > 0 ? opts.maxHops : config.cnMaxHops),
+  );
+  const autoSwitch = opts.autoSwitch ?? config.cnAutoSwitch;
+  const hops = selectHops(proxies, maxHops);
+  log.info(`补测运行参数：跳板 ${hops.length} 个，失败${autoSwitch ? '自动换节点' : '不换节点'}`);
   let lastError = '';
 
   for (const proxy of candidates) {
@@ -69,7 +81,7 @@ export async function cnRun(opts: CnRunOptions): Promise<CnFile> {
     const check = await testRunnerProxy(proxy, {
       allowPrivate: opts.allowPrivate,
       hops,
-      maxHops: 5,
+      maxHops,
     });
     if (!check.ok) {
       lastError = check.error ?? '测活失败';
@@ -81,6 +93,7 @@ export async function cnRun(opts: CnRunOptions): Promise<CnFile> {
         opts.allowPrivate,
       ).catch(() => undefined);
       log.warn(`节点不可用，换下一个：${label}（${lastError}）`);
+      if (!autoSwitch) throw new Error(`节点不可用且已关闭自动换节点：${label}（${lastError}）`);
       continue;
     }
 
@@ -97,6 +110,7 @@ export async function cnRun(opts: CnRunOptions): Promise<CnFile> {
         opts.allowPrivate,
       ).catch(() => undefined);
       log.warn(`节点启动失败，换下一个：${label}（${lastError}）`);
+      if (!autoSwitch) throw new Error(`节点启动失败且已关闭自动换节点：${label}（${lastError}）`);
       continue;
     }
 
@@ -143,6 +157,7 @@ export async function cnRun(opts: CnRunOptions): Promise<CnFile> {
         opts.allowPrivate,
       ).catch(() => undefined);
       log.warn(`补测失败，换下一个：${label}（${lastError}）`);
+      if (!autoSwitch) throw new Error(`补测失败且已关闭自动换节点：${label}（${lastError}）`);
     } finally {
       await active.stop();
     }

@@ -23,10 +23,20 @@ export interface AppSettings {
   cnMaxProxies: number;
   /** 国内补测并发。 */
   cnConcurrency: number;
+  /** 内核节点最多试几个跳板。 */
+  cnMaxHops: number;
+  /** 国内补测失败后是否自动换下一个代理。 */
+  cnAutoSwitch: boolean;
+  /** 订阅拉取默认 User-Agent；留空用内置 UA。 */
+  proxyFetchUserAgent: string;
   /** 代理测活开关。 */
   proxyTestEnabled: boolean;
   /** 代理测活间隔（小时）。 */
   proxyTestIntervalHours: number;
+  /** 代理测活并发。 */
+  proxyTestConcurrency: number;
+  /** 单个代理测活超时（毫秒）。 */
+  proxyTestTimeoutMs: number;
   /** 自动发现候选开关。 */
   discoveryEnabled: boolean;
   /** 自动发现间隔（小时）。 */
@@ -54,8 +64,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
   cnEnabled: true,
   cnMaxProxies: 8,
   cnConcurrency: 5,
+  cnMaxHops: 5,
+  cnAutoSwitch: true,
+  proxyFetchUserAgent: '',
   proxyTestEnabled: true,
   proxyTestIntervalHours: 6,
+  proxyTestConcurrency: 5,
+  proxyTestTimeoutMs: 20_000,
   discoveryEnabled: true,
   discoveryIntervalHours: 12,
   autoPromoteCandidates: true,
@@ -77,6 +92,11 @@ function int(value: unknown, fallback: number, min: number, max: number): number
   return Math.min(max, Math.max(min, Math.trunc(parsed)));
 }
 
+function text(value: unknown, fallback: string, maxLength: number): string {
+  if (typeof value !== 'string') return fallback;
+  return value.trim().slice(0, maxLength);
+}
+
 /** 把任意输入收紧成一份完整设置；缺省或非法字段回落到默认值。 */
 export function normalizeSettings(input: unknown): AppSettings {
   const raw: Raw = input && typeof input === 'object' ? (input as Raw) : {};
@@ -91,8 +111,13 @@ export function normalizeSettings(input: unknown): AppSettings {
     cnEnabled: bool(raw.cnEnabled, d.cnEnabled),
     cnMaxProxies: int(raw.cnMaxProxies, d.cnMaxProxies, 1, 20),
     cnConcurrency: int(raw.cnConcurrency, d.cnConcurrency, 1, 10),
+    cnMaxHops: int(raw.cnMaxHops, d.cnMaxHops, 1, 5),
+    cnAutoSwitch: bool(raw.cnAutoSwitch, d.cnAutoSwitch),
+    proxyFetchUserAgent: text(raw.proxyFetchUserAgent, d.proxyFetchUserAgent, 200),
     proxyTestEnabled: bool(raw.proxyTestEnabled, d.proxyTestEnabled),
     proxyTestIntervalHours: int(raw.proxyTestIntervalHours, d.proxyTestIntervalHours, 1, 72),
+    proxyTestConcurrency: int(raw.proxyTestConcurrency, d.proxyTestConcurrency, 1, 10),
+    proxyTestTimeoutMs: int(raw.proxyTestTimeoutMs, d.proxyTestTimeoutMs, 5_000, 90_000),
     discoveryEnabled: bool(raw.discoveryEnabled, d.discoveryEnabled),
     discoveryIntervalHours: int(raw.discoveryIntervalHours, d.discoveryIntervalHours, 1, 168),
     autoPromoteCandidates: bool(raw.autoPromoteCandidates, d.autoPromoteCandidates),

@@ -144,6 +144,7 @@ cn:
   --token <token>           Runner Token（默认读 RUNNER_TOKEN）
   --proxy-id <id>           指定代理节点
   --max-proxies <n>         最多预检几个节点，默认 8
+  --max-hops <n>            内核节点最多试几个跳板，默认取设置（5）
   --all                     国内补测全部地址（默认只测海外未通过的地址）
   --status-in <path>        探测快照，用来补测接入点，默认 out/status.json
   --skip-endpoints          跳过接入点国内连通性补测
@@ -157,8 +158,9 @@ proxy-test:
   --token <token>           默认读 RUNNER_TOKEN
   --proxy-id <id>           只测指定节点
   --sub-id <id>             只测指定订阅下的节点
-  --concurrency <n>         测活并发，默认 5，最高 10
-  --max-hops <n>            内核节点最多试几个跳板，默认 5
+  --concurrency <n>         测活并发，默认取设置（5），最高 10
+  --max-hops <n>            内核节点最多试几个跳板，默认取设置（5）
+  --timeout <ms>            单节点超时，默认取设置（20000）
   --limit <n>               最多测 n 个（调试用）
   --allow-private           允许访问 127.0.0.1（仅本地联调）
 
@@ -244,6 +246,7 @@ async function cmdCn(args: Args): Promise<void> {
       token,
       preferredId: str(args, 'proxy-id'),
       maxProxies: num(args, 'max-proxies', 8),
+      maxHops: num(args, 'max-hops', 0),
       concurrency: num(args, 'concurrency', 5),
       timeoutMs: num(args, 'timeout', 15_000),
       limit: num(args, 'limit'),
@@ -297,8 +300,9 @@ async function cmdProxyTest(args: Args): Promise<void> {
     runId: str(args, 'run-id') ?? process.env.LX_RUN_ID,
     proxyId: str(args, 'proxy-id'),
     subscriptionId: str(args, 'sub-id'),
-    concurrency: num(args, 'concurrency', 5),
-    maxHops: num(args, 'max-hops', 5),
+    concurrency: num(args, 'concurrency', 0),
+    maxHops: num(args, 'max-hops', 0),
+    timeoutMs: num(args, 'timeout', 0),
     limit: num(args, 'limit'),
     allowPrivate: bool(args, 'allow-private') || process.env.INGEST_ALLOW_PRIVATE === '1',
   });

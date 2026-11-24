@@ -174,10 +174,13 @@ export interface TestProxyOptions {
   /** 内核节点的中转跳板候选，按顺序尝试，最后再直连。 */
   hops?: ChainHop[];
   maxHops?: number;
+  /** 单节点总超时（毫秒），默认 20 秒。 */
+  timeoutMs?: number;
 }
 
 export async function testRunnerProxy(proxy: RunnerProxy, options: TestProxyOptions = {}): Promise<ProxyCheck> {
-  const deadline = Date.now() + TOTAL_TIMEOUT_MS;
+  const totalTimeoutMs = Math.max(5_000, Math.min(90_000, options.timeoutMs ?? TOTAL_TIMEOUT_MS));
+  const deadline = Date.now() + totalTimeoutMs;
   if (!proxy.kernelOnly) {
     const client = parseProxy(proxyUrl(proxy));
     if (!client) return fail('代理地址不合法');
@@ -201,7 +204,8 @@ export async function testRunnerProxy(proxy: RunnerProxy, options: TestProxyOpti
 
       // 内核冷启动时第一次 TLS 连接常被复位；等 1.5 秒再试一次（照 IPTV 的 probeKernelOnce）。
       await new Promise((resolve) => setTimeout(resolve, 1_500));
-      const retryDeadline = Date.now() + 15_000;
+      const remaining = Math.max(1_000, deadline - Date.now());
+      const retryDeadline = Date.now() + Math.min(15_000, remaining);
       const retry = await probeThrough(client, options.allowPrivate ?? false, retryDeadline);
       if (retry.ok) return retry;
       last = retry;

@@ -3,6 +3,7 @@ import type { Env } from './env';
 import { decryptSecret, encryptSecret } from './proxyCrypto';
 import { isKernelProtocol, parseProxyText, proxyKey, type ParseResult, type ParsedProxy } from './proxyImport';
 import { completeTaskForRun, dispatchNext, refreshTaskState } from './tasks';
+import { loadSettings } from './settings';
 
 interface ProxyRow {
   id: string;
@@ -182,6 +183,47 @@ export async function applyParsedNodes(env: Env, parsed: ParseResult, subscripti
   };
 }
 
+export interface ImportPreview {
+  total: number;
+  added: number;
+  duplicates: number;
+  kernelOnly: number;
+  protocols: Array<{ protocol: string; count: number }>;
+  sample: Array<{ name: string; protocol: string; host: string; port: number; kernelOnly: boolean }>;
+  warnings: string[];
+}
+
+/** 只解析、不写库：导入前告诉用户会新增多少、覆盖多少。 */
+export async function previewParsedNodes(env: Env, parsed: ParseResult): Promise<ImportPreview> {
+  const existing = await listRows(env);
+  const keys = new Set(
+    existing.map((row) => proxyKey({ protocol: row.protocol, host: row.host, port: row.port, username: row.username })),
+  );
+  const protocols = new Map<string, number>();
+  let duplicates = 0;
+  for (const node of parsed.nodes) {
+    protocols.set(node.protocol, (protocols.get(node.protocol) ?? 0) + 1);
+    if (keys.has(proxyKey(node))) duplicates += 1;
+  }
+  return {
+    total: parsed.nodes.length,
+    added: parsed.nodes.length - duplicates,
+    duplicates,
+    kernelOnly: parsed.nodes.filter((node) => node.kernelOnly).length,
+    protocols: [...protocols.entries()]
+      .map(([protocol, count]) => ({ protocol, count }))
+      .sort((a, b) => b.count - a.count),
+    sample: parsed.nodes.slice(0, 5).map((node) => ({
+      name: node.name,
+      protocol: node.protocol,
+      host: node.host,
+      port: node.port,
+      kernelOnly: node.kernelOnly,
+    })),
+    warnings: parsed.warnings.slice(0, 5),
+  };
+}
+
 type SubscriptionItem = SubscriptionRow & { nodeCount: number };
 
 async function listSubscriptions(env: Env): Promise<SubscriptionItem[]> {
@@ -293,7 +335,8 @@ async function refreshSubscription(env: Env, row: SubscriptionRow): Promise<Impo
   }
   try {
     const url = assertFetchable(row.url);
-    const { parsed } = await fetchSubscription(url, row.user_agent, row.headers);
+    const settings = await loadSettings(env.DB);
+    const { parsed } = await fetchSubscription(url, row.user_agent || settings.proxyFetchUserAgent, row.headers);
     const summary = await applyParsedNodes(env, parsed, row.id);
     await touchSubscription(env, row.id, `成功：新增 ${summary.added}，更新 ${summary.updated}`);
     return summary;
@@ -530,6 +573,20 @@ export function createAdminProxyRoutes(): Hono<{ Bindings: Env }> {
     return c.json({ ok: true });
   });
 
+  api.post('/preview', async (c) => {
+    const body = await c.req.json<{ text?: string }>().catch(() => null);
+    const text = typeof body?.text === 'string' ? body.text : '';
+    if (!text.trim()) return c.json({ error: 'empty_text', message: '请粘贴订阅内容' }, 400);
+    if (new TextEncoder().encode(text).length > MAX_TEXT_BYTES) {
+      return c.json({ error: 'too_large', message: '订阅内容超过 512KB' }, 413);
+    }
+    const parsed = parseProxyText(text);
+    if (!parsed.nodes.length) {
+      return c.json({ error: 'no_nodes', message: parsed.warnings[0] ?? '没有识别到节点' }, 400);
+    }
+    return c.json({ ok: true, ...(await previewParsedNodes(c.env, parsed)) });
+  });
+
   api.post('/import', async (c) => {
     const body = await c.req.json<{ text?: string }>().catch(() => null);
     const text = typeof body?.text === 'string' ? body.text : '';
@@ -654,7 +711,12 @@ export function createAdminProxyRoutes(): Hono<{ Bindings: Env }> {
 
     let fetched: { parsed: ParseResult; bytes: number };
     try {
-      fetched = await fetchSubscription(url, clean(body?.userAgent, 200), clean(body?.headers, 2000));
+      const settings = await loadSettings(c.env.DB);
+      fetched = await fetchSubscription(
+        url,
+        clean(body?.userAgent, 200) || settings.proxyFetchUserAgent,
+        clean(body?.headers, 2000),
+      );
     } catch (error) {
       if (isNeedsRunnerError(error)) {
         return c.json({ error: 'fetch_forbidden', message: error.message, needsRunner: true }, 502);

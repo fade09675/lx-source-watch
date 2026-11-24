@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Env } from './env';
 import { parseProxyText } from './proxyImport';
 import { applyParsedNodes } from './proxyRoutes';
+import { loadSettings } from './settings';
 import { completeTaskForRun, dispatchNext, refreshTaskState } from './tasks';
 
 function authorized(env: Env, header: string | undefined): boolean {
@@ -41,13 +42,14 @@ export function createRunnerSubscriptionRoutes(): Hono<{ Bindings: Env }> {
       .first<SubscriptionRow>();
     if (!row) return c.json({ error: 'not_found', message: '订阅不存在' }, 404);
     if (!row.url) return c.json({ error: 'file_subscription', message: '文件订阅没有可拉取的地址' }, 400);
+    const settings = await loadSettings(c.env.DB);
     return c.json({
       ok: true,
       subscription: {
         id: row.id,
         name: row.name,
         url: row.url,
-        userAgent: row.user_agent,
+        userAgent: row.user_agent || settings.proxyFetchUserAgent,
         headers: row.headers,
         kind: row.kind,
       },

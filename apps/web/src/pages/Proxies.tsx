@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ApiError, api, type AdminProxy, type SubscriptionItem } from '../api';
+import { ApiError, api, type AdminProxy, type ProxyImportPreview, type SubscriptionItem } from '../api';
 import { ErrorBox, Spinner } from '../components/Feedback';
 
 const PROTOCOLS = ['http', 'socks5', 'ss', 'vmess', 'vless', 'trojan', 'hysteria2', 'tuic', 'anytls'];
@@ -23,6 +23,8 @@ export function ProxiesPage() {
   const [subs, setSubs] = useState<SubscriptionItem[] | null>(null);
   const [error, setError] = useState('');
   const [text, setText] = useState('');
+  const [preview, setPreview] = useState<ProxyImportPreview | null>(null);
+  const [pendingText, setPendingText] = useState('');
   const [subUrl, setSubUrl] = useState('');
   const [subName, setSubName] = useState('');
   const [subUa, setSubUa] = useState('');
@@ -67,13 +69,42 @@ export function ProxiesPage() {
     }
   }
 
-  async function importText() {
+  async function previewContent(content: string, source: '文本' | '文件') {
+    if (!content.trim()) {
+      setMessage('请先粘贴或选择要导入的内容');
+      return;
+    }
     setBusy(true);
     setMessage('');
     try {
-      const result = await api.importProxies(text);
+      const result = await api.previewProxies(content);
+      setPreview(result);
+      setPendingText(content);
+      setMessage(
+        `${source}预览：识别 ${result.total} 个，新增 ${result.added}，已存在 ${result.duplicates}（将更新），内核 ${result.kernelOnly} 个`,
+      );
+    } catch (e) {
+      setPreview(null);
+      setPendingText('');
+      setMessage(e instanceof ApiError ? e.message : '预览失败');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function importText(content = pendingText || text) {
+    if (!content.trim()) {
+      setMessage('请先预览或粘贴要导入的内容');
+      return;
+    }
+    setBusy(true);
+    setMessage('');
+    try {
+      const result = await api.importProxies(content);
       setMessage(`导入完成：新增 ${result.added}，更新 ${result.updated}，共 ${result.total} 个节点${result.warnings.length ? `；${result.warnings[0]}` : ''}`);
       setText('');
+      setPreview(null);
+      setPendingText('');
       await load();
     } catch (e) {
       setMessage(e instanceof ApiError ? e.message : '导入失败');
@@ -82,24 +113,16 @@ export function ProxiesPage() {
     }
   }
 
-  async function importFile(file: File) {
+  async function previewFile(file: File) {
     if (file.size > 512 * 1024) {
       setMessage('文件超过 512KB，请拆分后再导入');
       return;
     }
-    setBusy(true);
-    setMessage('');
     try {
       const content = await file.text();
-      const result = await api.importProxies(content);
-      setMessage(
-        `文件导入完成：新增 ${result.added}，更新 ${result.updated}，共 ${result.total} 个节点${result.warnings.length ? `；${result.warnings[0]}` : ''}（导入的节点属于“手动”）`,
-      );
-      await load();
-    } catch (e) {
-      setMessage(e instanceof ApiError ? e.message : '文件导入失败');
-    } finally {
-      setBusy(false);
+      await previewContent(content, '文件');
+    } catch {
+      setMessage('读取文件失败');
     }
   }
 
@@ -437,28 +460,65 @@ export function ProxiesPage() {
         <textarea
           className="proxy-textarea"
           value={text}
-          onChange={(event) => setText(event.target.value)}
+          onChange={(event) => {
+            setText(event.target.value);
+            setPreview(null);
+            setPendingText('');
+          }}
           placeholder="把订阅内容粘贴到这里…"
           rows={6}
         />
         <div className="page-actions">
-          <button type="button" className="primary-button" disabled={busy || !text.trim()} onClick={() => void importText()}>
-            导入
+          <button type="button" className="ghost-button" disabled={busy || !text.trim()} onClick={() => void previewContent(text, '文本')}>
+            预览
+          </button>
+          <button type="button" className="primary-button" disabled={busy || !text.trim()} onClick={() => void importText(text)}>
+            直接导入
           </button>
           <label className="ghost-button file-button">
-            从文件导入
+            从文件预览
             <input
               type="file"
               accept=".txt,.yaml,.yml,.json,.conf,.ini"
               hidden
               onChange={(event) => {
                 const file = event.target.files?.[0];
-                if (file) void importFile(file);
+                if (file) void previewFile(file);
                 event.target.value = '';
               }}
             />
           </label>
         </div>
+        {preview ? (
+          <div className="notice">
+            <p>
+              将导入 <strong>{preview.total}</strong> 个：新增 <strong>{preview.added}</strong>，已存在{' '}
+              <strong>{preview.duplicates}</strong>（会更新密码/配置），内核 <strong>{preview.kernelOnly}</strong> 个
+            </p>
+            <p className="muted small">
+              协议分布：{preview.protocols.map((item) => `${item.protocol} ${item.count}`).join('、') || '—'}
+            </p>
+            <p className="muted small">
+              样例：{preview.sample.map((node) => `${node.name}（${node.protocol} ${node.host}:${node.port}）`).join('；')}
+            </p>
+            {preview.warnings.length ? <p className="muted small">提示：{preview.warnings.join('；')}</p> : null}
+            <div className="page-actions">
+              <button type="button" className="primary-button" disabled={busy || !pendingText} onClick={() => void importText(pendingText)}>
+                确认导入
+              </button>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => {
+                  setPreview(null);
+                  setPendingText('');
+                }}
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        ) : null}
       </section>
 
       <details className="panel">

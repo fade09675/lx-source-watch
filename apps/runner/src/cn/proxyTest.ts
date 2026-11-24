@@ -10,6 +10,7 @@ import {
   type ProxyCheck,
   type RunnerProxy,
 } from './proxyPool.js';
+import { fetchRunnerConfig } from './runnerConfig.js';
 
 /**
  * 内核节点的跳板候选：已测活的普通 http/socks5，延迟最低的优先。
@@ -68,10 +69,12 @@ export interface ProxyTestOptions {
   proxyId?: string;
   /** 只测这个订阅下的节点。 */
   subscriptionId?: string;
-  /** 默认 5，与 cn 补测一致，最高 10。 */
+  /** 默认取 Worker 设置（5），最高 10；0 表示未指定。 */
   concurrency?: number;
-  /** 内核节点最多试几个跳板，默认 5。 */
+  /** 内核节点最多试几个跳板；0 表示未指定。 */
   maxHops?: number;
+  /** 单节点测活超时（毫秒）；0 表示未指定。 */
+  timeoutMs?: number;
   allowPrivate?: boolean;
   /** 只测前 N 个，便于本地调试。 */
   limit?: number;
@@ -142,8 +145,23 @@ export async function runProxyTest(options: ProxyTestOptions): Promise<ProxyTest
     );
   }
 
-  const concurrency = Math.max(1, Math.min(10, options.concurrency ?? 5));
-  const hops = selectHops(proxies, options.maxHops ?? 5);
+  const config = await fetchRunnerConfig(options.endpoint, options.token);
+  const concurrency = Math.max(
+    1,
+    Math.min(10, options.concurrency && options.concurrency > 0 ? options.concurrency : config.proxyTestConcurrency),
+  );
+  const maxHops = Math.max(
+    1,
+    Math.min(5, options.maxHops && options.maxHops > 0 ? options.maxHops : config.cnMaxHops),
+  );
+  const timeoutMs = Math.max(
+    5_000,
+    Math.min(
+      90_000,
+      options.timeoutMs && options.timeoutMs > 0 ? options.timeoutMs : config.proxyTestTimeoutMs,
+    ),
+  );
+  const hops = selectHops(proxies, maxHops);
   const total = testable.length;
   let done = 0;
   let ok = 0;
@@ -151,7 +169,7 @@ export async function runProxyTest(options: ProxyTestOptions): Promise<ProxyTest
   const queue = [...testable];
   const rows: ProxyTestRow[] = [];
 
-  log.step(`开始代理测活：${total} 个，并发 ${concurrency}，跳板 ${hops.length} 个`);
+  log.step(`开始代理测活：${total} 个，并发 ${concurrency}，跳板 ${hops.length} 个，单节点超时 ${timeoutMs}ms`);
 
   const workers = Array.from({ length: Math.min(concurrency, total) }, async () => {
     for (;;) {
@@ -162,7 +180,8 @@ export async function runProxyTest(options: ProxyTestOptions): Promise<ProxyTest
         check = await testRunnerProxy(proxy, {
           allowPrivate: options.allowPrivate,
           hops,
-          maxHops: options.maxHops ?? 5,
+          maxHops,
+          timeoutMs,
         });
       } catch (error) {
         check = {

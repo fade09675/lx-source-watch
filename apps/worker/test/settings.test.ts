@@ -39,4 +39,27 @@ describe('normalizeSettings', () => {
     expect(settings.probeIntervalHours).toBe(6);
     expect(settings.probeLimit).toBe(50);
   });
+
+  it('4E 新增运行参数会夹取并清理 UA', () => {
+    const settings = normalizeSettings({
+      cnMaxHops: 99,
+      cnAutoSwitch: 'false',
+      proxyFetchUserAgent: '  ClashforWindows/0.20.39  ',
+      proxyTestConcurrency: 0,
+      proxyTestTimeoutMs: 999_999,
+    });
+    expect(settings.cnMaxHops).toBe(5);
+    expect(settings.cnAutoSwitch).toBe(true);
+    expect(settings.proxyFetchUserAgent).toBe('ClashforWindows/0.20.39');
+    expect(settings.proxyTestConcurrency).toBe(1);
+    expect(settings.proxyTestTimeoutMs).toBe(90_000);
+  });
+
+  it('4E 默认值：跳板 5、自动换节点开、测活并发 5、超时 20 秒', () => {
+    expect(DEFAULT_SETTINGS.cnMaxHops).toBe(5);
+    expect(DEFAULT_SETTINGS.cnAutoSwitch).toBe(true);
+    expect(DEFAULT_SETTINGS.proxyFetchUserAgent).toBe('');
+    expect(DEFAULT_SETTINGS.proxyTestConcurrency).toBe(5);
+    expect(DEFAULT_SETTINGS.proxyTestTimeoutMs).toBe(20_000);
+  });
 });
