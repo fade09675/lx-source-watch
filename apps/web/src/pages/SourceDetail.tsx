@@ -52,6 +52,8 @@ export function SourceDetailPage() {
 
   const { source, history, daily, platformDaily } = data;
   const platformKeys = source.platforms.filter((item) => item.declared).map((item) => item.key);
+  const cnPlatforms = source.platforms.filter((item) => item.declared && item.cn?.tested);
+  const cnOk = cnPlatforms.filter((item) => item.cn?.ok).length;
 
   return (
     <div className="page">
@@ -84,6 +86,7 @@ export function SourceDetailPage() {
 
       <div className="stats-grid compact">
         <MiniStat label="通过平台" value={`${source.stats.ok}/${source.stats.tested}`} />
+        <MiniStat label="国内可达" value={cnPlatforms.length > 0 ? `${cnOk}/${cnPlatforms.length}` : '未测'} />
         <MiniStat label="声明平台" value={source.stats.total} />
         <MiniStat label="本轮耗时" value={formatMs(source.durationMs)} />
         <MiniStat label="检测时间" value={formatDateTime(source.checkedAt)} />

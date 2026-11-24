@@ -58,6 +58,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export interface StatusFilters {
   platforms?: string[];
   statuses?: string[];
+  cn?: string;
   q?: string;
 }
 
@@ -639,6 +640,7 @@ export const api = {
       `/api/status${query({
         platform: filters.platforms?.join(','),
         status: filters.statuses?.join(','),
+        cn: filters.cn,
         q: filters.q,
       })}`,
     ),

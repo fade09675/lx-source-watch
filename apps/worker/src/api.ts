@@ -956,6 +956,7 @@ export function createApi(): Hono<Ctx> {
     const filtered = filterSnapshot(snapshot, {
       platforms: parseList(c.req.query('platform')),
       statuses: parseList(c.req.query('status')),
+      cn: c.req.query('cn'),
       q: c.req.query('q'),
     });
     const envelope: StatusEnvelope = {

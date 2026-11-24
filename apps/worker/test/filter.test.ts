@@ -40,6 +40,26 @@ describe('filterSnapshot', () => {
     expect(filterSnapshot(sample(), { q: 'nothing' }).sources).toHaveLength(0);
   });
 
+  it('国内补测筛选', () => {
+    const bad = makeSource({
+      id: 'c',
+      platforms: [makePlatform({ key: 'kw', cn: { tested: true, ok: false, error: '连接超时' } })],
+      stats: { ok: 1, tested: 1, total: 1 },
+      status: 'available',
+    });
+    const good = makeSource({
+      id: 'd',
+      platforms: [makePlatform({ key: 'kg', cn: { tested: true, ok: true, ms: 120 } })],
+      stats: { ok: 1, tested: 1, total: 1 },
+      status: 'available',
+    });
+    const snapshot = makeSnapshot([bad, good, ...sample().sources]);
+
+    expect(filterSnapshot(snapshot, { cn: 'failed' }).sources.map((source) => source.id)).toEqual(['c']);
+    expect(filterSnapshot(snapshot, { cn: 'ok' }).sources.map((source) => source.id)).toEqual(['d']);
+    expect(filterSnapshot(snapshot, { cn: 'untested' }).sources.map((source) => source.id)).toEqual(['a', 'b']);
+  });
+
   it('空过滤返回原对象', () => {
     const snapshot = sample();
     expect(filterSnapshot(snapshot, {})).toBe(snapshot);

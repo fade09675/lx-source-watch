@@ -27,11 +27,17 @@ export function OverviewPage() {
 
   const platforms = useMemo(() => (params.get('platform') ?? '').split(',').filter(Boolean), [params]);
   const statuses = useMemo(() => (params.get('status') ?? '').split(',').filter(Boolean), [params]);
+  const cn = params.get('cn') ?? '';
   const q = params.get('q') ?? '';
 
   const filters: StatusFilters = useMemo(
-    () => ({ platforms: platforms.length ? platforms : undefined, statuses: statuses.length ? statuses : undefined, q: q || undefined }),
-    [platforms, statuses, q],
+    () => ({
+      platforms: platforms.length ? platforms : undefined,
+      statuses: statuses.length ? statuses : undefined,
+      cn: cn || undefined,
+      q: q || undefined,
+    }),
+    [platforms, statuses, cn, q],
   );
 
   useEffect(() => {
@@ -85,6 +91,13 @@ export function OverviewPage() {
     setParams(next, { replace: true });
   }
 
+  function toggleCnFailed() {
+    const next = new URLSearchParams(params);
+    if (cn === 'failed') next.delete('cn');
+    else next.set('cn', 'failed');
+    setParams(next, { replace: true });
+  }
+
   function clearFilters() {
     setQuery('');
     setParams(new URLSearchParams(), { replace: true });
@@ -92,6 +105,18 @@ export function OverviewPage() {
 
   const snapshot = data?.snapshot;
   const summary = snapshot?.summary;
+  const cnStats = useMemo(() => {
+    let tested = 0;
+    let ok = 0;
+    for (const source of snapshot?.sources ?? []) {
+      for (const platform of source.platforms) {
+        if (!platform.declared || !platform.cn?.tested) continue;
+        tested += 1;
+        if (platform.cn.ok) ok += 1;
+      }
+    }
+    return { tested, ok };
+  }, [snapshot]);
 
   return (
     <div className="page">
@@ -124,6 +149,19 @@ export function OverviewPage() {
           <StatCard label="不可用" value={summary.unavailable} tone="bad" />
           <StatCard label="未测试" value={summary.untested} tone="idle" />
           <StatCard label="通过平台" value={`${summary.platformsOk}/${summary.platformsTested}`} tone="ok" />
+          <StatCard
+            label="国内可达平台"
+            value={cnStats.tested > 0 ? `${cnStats.ok}/${cnStats.tested}` : '未测'}
+            tone={
+              cnStats.tested === 0
+                ? 'idle'
+                : cnStats.ok === cnStats.tested
+                  ? 'ok'
+                  : cnStats.ok > 0
+                    ? 'warn'
+                    : 'bad'
+            }
+          />
         </div>
       )}
 
@@ -161,7 +199,18 @@ export function OverviewPage() {
             </button>
           ))}
         </div>
-        {(platforms.length > 0 || statuses.length > 0 || q) && (
+        <div className="filter-group">
+          <span className="filter-label">国内</span>
+          <button
+            type="button"
+            className={`filter-chip${cn === 'failed' ? ' active' : ''}`}
+            onClick={toggleCnFailed}
+            title="只看至少一个平台经国内代理补测失败的音源"
+          >
+            只看国内失败
+          </button>
+        </div>
+        {(platforms.length > 0 || statuses.length > 0 || cn || q) && (
           <button type="button" className="link-button" onClick={clearFilters}>
             清空筛选
           </button>
@@ -192,6 +241,8 @@ export function OverviewPage() {
                   const byKey = new Map(source.platforms.map((item) => [item.key, item]));
                   const endpointsOk = source.endpoints.filter((item) => item.ok).length;
                   const lagging = source.endpoints.some((item) => item.versionState === 'lagging');
+                  const cnPlatforms = source.platforms.filter((item) => item.declared && item.cn?.tested);
+                  const cnOk = cnPlatforms.filter((item) => item.cn?.ok).length;
                   return (
                     <tr key={source.id} onClick={() => navigate(`/s/${encodeURIComponent(source.id)}`)} className="matrix-row">
                       <td>
@@ -206,6 +257,16 @@ export function OverviewPage() {
                             </span>
                           )}
                           {lagging && <span className="pill pill-warn">镜像版本落后</span>}
+                          {cnPlatforms.length > 0 && (
+                            <span
+                              className={`pill tone-${
+                                cnOk === cnPlatforms.length ? 'ok' : cnOk > 0 ? 'warn' : 'bad'
+                              }`}
+                              title="经国内代理补测可达的平台数 / 已补测平台数"
+                            >
+                              国内 {cnOk}/{cnPlatforms.length}
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td>
