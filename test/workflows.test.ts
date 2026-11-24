@@ -143,6 +143,9 @@ describe('probe.yml', () => {
 
     const discover = namedStep(doc.jobs.probe, '自动发现候选');
     expect(String(discover.if)).toContain('inputs.discover');
+    // workflow_dispatch 的 boolean 输入在 inputs 上下文里是布尔值，不能拿字符串比较。
+    expect(String(discover.if)).not.toContain("== 'true'");
     expect(String(doc.jobs.cn.if)).toContain('inputs.cn');
+    expect(String(doc.jobs.cn.if)).not.toContain("!= 'false'");
   });
 });

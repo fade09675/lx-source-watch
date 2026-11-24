@@ -26,6 +26,7 @@ const PUBLIC_PATHS = new Set([
   '/api/runner/proxies',
   '/api/config/mirrors',
   '/api/config/sources',
+  '/api/health',
   '/favicon.ico',
   '/favicon.svg',
   '/robots.txt',

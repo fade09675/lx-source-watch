@@ -1,5 +1,6 @@
 import { SCHEMA_VERSION, SnapshotSchema, type ExportItem, type Snapshot, type SourceResult, type StatusEnvelope } from '@lx/shared';
 import { Hono } from 'hono';
+import { toCsv } from './csv';
 import {
   buildClearSessionCookie,
   buildSessionCookie,
@@ -114,38 +115,6 @@ function toExportItem(source: SourceResult): ExportItem {
       ms: platform.totalMs,
     })),
   };
-}
-
-function csvCell(value: unknown): string {
-  const text = value === undefined || value === null ? '' : String(value);
-  return `"${text.replaceAll('"', '""')}"`;
-}
-
-function toCsv(items: ExportItem[]): string {
-  const header = ['id', 'title', 'url', 'mirror', 'homepage', 'status', 'ok', 'tested', 'total', 'platforms'];
-  const lines = [header.join(',')];
-  for (const item of items) {
-    const platforms = item.platforms
-      .map((platform) => `${platform.key}:${platform.tested ? (platform.ok ? 'ok' : 'fail') : 'untested'}`)
-      .join('|');
-    lines.push(
-      [
-        item.id,
-        item.title,
-        item.url,
-        item.mirror ?? '',
-        item.homepage ?? '',
-        item.status,
-        item.ok,
-        item.tested,
-        item.total,
-        platforms,
-      ]
-        .map(csvCell)
-        .join(','),
-    );
-  }
-  return `${lines.join('\n')}\n`;
 }
 
 export function createApi(): Hono<Ctx> {
@@ -776,7 +745,7 @@ export function createApi(): Hono<Ctx> {
         candidates,
         serverTime: new Date().toISOString(),
       },
-      { headers: { 'cache-control': 'no-store' } },
+      { headers: { 'cache-control': 'public, max-age=10, s-maxage=30' } },
     );
   });
 

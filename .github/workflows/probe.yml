@@ -87,7 +87,7 @@ jobs:
         run: pnpm test
 
       - name: 自动发现候选
-        if: inputs.discover == 'true'
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.discover }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -125,7 +125,7 @@ jobs:
           if-no-files-found: error
 
       - name: 上传候选结果
-        if: inputs.discover == 'true'
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.discover }}
         uses: actions/upload-artifact@v4
         with:
           name: candidates-result
@@ -137,7 +137,7 @@ jobs:
   cn:
     name: 国内补测（不执行脚本）
     needs: probe
-    if: ${{ inputs.cn != 'false' }}
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.cn }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     continue-on-error: true
