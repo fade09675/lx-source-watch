@@ -1,5 +1,6 @@
 import { IngestPayloadSchema, SnapshotSchema, type Snapshot } from '@lx/shared';
 import type { Context } from 'hono';
+import { autoMergeRegistryDuplicates } from './autoMerge';
 import { autoPromoteCandidates } from './candidatePromotion';
 import { alreadyIngested, loadRecentStatuses, writeSnapshot } from './db';
 import { SNAPSHOT_KEY, type Env } from './env';
@@ -123,6 +124,14 @@ export async function handleIngest(c: Ctx): Promise<Response> {
     await env.SNAPSHOT.put(`run:${snapshot.runId}:log`, meta.log, { expirationTtl: LOG_TTL_SECONDS });
   }
 
+  // 上报后自动合并注册表里的同内容源：重复源只停用、地址转成主源别名。
+  let mergeResult: Awaited<ReturnType<typeof autoMergeRegistryDuplicates>> | null = null;
+  try {
+    mergeResult = await autoMergeRegistryDuplicates(env, now);
+  } catch {
+    mergeResult = null;
+  }
+
   // 无人值守收录：初始化通过的新候选自动进入正式清单（数量受设置限制）。
   const promotion = await autoPromoteCandidates(env, now);
 
@@ -146,5 +155,7 @@ export async function handleIngest(c: Ctx): Promise<Response> {
     candidates: stats.candidates,
     promoted: promotion.promoted.length,
     promotionErrors: promotion.errors,
+    merged: mergeResult?.merged ?? 0,
+    mergeErrors: mergeResult?.errors ?? [],
   });
 }

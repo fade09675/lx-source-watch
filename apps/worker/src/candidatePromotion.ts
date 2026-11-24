@@ -1,5 +1,6 @@
 import type { D1Database } from '@cloudflare/workers-types';
 import { parseGitHubRawUrl, renderMirror, type Candidate } from '@lx/shared';
+import { ensureCandidateSha } from './candidateSha';
 import { getCandidate, getCandidates, setCandidateState } from './db';
 import { getMirrorTemplates } from './mirrors';
 import { createSourceRegistry, findSourceRegistryByUrl } from './sourceRegistry';
@@ -49,19 +50,22 @@ async function promoteOne(
     return { ok: true, id: existing.id, existing: true };
   }
 
+  // 老候选没有指纹：收录前自动下载补算，避免重复内容被当成新源。
+  const sha256 = candidate.sha256 ?? (await ensureCandidateSha(env.DB, candidate));
+
   // 内容指纹相同视为重复：并入主源、写别名、把候选标为 duplicate，不再新建源。
-  if (candidate.sha256) {
+  if (sha256) {
     const decision = await decideDuplicate(env.DB, {
       kind: 'candidate',
       url: candidate.url,
-      sha256: candidate.sha256,
+      sha256,
       title: candidate.title ?? '',
       author: candidate.author ?? '',
     });
     const canonical = decision.canonical;
     if (canonical && canonical.id !== candidate.id && decision.action === 'alias' && canonical.kind === 'registry') {
       await markCandidateDuplicate(env.DB, candidate.id, canonical.id, now);
-      await mergeIntoCanonical(env.DB, canonical.id, [{ url: candidate.url, sha256: candidate.sha256 }], now);
+      await mergeIntoCanonical(env.DB, canonical.id, [{ url: candidate.url, sha256 }], now);
       return { ok: true, id: canonical.id, existing: true };
     }
     if (canonical && canonical.id !== candidate.id && decision.action === 'merge_candidates' && canonical.kind === 'candidate') {
@@ -78,7 +82,7 @@ async function promoteOne(
       url: candidate.url,
       homepage: '',
       mirrors: await suggestedMirrors(env.DB, candidate.url),
-      contentSha256: candidate.sha256 ?? null,
+      contentSha256: sha256 ?? null,
       enabled: true,
       trusted: false,
       notes: `自动收录：${candidate.repo}/${candidate.path}`,
