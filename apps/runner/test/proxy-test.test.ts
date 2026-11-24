@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { selectHops } from '../src/cn/proxyTest.js';
+import { selectHops, toProxyTestRow } from '../src/cn/proxyTest.js';
 import { isUdpOnly, parseEgress, type RunnerProxy } from '../src/cn/proxyPool.js';
 
 function proxy(over: Partial<RunnerProxy>): RunnerProxy {
@@ -41,6 +41,22 @@ describe('selectHops', () => {
     expect(hops).toHaveLength(5);
     expect(hops.map((hop) => hop.host)).toEqual(['b', 'f', 'a', 'g', 'h']);
     expect(hops[0]).toMatchObject({ protocol: 'socks5', port: 8080 });
+  });
+});
+
+describe('toProxyTestRow', () => {
+  it('error 截到 300 字符，避免整份汇总报告被 400 拒绝', () => {
+    const row = toProxyTestRow(proxy({ id: 'k', kernelOnly: true }), {
+      ok: false,
+      latencyMs: 0,
+      egressIp: '',
+      country: '',
+      asn: '',
+      error: 'x'.repeat(900),
+    });
+    expect(row.error).toHaveLength(300);
+    expect(row.id).toBe('k');
+    expect(row.kernelOnly).toBe(true);
   });
 });
 

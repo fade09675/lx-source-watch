@@ -7,6 +7,7 @@ import {
   isUdpOnly,
   reportProxyCheck,
   testRunnerProxy,
+  type ProxyCheck,
   type RunnerProxy,
 } from './proxyPool.js';
 
@@ -33,6 +34,28 @@ export function selectHops(proxies: RunnerProxy[], maxHops = 5): ChainHop[] {
       username: proxy.username || undefined,
       password: proxy.password || undefined,
     }));
+}
+
+/**
+ * 单条回传结果。error 在单节点回写里保留完整内核日志，
+ * 但汇总报告有 300 字符上限，这里必须截断，否则整份报告被 400 拒绝。
+ */
+export function toProxyTestRow(proxy: RunnerProxy, check: ProxyCheck): ProxyTestRow {
+  return {
+    id: proxy.id,
+    name: proxy.name,
+    protocol: proxy.protocol,
+    host: proxy.host,
+    port: proxy.port,
+    subscriptionId: proxy.subscriptionId ?? null,
+    kernelOnly: proxy.kernelOnly,
+    ok: check.ok,
+    latencyMs: check.latencyMs,
+    country: check.country,
+    asn: check.asn,
+    error: check.error?.slice(0, 300),
+    testedAt: nowIso(),
+  };
 }
 
 export interface ProxyTestOptions {
@@ -156,21 +179,7 @@ export async function runProxyTest(options: ProxyTestOptions): Promise<ProxyTest
         if (proxy.kernelOnly) kernelOk += 1;
       }
       await reportProxyCheck(options.endpoint, options.token, proxy.id, check, options.allowPrivate);
-      rows.push({
-        id: proxy.id,
-        name: proxy.name,
-        protocol: proxy.protocol,
-        host: proxy.host,
-        port: proxy.port,
-        subscriptionId: proxy.subscriptionId ?? null,
-        kernelOnly: proxy.kernelOnly,
-        ok: check.ok,
-        latencyMs: check.latencyMs,
-        country: check.country,
-        asn: check.asn,
-        error: check.error,
-        testedAt: nowIso(),
-      });
+      rows.push(toProxyTestRow(proxy, check));
       done += 1;
       const label = proxy.name || proxy.id;
       if (check.ok) {
