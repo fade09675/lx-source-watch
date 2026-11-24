@@ -73,6 +73,44 @@ function query(params: Record<string, string | undefined>): string {
 export interface CandidateList {
   candidates: Candidate[];
   count: number;
+  counts?: Record<string, number>;
+}
+
+export interface AppSettingsView {
+  probeEnabled: boolean;
+  probeIntervalHours: number;
+  probeLimit: number;
+  probeConcurrency: number;
+  probeDeep: boolean;
+  preferMirror: boolean;
+  cnEnabled: boolean;
+  cnMaxProxies: number;
+  cnConcurrency: number;
+  proxyTestEnabled: boolean;
+  proxyTestIntervalHours: number;
+  discoveryEnabled: boolean;
+  discoveryIntervalHours: number;
+  autoPromoteCandidates: boolean;
+  autoPromoteMaxPerRun: number;
+  retentionDetailDays: number;
+  retentionDailyDays: number;
+  retentionEventDays: number;
+  updatedAt?: string;
+}
+
+export interface SettingsResult {
+  settings: AppSettingsView;
+  scheduler: SchedulerStatus;
+}
+
+export interface SystemView {
+  site: string;
+  repo: string;
+  schemaVersion: number;
+  tokens: { github: boolean; cloudflare: boolean; runner: boolean; ingest: boolean };
+  scheduler: SchedulerStatus;
+  counts: { candidates: Record<string, number>; sources: number };
+  serverTime: string;
 }
 
 export interface AdminProxy {
@@ -211,11 +249,13 @@ export interface SchedulerJobStatus {
   lastError?: string;
   manualAt?: string;
   nextAt: string;
+  enabled?: boolean;
 }
 
 export interface SchedulerStatus {
   probe: SchedulerJobStatus;
   proxyTest: SchedulerJobStatus;
+  discovery?: SchedulerJobStatus;
   now: string;
 }
 
@@ -398,7 +438,19 @@ export const api = {
   events: (limit = 50) => request<EventItem[]>(`/api/events?limit=${limit}`),
   health: () => request<HealthResponse>('/api/health'),
 
-  candidates: () => request<CandidateList>('/api/admin/candidates'),
+  candidates: (state?: string, q?: string) => {
+    const params = new URLSearchParams();
+    if (state) params.set('state', state);
+    if (q) params.set('q', q);
+    const suffix = params.toString() ? `?${params.toString()}` : '';
+    return request<CandidateList>(`/api/admin/candidates${suffix}`);
+  },
+  promoteCandidates: () =>
+    request<{ promoted: string[]; skipped: number; errors: string[] }>('/api/admin/candidates/promote', {
+      method: 'POST',
+    }),
+  deleteRejectedCandidates: () =>
+    request<{ ok: boolean; deleted: number }>('/api/admin/candidates/rejected', { method: 'DELETE' }),
   setCandidateState: (id: string, state: string) =>
     request<{ ok: boolean; id: string; state: string }>(`/api/admin/candidates/${encodeURIComponent(id)}`, {
       method: 'PATCH',
@@ -447,6 +499,13 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(input),
     }),
+  runDiscovery: () =>
+    request<{ ok: boolean; dispatchedAt: string }>('/api/admin/run/discovery', { method: 'POST' }),
+  settings: () => request<SettingsResult>('/api/admin/settings'),
+  saveSettings: (patch: Partial<AppSettingsView>) =>
+    request<SettingsResult>('/api/admin/settings', { method: 'PUT', body: JSON.stringify(patch) }),
+  resetSettings: () => request<SettingsResult>('/api/admin/settings/reset', { method: 'POST' }),
+  system: () => request<SystemView>('/api/admin/system'),
   runProxyTest: (input: RunProxyTestInput = {}) =>
     request<{ ok: boolean; dispatchedAt: string }>('/api/admin/run/proxy-test', {
       method: 'POST',

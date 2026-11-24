@@ -263,3 +263,21 @@ pnpm --filter @lx/worker exec wrangler d1 migrations apply lx-source-watch --rem
 - `publish` job 合并 `out/cn.json` 后一次 HMAC 上报；国内可达只作为独立标记，不改变总状态。
 - 没配 `RUNNER_TOKEN` 时 cn job 自动跳过，站点仍可用。
 - 内核协议（ss/vmess/vless/trojan/hysteria2/tuic）会让 cn job 下载固定版本 mihomo（v1.19.9）并缓存；单个代理只代表该节点出口，不代表全国各地区。
+
+---
+
+## 12. 音源注册表与自动发现
+
+- 迁移 `0008_source_registry.sql` 会建 `source_registry` 表并写入初始 19 个源；之后以 D1 为唯一清单，`/admin/sources` 可新增、编辑、启停、删除。
+- `GET /api/config/sources` 是公开接口，Actions 的 probe job 通过 `LX_REGISTRY_URL` 读取，读不到时自动回退仓库里的 `sources/registry.json`；探测 job 仍然零密钥。
+- 每个源支持主地址 + 最多 10 个自定义镜像；加速模板在「管理后台 → 设置 → 加速镜像」里维护，默认 8 条，随时可换。
+- 自动发现由 Worker 定时（默认 12 小时）或「候选源 → 立即发现」触发；发现步骤只在该 step 使用仓库自带的 `GITHUB_TOKEN`，不会拿到上报/部署密钥。
+- 候选初始化通过后可自动收录为正式源（默认每轮最多 3 个），审核策略在「设置 → 候选与自动收录」里调整。
+
+## 13. 定时与设置
+
+- GitHub 工作流本身不再配置 `schedule`；Worker 的 cron `*/5 * * * *` 每 5 分钟判断是否到点，再通过 GitHub API 派发 probe / proxy-test。
+- 探测与测活的间隔、每轮源数、并发、是否 deep、国内补测、自动发现、数据保留天数都在「设置」页里改，存 D1 的 `settings` 表，不需要重新部署。
+- 手动触发时间也参与“下次到期”计算；派发失败会记录原因，并在设置页和任务中心显示。
+- 额度：工作台顶部显示 KV/D1/Actions 用量；KV 写保护阈值 920/1000，D1 写保护阈值 9 万/10 万。
+

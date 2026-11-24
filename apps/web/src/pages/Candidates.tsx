@@ -1,163 +1,305 @@
-import { useEffect, useMemo, useState } from 'react';
-import { formatDateTime, platformMeta, type Candidate } from '@lx/shared';
-import { ApiError, api } from '../api';
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { formatDateTime, formatRelative, platformMeta, type Candidate } from '@lx/shared';
+import { api, type CandidateList } from '../api';
 import { EmptyBox, ErrorBox, Spinner } from '../components/Feedback';
 
-const STATES: { key: string; label: string; tone: string; hint: string }[] = [
-  { key: 'new', label: '新发现', tone: 'idle', hint: '尚未通过初始化检测' },
-  { key: 'qualified', label: '已通过', tone: 'ok', hint: '初始化成功，可加入清单' },
-  { key: 'rejected', label: '已拒绝', tone: 'bad', hint: '确认无用，后续不再提示' },
-  { key: 'promoted', label: '已收录', tone: 'warn', hint: '已加入正式清单' },
+const STATE_FALLBACK = { label: '待验证', tone: 'warn', hint: '还没通过初始化' } as const;
+const STATE_META: Record<string, { label: string; tone: string; hint: string }> = {
+  new: { label: '待验证', tone: 'warn', hint: '还没通过初始化' },
+  qualified: { label: '可收录', tone: 'ok', hint: '初始化通过，等自动或手动收录' },
+  rejected: { label: '已拒绝', tone: 'bad', hint: '不会自动收录' },
+  promoted: { label: '已收录', tone: 'idle', hint: '已进入正式音源清单' },
+};
+
+const STATE_TABS: Array<{ value: string; label: string }> = [
+  { value: '', label: '全部' },
+  { value: 'new', label: '待验证' },
+  { value: 'qualified', label: '可收录' },
+  { value: 'promoted', label: '已收录' },
+  { value: 'rejected', label: '已拒绝' },
 ];
 
 export function CandidatesPage() {
-  const [candidates, setCandidates] = useState<Candidate[] | null>(null);
-  const [error, setError] = useState('');
-  const [filter, setFilter] = useState<string>('all');
-  const [busy, setBusy] = useState<string>('');
+  const [data, setData] = useState<CandidateList | null>(null);
+  const [state, setState] = useState('');
+  const [query, setQuery] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
-  async function load() {
-    setError('');
+  const load = async (nextState = state, nextQuery = query) => {
+    setLoading(true);
+    setError(null);
     try {
-      const result = await api.candidates();
-      setCandidates(result.candidates);
+      setData(await api.candidates(nextState || undefined, nextQuery.trim() || undefined));
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : '加载候选失败');
+      setError(err instanceof Error ? err.message : '加载候选失败');
+    } finally {
+      setLoading(false);
     }
-  }
+  };
 
   useEffect(() => {
-    void load();
-  }, []);
+    void load(state, query);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
 
-  async function setState(id: string, state: string) {
-    setBusy(id);
+  const counts = data?.counts ?? {};
+  const total = Object.values(counts).reduce((sum, n) => sum + n, 0);
+
+  const removeRow = (candidate: Candidate) => {
+    setData((current) =>
+      current
+        ? {
+            ...current,
+            candidates: current.candidates.filter((item) => item.id !== candidate.id),
+            count: Math.max(0, current.count - 1),
+          }
+        : current,
+    );
+    void load(state, query);
+  };
+
+  const act = async (candidate: Candidate, next: 'promoted' | 'rejected' | 'new') => {
+    setBusy(candidate.id);
+    setError(null);
+    setNotice(null);
     try {
-      await api.setCandidateState(id, state);
-      await load();
+      await api.setCandidateState(candidate.id, next);
+      if (next === 'promoted') setNotice(`已收录：${candidate.title ?? candidate.id}，可在音源管理里查看`);
+      if (next === 'rejected') setNotice(`已拒绝：${candidate.title ?? candidate.id}`);
+      if (next === 'new') setNotice(`已重置：${candidate.title ?? candidate.id}`);
+      removeRow(candidate);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : '更新失败');
+      setError(err instanceof Error ? err.message : '操作失败');
     } finally {
-      setBusy('');
+      setBusy(null);
     }
-  }
+  };
 
-  const visible = useMemo(() => {
-    if (!candidates) return [];
-    if (filter === 'all') return candidates;
-    return candidates.filter((item) => item.state === filter);
-  }, [candidates, filter]);
+  const runDiscovery = async () => {
+    setBusy('discovery');
+    try {
+      await api.runDiscovery();
+      setNotice('已触发一次自动发现，完成后刷新本页查看新候选');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '触发失败');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const promoteAll = async () => {
+    setBusy('promote');
+    try {
+      const result = await api.promoteCandidates();
+      setNotice(`自动收录：收录 ${result.promoted.length} 个，跳过 ${result.skipped} 个${result.errors.length ? `，失败 ${result.errors.length} 个` : ''}`);
+      void load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '收录失败');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const clearRejected = async () => {
+    if (!window.confirm('删除全部“已拒绝”的候选？')) return;
+    setBusy('clear');
+    try {
+      const result = await api.deleteRejectedCandidates();
+      setNotice(`已删除 ${result.deleted} 个已拒绝候选`);
+      void load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '清理失败');
+    } finally {
+      setBusy(null);
+    }
+  };
 
   return (
     <div className="page">
-      <div className="page-head">
+      <header className="page-head">
         <div>
-          <h1>候选音源</h1>
-          <p className="muted">
-            自动发现只保存链接，不复制脚本；审核通过后才会进入正式清单。当前共 {candidates?.length ?? 0} 个候选。
-          </p>
+          <p className="eyebrow">CANDIDATES</p>
+          <h1>候选源</h1>
+          <p className="page-sub">从仓库自动发现的脚本先放这里；初始化通过后自动收录，也可以手动收录或拒绝。</p>
         </div>
         <div className="page-actions">
-          <button type="button" className="ghost-button" onClick={() => void load()}>
-            刷新
+          <button type="button" className="ghost-button" onClick={runDiscovery} disabled={busy === 'discovery'}>
+            立即发现
           </button>
+          <button type="button" className="ghost-button" onClick={promoteAll} disabled={busy === 'promote'}>
+            立即收录
+          </button>
+        </div>
+      </header>
+
+      {notice ? <p className="notice">{notice}</p> : null}
+      {error ? <ErrorBox message={error} /> : null}
+
+      <div className="stats-grid stats-grid--compact">
+        <div className="stat-card">
+          <span className="stat-label">全部候选</span>
+          <strong className="stat-value">{total}</strong>
+          <span className="stat-note">最近一次发现的结果</span>
+        </div>
+        <div className="stat-card">
+          <span className="stat-label">待验证</span>
+          <strong className="stat-value">{counts.new ?? 0}</strong>
+          <span className="stat-note">尚未通过初始化</span>
+        </div>
+        <div className="stat-card">
+          <span className="stat-label">可收录</span>
+          <strong className="stat-value text-ok">{counts.qualified ?? 0}</strong>
+          <span className="stat-note">初始化通过、声明了平台</span>
+        </div>
+        <div className="stat-card">
+          <span className="stat-label">已收录</span>
+          <strong className="stat-value">{counts.promoted ?? 0}</strong>
+          <span className="stat-note">
+            <Link to="/admin/sources">去音源管理</Link>
+          </span>
+        </div>
+        <div className="stat-card">
+          <span className="stat-label">已拒绝</span>
+          <strong className="stat-value text-bad">{counts.rejected ?? 0}</strong>
+          <span className="stat-note">
+            <button type="button" className="link-button" onClick={clearRejected} disabled={busy === 'clear'}>
+              清空
+            </button>
+          </span>
         </div>
       </div>
 
       <div className="filter-bar">
-        <div className="filter-group">
-          <span className="filter-label">状态</span>
-          <button type="button" className={`filter-chip${filter === 'all' ? ' active' : ''}`} onClick={() => setFilter('all')}>
-            全部
+        <div className="search-box">
+          <input
+            type="search"
+            placeholder="搜索名称、仓库、路径或作者"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') void load(state, query);
+            }}
+          />
+          <button type="button" className="ghost-button" onClick={() => load(state, query)}>
+            搜索
           </button>
-          {STATES.map((item) => (
+        </div>
+        <div className="chip-row">
+          {STATE_TABS.map((tab) => (
             <button
-              key={item.key}
+              key={tab.value}
               type="button"
-              className={`filter-chip${filter === item.key ? ' active' : ''}`}
-              onClick={() => setFilter(item.key)}
-              title={item.hint}
+              className={`chip ${state === tab.value ? 'chip-active' : ''}`}
+              onClick={() => setState(tab.value)}
             >
-              {item.label}
+              {tab.label}
+              {tab.value ? <span className="chip-count">{counts[tab.value] ?? 0}</span> : null}
             </button>
           ))}
         </div>
       </div>
 
-      {error && <ErrorBox message={error} onRetry={() => void load()} />}
-      {!candidates && !error && <Spinner label="正在加载候选…" />}
-      {candidates && visible.length === 0 && <EmptyBox message="当前筛选下没有候选源。" />}
+      {loading ? <Spinner label="加载候选" /> : null}
 
-      {visible.length > 0 && (
-        <div className="matrix-wrap">
-          <table className="simple-table candidates-table">
+      {!loading && data && data.candidates.length === 0 ? (
+        <EmptyBox message="没有候选：点「立即发现」从配置的仓库里找新脚本，首次运行可能要等十几秒。" />
+      ) : null}
+
+      {!loading && data && data.candidates.length > 0 ? (
+        <div className="table-wrap">
+          <table className="data-table source-table">
             <thead>
               <tr>
                 <th>候选</th>
-                <th>仓库 / 路径</th>
                 <th>声明平台</th>
                 <th>初始化</th>
+                <th>版本 / sha</th>
+                <th>首次发现</th>
                 <th>状态</th>
                 <th>操作</th>
               </tr>
             </thead>
             <tbody>
-              {visible.map((candidate) => {
-                const state = STATES.find((item) => item.key === candidate.state) ?? STATES[0]!;
+              {data.candidates.map((candidate) => {
+                const meta = STATE_META[candidate.state] ?? STATE_FALLBACK;
                 return (
                   <tr key={candidate.id}>
                     <td>
                       <div className="source-title">{candidate.title ?? candidate.id}</div>
                       <div className="source-sub">
-                        <span className="mono">{candidate.id}</span>
-                        {candidate.version && <span>v{candidate.version}</span>}
-                        {candidate.author && <span>{candidate.author}</span>}
+                        {candidate.repo}/{candidate.path}
                       </div>
                     </td>
-                    <td className="mono small">
-                      {candidate.repo}
-                      <br />
-                      {candidate.path}
-                    </td>
                     <td>
-                      <div className="platform-grid">
-                        {(candidate.platforms ?? []).map((key) => (
-                          <span key={key} className="platform-chip tone-idle" title={platformMeta(key).name}>
-                            <span className="platform-name">{platformMeta(key).short}</span>
-                          </span>
-                        ))}
-                        {(candidate.platforms ?? []).length === 0 && <span className="muted">—</span>}
+                      <div className="chip-row">
+                        {candidate.platforms.length === 0 ? (
+                          <span className="muted">未声明</span>
+                        ) : (
+                          candidate.platforms.map((key) => (
+                            <span key={key} className="mini-chip">
+                              {platformMeta(key).short}
+                            </span>
+                          ))
+                        )}
                       </div>
                     </td>
                     <td>
                       {candidate.initOk === true ? (
-                        <span className="pill pill-ok">成功</span>
+                        <span className="text-ok">通过</span>
                       ) : candidate.initOk === false ? (
-                        <span className="pill pill-bad" title={candidate.initError ?? ''}>
+                        <span className="text-bad" title={candidate.initError ?? ''}>
                           失败
                         </span>
                       ) : (
-                        <span className="pill">未测</span>
+                        <span className="muted">未测</span>
                       )}
-                      {candidate.initError && <div className="source-error">{candidate.initError}</div>}
                     </td>
                     <td>
-                      <span className={`status-badge tone-${state.tone}`}>{state.label}</span>
-                      <div className="muted small">最近发现 {formatDateTime(candidate.lastSeen ?? candidate.firstSeen ?? '')}</div>
+                      <span className="mono">{candidate.version ?? '未声明版本'}</span>
+                      <div className="source-sub mono">{candidate.sha.slice(0, 8)}</div>
+                    </td>
+                    <td title={formatDateTime(candidate.firstSeen)}>{formatRelative(candidate.firstSeen)}</td>
+                    <td>
+                      <span className={`pill tone-${meta.tone}`} title={meta.hint}>
+                        {meta.label}
+                      </span>
                     </td>
                     <td>
-                      <div className="button-row">
-                        <button type="button" className="mini-button" disabled={busy === candidate.id} onClick={() => void setState(candidate.id, 'qualified')}>
-                          通过
-                        </button>
-                        <button type="button" className="mini-button" disabled={busy === candidate.id} onClick={() => void setState(candidate.id, 'promoted')}>
-                          收录
-                        </button>
-                        <button type="button" className="mini-button danger" disabled={busy === candidate.id} onClick={() => void setState(candidate.id, 'rejected')}>
-                          拒绝
-                        </button>
-                        {candidate.state !== 'new' && (
-                          <button type="button" className="mini-button" disabled={busy === candidate.id} onClick={() => void setState(candidate.id, 'new')}>
+                      <div className="row-actions">
+                        {candidate.state !== 'promoted' ? (
+                          <button
+                            type="button"
+                            className="link-button"
+                            disabled={busy === candidate.id}
+                            onClick={() => act(candidate, 'promoted')}
+                          >
+                            收录
+                          </button>
+                        ) : (
+                          <Link className="link-button" to="/admin/sources">
+                            查看
+                          </Link>
+                        )}
+                        {candidate.state !== 'rejected' ? (
+                          <button
+                            type="button"
+                            className="link-button danger"
+                            disabled={busy === candidate.id}
+                            onClick={() => act(candidate, 'rejected')}
+                          >
+                            拒绝
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="link-button"
+                            disabled={busy === candidate.id}
+                            onClick={() => act(candidate, 'new')}
+                          >
                             重置
                           </button>
                         )}
@@ -169,7 +311,11 @@ export function CandidatesPage() {
             </tbody>
           </table>
         </div>
-      )}
+      ) : null}
+
+      <p className="muted page-foot">
+        自动收录要求：初始化通过、至少声明一个平台；每轮数量在上方“设置”里限制。候选 sha 是文件内容指纹，同一地址内容变化会重新进入待验证。
+      </p>
     </div>
   );
 }

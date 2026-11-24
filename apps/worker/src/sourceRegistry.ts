@@ -188,6 +188,12 @@ export async function getSourceRegistry(db: D1Database, id: string): Promise<Sou
   return row ? fromRow(row) : null;
 }
 
+/** 按脚本地址查找，自动收录时用来避免重复。 */
+export async function findSourceRegistryByUrl(db: D1Database, url: string): Promise<SourceRegistryRow | null> {
+  const row = await db.prepare(`SELECT ${COLUMNS} FROM source_registry WHERE url = ? LIMIT 1`).bind(url).first<RawRow>();
+  return row ? fromRow(row) : null;
+}
+
 async function idExists(db: D1Database, id: string): Promise<boolean> {
   const row = await db.prepare('SELECT 1 AS one FROM source_registry WHERE id = ?').bind(id).first<{ one: number }>();
   return Boolean(row);

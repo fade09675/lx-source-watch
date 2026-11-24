@@ -76,6 +76,7 @@ export async function writeSnapshot(db: D1Database, input: {
   candidates: Candidate[];
   recent: Map<string, SourceStatus[]>;
   now?: string;
+  retention?: RetentionOptions;
 }): Promise<WriteStats> {
   const { snapshot, events, candidates, recent } = input;
   const now = input.now ?? new Date().toISOString();
@@ -312,7 +313,7 @@ export async function writeSnapshot(db: D1Database, input: {
   // 单次 batch 的 statement 数远低于免费额度 1000；仍按 900 分块以防未来扩张。
   await runBatches(db, statements);
 
-  await maybeCleanup(db, day, now);
+  await maybeCleanup(db, day, now, input.retention);
 
   return { sources: snapshot.sources.length, platforms, endpoints, events: events.length, candidates: candidates.length };
 }
@@ -334,15 +335,32 @@ function computeStreak(previousNewestFirst: readonly SourceStatus[], current: So
   return streak;
 }
 
-/** 每天只清理一次：明细 14 天、日汇总/事件 180 天。 */
-export async function maybeCleanup(db: D1Database, day: string, now: string): Promise<boolean> {
+export interface RetentionOptions {
+  detailDays: number;
+  dailyDays: number;
+  eventDays: number;
+}
+
+const DEFAULT_RETENTION: RetentionOptions = {
+  detailDays: DETAIL_RETENTION_DAYS,
+  dailyDays: DAILY_RETENTION_DAYS,
+  eventDays: EVENT_RETENTION_DAYS,
+};
+
+/** 每天只清理一次：默认明细 14 天、日汇总/事件 180 天，可被设置覆盖。 */
+export async function maybeCleanup(
+  db: D1Database,
+  day: string,
+  now: string,
+  retention: RetentionOptions = DEFAULT_RETENTION,
+): Promise<boolean> {
   const row = await db.prepare("SELECT value FROM settings WHERE key = 'last_cleanup_day'").first<{ value: string }>();
   if (row?.value === day) return false;
 
-  const detailCutoff = new Date(Date.parse(now) - DETAIL_RETENTION_DAYS * 86_400_000).toISOString();
-  const dailyCutoff = new Date(Date.parse(now) - DAILY_RETENTION_DAYS * 86_400_000).toISOString();
+  const detailCutoff = new Date(Date.parse(now) - retention.detailDays * 86_400_000).toISOString();
+  const dailyCutoff = new Date(Date.parse(now) - retention.dailyDays * 86_400_000).toISOString();
   const dailyDayCutoff = toDay(dailyCutoff);
-  const eventCutoff = new Date(Date.parse(now) - EVENT_RETENTION_DAYS * 86_400_000).toISOString();
+  const eventCutoff = new Date(Date.parse(now) - retention.eventDays * 86_400_000).toISOString();
 
   await db.batch([
     db.prepare('DELETE FROM platform_results WHERE run_id IN (SELECT run_id FROM runs WHERE generated_at < ?)').bind(detailCutoff),
@@ -514,26 +532,33 @@ export async function getCandidates(
     ? await stmt.bind(opts.state, limit).all<CandidateRow>()
     : await stmt.bind(limit).all<CandidateRow>();
 
-  return rows.results.map((row) =>
-    CandidateSchema.parse({
-      id: row.id,
-      repo: row.repo,
-      path: row.path,
-      url: row.url,
-      sha: row.sha,
-      title: row.title ?? undefined,
-      version: row.version ?? undefined,
-      author: row.author ?? undefined,
-      description: row.description ?? undefined,
-      platforms: parseJsonArray(row.platforms),
-      bytes: row.bytes ?? undefined,
-      initOk: row.initOk === null ? undefined : Boolean(row.initOk),
-      initError: row.initError ?? undefined,
-      state: row.state,
-      firstSeen: row.firstSeen ?? undefined,
-      lastSeen: row.lastSeen ?? undefined,
-    }),
-  );
+  return rows.results.map(toCandidate);
+}
+
+function toCandidate(row: CandidateRow): Candidate {
+  return CandidateSchema.parse({
+    id: row.id,
+    repo: row.repo,
+    path: row.path,
+    url: row.url,
+    sha: row.sha,
+    title: row.title ?? undefined,
+    version: row.version ?? undefined,
+    author: row.author ?? undefined,
+    description: row.description ?? undefined,
+    platforms: parseJsonArray(row.platforms),
+    bytes: row.bytes ?? undefined,
+    initOk: row.initOk === null ? undefined : Boolean(row.initOk),
+    initError: row.initError ?? undefined,
+    state: row.state,
+    firstSeen: row.firstSeen ?? undefined,
+    lastSeen: row.lastSeen ?? undefined,
+  });
+}
+
+export async function getCandidate(db: D1Database, id: string): Promise<Candidate | null> {
+  const row = await db.prepare(`SELECT ${CANDIDATE_COLUMNS} FROM candidates WHERE id = ?`).bind(id).first<CandidateRow>();
+  return row ? toCandidate(row) : null;
 }
 
 function parseJsonArray(raw: string): string[] {
@@ -563,6 +588,20 @@ export async function setCandidateState(db: D1Database, id: string, state: strin
     .bind(state, now, id)
     .run();
   return (result.meta.changes ?? 0) > 0;
+}
+
+/** 清理某个状态的候选（例如已拒绝的）。 */
+export async function deleteCandidatesByState(db: D1Database, state: string): Promise<number> {
+  const result = await db.prepare('DELETE FROM candidates WHERE state = ?').bind(state).run();
+  return result.meta.changes ?? 0;
+}
+
+/** 候选数量按状态汇总。 */
+export async function countCandidatesByState(db: D1Database): Promise<Record<string, number>> {
+  const rows = await db.prepare('SELECT state, COUNT(*) AS n FROM candidates GROUP BY state').all<{ state: string; n: number }>();
+  const out: Record<string, number> = {};
+  for (const row of rows.results ?? []) out[row.state] = row.n;
+  return out;
 }
 
 interface EndpointDbRow {

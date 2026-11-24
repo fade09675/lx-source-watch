@@ -1,4 +1,4 @@
-import { SnapshotSchema, type ExportItem, type Snapshot, type SourceResult, type StatusEnvelope } from '@lx/shared';
+import { SCHEMA_VERSION, SnapshotSchema, type ExportItem, type Snapshot, type SourceResult, type StatusEnvelope } from '@lx/shared';
 import { Hono } from 'hono';
 import {
   buildClearSessionCookie,
@@ -15,6 +15,8 @@ import {
 } from './auth';
 import {
   countCandidates,
+  countCandidatesByState,
+  deleteCandidatesByState,
   getCandidates,
   getEvents,
   getFailureAggregate,
@@ -52,6 +54,8 @@ import {
   type SourceInput,
 } from './sourceRegistry';
 import { getSchedulerStatus } from './scheduler';
+import { autoPromoteCandidates, promoteCandidate } from './candidatePromotion';
+import { loadSettings, resetSettings, saveSettings } from './settings';
 
 type Ctx = { Bindings: Env };
 
@@ -219,9 +223,109 @@ export function createApi(): Hono<Ctx> {
     return c.json({ ok: true }, 200, { 'cache-control': CACHE_PRIVATE });
   });
 
+  // 运行参数：调度、并发、国内补测、自动收录与数据保留。
+  api.get('/admin/settings', async (c) => {
+    const [settings, scheduler] = await Promise.all([loadSettings(c.env.DB), getSchedulerStatus(c.env)]);
+    return c.json({ settings, scheduler }, 200, { 'cache-control': CACHE_PRIVATE });
+  });
+
+  api.put('/admin/settings', async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'bad_request', message: '请求体不是合法 JSON' }, 400);
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return c.json({ error: 'bad_request', message: '设置必须是对象' }, 400);
+    }
+    const settings = await saveSettings(c.env.DB, body);
+    const scheduler = await getSchedulerStatus(c.env);
+    return c.json({ settings, scheduler }, 200, { 'cache-control': CACHE_PRIVATE });
+  });
+
+  api.post('/admin/settings/reset', async (c) => {
+    const settings = await resetSettings(c.env.DB);
+    const scheduler = await getSchedulerStatus(c.env);
+    return c.json({ settings, scheduler }, 200, { 'cache-control': CACHE_PRIVATE });
+  });
+
+  // 系统信息：用来确认部署版本与三类令牌是否配置。
+  api.get('/admin/system', async (c) => {
+    const [scheduler, candidateCounts, registry] = await Promise.all([
+      getSchedulerStatus(c.env),
+      countCandidatesByState(c.env.DB),
+      listSourceRegistry(c.env.DB),
+    ]);
+    return c.json(
+      {
+        site: c.env.SITE_NAME ?? 'LX 音源监测',
+        repo: c.env.GH_REPO ?? 'fade09675/lx-source-watch',
+        schemaVersion: SCHEMA_VERSION,
+        tokens: {
+          github: Boolean(c.env.GH_DISPATCH_TOKEN),
+          cloudflare: Boolean(c.env.CF_ANALYTICS_TOKEN),
+          runner: Boolean(c.env.RUNNER_TOKEN),
+          ingest: Boolean(c.env.INGEST_SECRET),
+        },
+        scheduler,
+        counts: { candidates: candidateCounts, sources: registry.length },
+        serverTime: new Date().toISOString(),
+      },
+      200,
+      { 'cache-control': CACHE_PRIVATE },
+    );
+  });
+
+  // 手动跑一次“自动发现”，只发现不探测，结果进候选列表。
+  api.post('/admin/run/discovery', async (c) => {
+    const key = 'run:discovery:last';
+    if (await c.env.SNAPSHOT.get(key)) {
+      return c.json({ error: 'too_frequent', message: '刚刚已经触发过，请等一分钟再试' }, 429, {
+        'retry-after': '60',
+        'cache-control': CACHE_PRIVATE,
+      });
+    }
+    const result = await dispatchProbe(c.env, { discover: true, limit: '1', cn: false });
+    if (!result.ok) {
+      return c.json({ error: 'dispatch_failed', message: result.message }, 503, { 'cache-control': CACHE_PRIVATE });
+    }
+    const now = new Date().toISOString();
+    await recordKvPut(c.env);
+    await c.env.SNAPSHOT.put(key, now, { expirationTtl: 60 });
+    return c.json({ ok: true, dispatchedAt: now }, 200, { 'cache-control': CACHE_PRIVATE });
+  });
+
   api.get('/admin/candidates', async (c) => {
-    const candidates = await getCandidates(c.env.DB, { limit: 500 });
-    return c.json({ candidates, count: candidates.length }, 200, { 'cache-control': CACHE_PRIVATE });
+    const state = c.req.query('state');
+    if (state && !CANDIDATE_STATES.includes(state)) {
+      return c.json({ error: 'bad_state', message: `未知候选状态：${state}` }, 400);
+    }
+    const q = (c.req.query('q') ?? '').trim().toLowerCase();
+    const [candidates, counts] = await Promise.all([
+      getCandidates(c.env.DB, { limit: 500 }),
+      countCandidatesByState(c.env.DB),
+    ]);
+    const filtered = candidates.filter((item) => {
+      if (state && item.state !== state) return false;
+      if (!q) return true;
+      return [item.id, item.repo, item.path, item.title ?? '', item.author ?? '']
+        .join(' ')
+        .toLowerCase()
+        .includes(q);
+    });
+    return c.json({ candidates: filtered, count: filtered.length, counts }, 200, { 'cache-control': CACHE_PRIVATE });
+  });
+
+  // 立即执行一次自动收录，把已通过初始化的候选转成正式音源。
+  api.post('/admin/candidates/promote', async (c) => {
+    const result = await autoPromoteCandidates(c.env);
+    return c.json(result, 200, { 'cache-control': CACHE_PRIVATE });
+  });
+
+  api.delete('/admin/candidates/rejected', async (c) => {
+    const deleted = await deleteCandidatesByState(c.env.DB, 'rejected');
+    return c.json({ ok: true, deleted }, 200, { 'cache-control': CACHE_PRIVATE });
   });
 
   api.patch('/admin/candidates/:id', async (c) => {
@@ -236,6 +340,15 @@ export function createApi(): Hono<Ctx> {
       return c.json({ error: 'bad_state', message: `未知候选状态：${state}` }, 400);
     }
     const id = c.req.param('id');
+    if (state === 'promoted') {
+      const outcome = await promoteCandidate(c.env, id);
+      if (!outcome.ok) {
+        return c.json({ error: 'promote_failed', message: outcome.error ?? '收录失败' }, 400, {
+          'cache-control': CACHE_PRIVATE,
+        });
+      }
+      return c.json({ ok: true, id: outcome.id ?? id, state }, 200, { 'cache-control': CACHE_PRIVATE });
+    }
     const updated = await setCandidateState(c.env.DB, id, state, new Date().toISOString());
     if (!updated) return c.json({ error: 'not_found', message: `未知候选源：${id}` }, 404);
     return c.json({ ok: true, id, state }, 200, { 'cache-control': CACHE_PRIVATE });

@@ -1,10 +1,12 @@
 import { IngestPayloadSchema, SnapshotSchema, type Snapshot } from '@lx/shared';
 import type { Context } from 'hono';
+import { autoPromoteCandidates } from './candidatePromotion';
 import { alreadyIngested, loadRecentStatuses, writeSnapshot } from './db';
 import { SNAPSHOT_KEY, type Env } from './env';
 import { diffEvents } from './events';
 import { verifySignature } from './hmac';
 import { mergeSnapshot } from './merge';
+import { loadSettings } from './settings';
 import { recordKvPut } from './usage';
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -79,6 +81,7 @@ export async function handleIngest(c: Ctx): Promise<Response> {
   const prev = await readPrev(env);
   const merged = mergeSnapshot(prev, snapshot);
   const recent = await loadRecentStatuses(env.DB, snapshot.runId, 3);
+  const settings = await loadSettings(env.DB);
   const events = diffEvents({
     runId: snapshot.runId,
     at: merged.generatedAt,
@@ -93,7 +96,15 @@ export async function handleIngest(c: Ctx): Promise<Response> {
     candidates,
     recent,
     now,
+    retention: {
+      detailDays: settings.retentionDetailDays,
+      dailyDays: settings.retentionDailyDays,
+      eventDays: settings.retentionEventDays,
+    },
   });
+
+  // 无人值守收录：初始化通过的新候选自动进入正式清单（数量受设置限制）。
+  const promotion = await autoPromoteCandidates(env, now);
 
   await recordKvPut(env);
   await env.SNAPSHOT.put(SNAPSHOT_KEY, JSON.stringify(merged));
@@ -106,5 +117,7 @@ export async function handleIngest(c: Ctx): Promise<Response> {
     platforms: stats.platforms,
     events: stats.events,
     candidates: stats.candidates,
+    promoted: promotion.promoted.length,
+    promotionErrors: promotion.errors,
   });
 }

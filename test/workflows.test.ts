@@ -60,11 +60,17 @@ describe('probe.yml', () => {
     expect(doc.concurrency).toEqual({ group: 'lx-probe', 'cancel-in-progress': false });
   });
 
-  it('探测 job 不接触任何 secret，且彻底禁用凭据持久化', async () => {
+  it('探测 job 不接触上报/部署密钥，且彻底禁用凭据持久化', async () => {
     const doc = await loadWorkflow();
     const probe = doc.jobs.probe;
     expect(probe).toBeDefined();
-    expect(JSON.stringify(probe)).not.toContain('secrets.');
+    const raw = JSON.stringify(probe);
+    // 只有“自动发现”一步拿仓库自带的 GITHUB_TOKEN；探测与上报密钥一律不出现。
+    expect(raw).not.toContain('secrets.INGEST_SECRET');
+    expect(raw).not.toContain('secrets.CF_API_TOKEN');
+    expect(raw).not.toContain('secrets.RUNNER_TOKEN');
+    expect(JSON.stringify(namedStep(probe, '探测'))).not.toContain('secrets.');
+    expect(JSON.stringify(namedStep(probe, '自动发现候选'))).toContain('secrets.GITHUB_TOKEN');
     expect(checkoutStep(probe).with?.['persist-credentials']).toBe(false);
     expect(probe['timeout-minutes']).toBeLessThanOrEqual(20);
   });
@@ -73,8 +79,9 @@ describe('probe.yml', () => {
     const doc = await loadWorkflow();
     const step = namedStep(doc.jobs.probe, '探测');
     expect(step.run).toContain('pnpm probe');
-    expect(step.run).toContain('--concurrency 4');
+    expect(step.run).toContain('--concurrency "${INPUT_CONCURRENCY:-4}"');
     expect(Object.keys(step.env ?? {}).sort()).toEqual([
+      'INPUT_CONCURRENCY',
       'INPUT_DEEP',
       'INPUT_LIMIT',
       'INPUT_ONLY',
@@ -91,7 +98,7 @@ describe('probe.yml', () => {
     const publish = doc.jobs.publish;
     expect(publish.needs).toEqual(['probe', 'cn']);
     const downloads = publish.steps.filter((s) => s.uses?.startsWith('actions/download-artifact'));
-    expect(downloads.map((step) => step.with?.name)).toEqual(['probe-result', 'cn-result']);
+    expect(downloads.map((step) => step.with?.name)).toEqual(['probe-result', 'cn-result', 'candidates-result']);
   });
 
   it('国内补测 job 不接触上报密钥，并缓存 mihomo 内核', async () => {
@@ -125,5 +132,17 @@ describe('probe.yml', () => {
     expect(publish.env?.INGEST_SECRET).toContain('secrets.INGEST_SECRET');
     expect(publish.environment).toBe('production');
     expect(checkoutStep(publish).with?.['persist-credentials']).toBe(false);
+  });
+
+  it('手动触发可开关自动发现与国内补测，并透传并发', async () => {
+    const doc = await loadWorkflow();
+    const inputs = doc.on?.workflow_dispatch?.inputs ?? {};
+    expect(inputs.concurrency).toBeDefined();
+    expect(inputs.cn).toBeDefined();
+    expect(inputs.discover).toBeDefined();
+
+    const discover = namedStep(doc.jobs.probe, '自动发现候选');
+    expect(String(discover.if)).toContain('inputs.discover');
+    expect(String(doc.jobs.cn.if)).toContain('inputs.cn');
   });
 });

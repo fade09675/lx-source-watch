@@ -28,6 +28,21 @@ on:
         description: "国内补测强制使用指定代理节点 id（留空=自动挑）"
         required: false
         type: string
+      concurrency:
+        description: "同时测几个来源"
+        required: false
+        type: string
+        default: "4"
+      cn:
+        description: "本轮是否做国内补测"
+        required: false
+        type: boolean
+        default: true
+      discover:
+        description: "本轮是否顺带自动发现候选"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -71,15 +86,25 @@ jobs:
       - name: 单元测试
         run: pnpm test
 
+      - name: 自动发现候选
+        if: inputs.discover == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          pnpm discover -- --config sources/discovery.json --out out/candidates.json --token "$GITHUB_TOKEN"
+          pnpm candidates -- --in out/candidates.json --out out/candidates.json --limit 12
+
       - name: 探测
         env:
           INPUT_ONLY: ${{ inputs.only }}
           INPUT_LIMIT: ${{ inputs.limit }}
           INPUT_DEEP: ${{ inputs.deep }}
           INPUT_PREFER_MIRROR: ${{ inputs.prefer_mirror }}
+          INPUT_CONCURRENCY: ${{ inputs.concurrency }}
         run: |
           set -euo pipefail
-          args=(--concurrency 4)
+          args=(--concurrency "${INPUT_CONCURRENCY:-4}")
           if [ -n "${INPUT_ONLY}" ]; then args+=(--only "${INPUT_ONLY}"); fi
           if [ -n "${INPUT_LIMIT}" ]; then args+=(--limit "${INPUT_LIMIT}"); fi
           if [ "${INPUT_DEEP}" = "true" ]; then args+=(--deep); fi
@@ -99,10 +124,20 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
+      - name: 上传候选结果
+        if: inputs.discover == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidates-result
+          path: out/candidates.json
+          retention-days: 7
+          if-no-files-found: ignore
+
   # 第二个平面：只测已解析 URL，不执行任何音源脚本；持有代理池 token。
   cn:
     name: 国内补测（不执行脚本）
     needs: probe
+    if: ${{ inputs.cn != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     continue-on-error: true
@@ -165,6 +200,7 @@ jobs:
   publish:
     name: 上报（持密钥，不执行脚本）
     needs: [probe, cn]
+    if: ${{ !cancelled() && needs.probe.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: production
@@ -204,12 +240,20 @@ jobs:
           path: out
         continue-on-error: true
 
+      - name: 下载候选结果
+        uses: actions/download-artifact@v4
+        with:
+          name: candidates-result
+          path: out
+        continue-on-error: true
+
       - name: 上报
         if: env.INGEST_URL != ''
         run: >-
           pnpm ingest --
           --snapshot out/status.json
           --cn out/cn.json
+          --candidates out/candidates.json
           --endpoint "$INGEST_URL"
           --secret "$INGEST_SECRET"
 

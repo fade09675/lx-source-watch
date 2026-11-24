@@ -1,10 +1,11 @@
 import type { Env } from './env';
 import { dispatchProbe, dispatchProxyTest, type DispatchResult } from './dispatch';
+import { loadSettings, normalizeSettings, type AppSettings } from './settings';
 
-/** 探测间隔：默认 4 小时。 */
+/** 默认间隔（设置里可改）。 */
 export const PROBE_INTERVAL_HOURS = 4;
-/** 代理测活间隔：默认 6 小时。 */
 export const PROXY_TEST_INTERVAL_HOURS = 6;
+export const DISCOVERY_INTERVAL_HOURS = 12;
 
 export const SCHEDULER_STATE_KEY = 'scheduler:state';
 
@@ -23,10 +24,13 @@ export interface JobState {
 export interface SchedulerState {
   probe?: JobState;
   proxyTest?: JobState;
+  /** 最近一次携带自动发现的探测。 */
+  discovery?: JobState;
 }
 
 export interface JobStatus {
   intervalHours: number;
+  enabled: boolean;
   /** 最近一次定时触发时间。 */
   lastAt?: string;
   lastOk?: boolean;
@@ -40,12 +44,15 @@ export interface JobStatus {
 export interface SchedulerStatus {
   probe: JobStatus;
   proxyTest: JobStatus;
+  discovery: JobStatus;
   now: string;
 }
 
 export interface SchedulerDeps {
-  dispatchProbe?: (env: Env) => Promise<DispatchResult>;
-  dispatchProxyTest?: (env: Env) => Promise<DispatchResult>;
+  /** 测试时可注入设置，跳过数据库。 */
+  settings?: AppSettings;
+  dispatchProbe?: (env: Env, input: Parameters<typeof dispatchProbe>[1]) => Promise<DispatchResult>;
+  dispatchProxyTest?: (env: Env, input: Parameters<typeof dispatchProxyTest>[1]) => Promise<DispatchResult>;
 }
 
 export function isDue(lastAt: string | undefined, intervalHours: number, now = Date.now()): boolean {
@@ -86,6 +93,7 @@ function errorMessage(error: unknown): string {
 
 function jobStatus(
   intervalHours: number,
+  enabled: boolean,
   job: JobState | undefined,
   manualAt: string | null,
   now: number,
@@ -96,6 +104,7 @@ function jobStatus(
     : new Date(now).toISOString();
   return {
     intervalHours,
+    enabled,
     lastAt: job?.at,
     lastOk: job?.ok,
     lastError: job?.error,
@@ -104,19 +113,26 @@ function jobStatus(
   };
 }
 
+async function readSettings(env: Env, deps: SchedulerDeps): Promise<AppSettings> {
+  if (deps.settings) return deps.settings;
+  if (!env.DB) return normalizeSettings({});
+  return loadSettings(env.DB);
+}
+
 /**
  * 由 Worker 的 Cron Trigger 每 5 分钟调用一次。
  *
  * 只有到点才真正派发 GitHub Actions，触发失败也会记录时间并等下一个间隔，
- * 避免每 5 分钟反复打 GitHub。
+ * 避免每 5 分钟反复打 GitHub。间隔与开关来自网页设置。
  */
 export async function runScheduler(
   env: Env,
   now = Date.now(),
   deps: SchedulerDeps = {},
-): Promise<{ probe: boolean; proxyTest: boolean }> {
-  const dispatchProbeFn = deps.dispatchProbe ?? ((target: Env) => dispatchProbe(target, {}));
-  const dispatchProxyTestFn = deps.dispatchProxyTest ?? ((target: Env) => dispatchProxyTest(target, {}));
+): Promise<{ probe: boolean; proxyTest: boolean; discovery: boolean }> {
+  const settings = await readSettings(env, deps);
+  const dispatchProbeFn = deps.dispatchProbe ?? dispatchProbe;
+  const dispatchProxyTestFn = deps.dispatchProxyTest ?? dispatchProxyTest;
 
   const state = await readState(env);
   const [manualProbe, manualProxy] = await Promise.all([
@@ -125,30 +141,43 @@ export async function runScheduler(
   ]);
 
   const at = new Date(now).toISOString();
-  const dispatched = { probe: false, proxyTest: false };
+  const dispatched = { probe: false, proxyTest: false, discovery: false };
   let changed = false;
 
-  if (isDue(laterIso(state.probe?.at, manualProbe), PROBE_INTERVAL_HOURS, now)) {
+  const probeDue =
+    settings.probeEnabled &&
+    isDue(laterIso(state.probe?.at, manualProbe), settings.probeIntervalHours, now);
+  const discoveryDue =
+    probeDue &&
+    settings.discoveryEnabled &&
+    isDue(state.discovery?.at, settings.discoveryIntervalHours, now);
+
+  if (probeDue) {
     dispatched.probe = true;
+    dispatched.discovery = discoveryDue;
     changed = true;
     try {
-      const result = await dispatchProbeFn(env);
-      state.probe = result.ok
-        ? { at, ok: true }
-        : { at, ok: false, error: result.message };
+      const result = await dispatchProbeFn(env, {
+        limit: settings.probeLimit > 0 ? String(settings.probeLimit) : undefined,
+        concurrency: settings.probeConcurrency,
+        deep: settings.probeDeep,
+        preferMirror: settings.preferMirror,
+        cn: settings.cnEnabled,
+        discover: discoveryDue,
+      });
+      state.probe = result.ok ? { at, ok: true } : { at, ok: false, error: result.message };
+      if (result.ok && discoveryDue) state.discovery = { at, ok: true };
     } catch (error) {
       state.probe = { at, ok: false, error: errorMessage(error) };
     }
   }
 
-  if (isDue(laterIso(state.proxyTest?.at, manualProxy), PROXY_TEST_INTERVAL_HOURS, now)) {
+  if (settings.proxyTestEnabled && isDue(laterIso(state.proxyTest?.at, manualProxy), settings.proxyTestIntervalHours, now)) {
     dispatched.proxyTest = true;
     changed = true;
     try {
-      const result = await dispatchProxyTestFn(env);
-      state.proxyTest = result.ok
-        ? { at, ok: true }
-        : { at, ok: false, error: result.message };
+      const result = await dispatchProxyTestFn(env, {});
+      state.proxyTest = result.ok ? { at, ok: true } : { at, ok: false, error: result.message };
     } catch (error) {
       state.proxyTest = { at, ok: false, error: errorMessage(error) };
     }
@@ -159,15 +188,34 @@ export async function runScheduler(
 }
 
 /** 给工作台读取的定时状态。 */
-export async function getSchedulerStatus(env: Env, now = Date.now()): Promise<SchedulerStatus> {
+export async function getSchedulerStatus(
+  env: Env,
+  now = Date.now(),
+  deps: SchedulerDeps = {},
+): Promise<SchedulerStatus> {
+  const settings = await readSettings(env, deps);
   const state = await readState(env);
   const [manualProbe, manualProxy] = await Promise.all([
     env.SNAPSHOT.get(MANUAL_KEYS.probe),
     env.SNAPSHOT.get(MANUAL_KEYS.proxyTest),
   ]);
+  const discoveryLast = laterIso(state.discovery?.at, state.probe?.at);
   return {
-    probe: jobStatus(PROBE_INTERVAL_HOURS, state.probe, manualProbe, now),
-    proxyTest: jobStatus(PROXY_TEST_INTERVAL_HOURS, state.proxyTest, manualProxy, now),
+    probe: jobStatus(settings.probeIntervalHours, settings.probeEnabled, state.probe, manualProbe, now),
+    proxyTest: jobStatus(
+      settings.proxyTestIntervalHours,
+      settings.proxyTestEnabled,
+      state.proxyTest,
+      manualProxy,
+      now,
+    ),
+    discovery: jobStatus(
+      settings.discoveryIntervalHours,
+      settings.discoveryEnabled,
+      state.discovery,
+      discoveryLast ?? null,
+      now,
+    ),
     now: new Date(now).toISOString(),
   };
 }

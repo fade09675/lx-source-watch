@@ -96,7 +96,7 @@ export function WorkbenchPage() {
   const [workflows, setWorkflows] = useState<WorkflowRunsResult | null>(null);
   const [error, setError] = useState('');
   const [action, setAction] = useState('');
-  const [busy, setBusy] = useState<'probe' | 'proxy' | 'usage' | null>(null);
+  const [busy, setBusy] = useState<'probe' | 'proxy' | 'discovery' | 'usage' | null>(null);
   const [loaded, setLoaded] = useState(false);
 
   const load = useCallback(async () => {
@@ -121,15 +121,18 @@ export function WorkbenchPage() {
     void load();
   }, [load]);
 
-  async function run(kind: 'probe' | 'proxy') {
+  async function run(kind: 'probe' | 'proxy' | 'discovery') {
     setBusy(kind);
     setAction('');
     try {
       const result =
         kind === 'probe'
           ? await api.runProbe({ limit: '3', preferMirror: true })
-          : await api.runProxyTest({});
-      setAction(`已触发${kind === 'probe' ? '音源探测' : '代理测活'}（${formatDateTime(result.dispatchedAt)}），约 1–2 分钟后刷新可看到状态。`);
+          : kind === 'proxy'
+            ? await api.runProxyTest({})
+            : await api.runDiscovery();
+      const label = kind === 'probe' ? '音源探测' : kind === 'proxy' ? '代理测活' : '自动发现';
+      setAction(`已触发${label}（${formatDateTime(result.dispatchedAt)}），约 1–2 分钟后刷新可看到状态。`);
       window.setTimeout(() => void load(), 4000);
     } catch (err) {
       setAction(err instanceof ApiError ? err.message : '触发失败');
@@ -259,6 +262,22 @@ export function WorkbenchPage() {
                 </div>
                 <button type="button" className="primary-button" onClick={() => void run('probe')} disabled={busy !== null}>
                   {busy === 'probe' ? '触发中…' : '立即运行'}
+                </button>
+              </div>
+              <div className="schedule-item">
+                <div>
+                  <strong>自动发现</strong>
+                  <span className="muted">
+                    {scheduler?.discovery?.enabled === false
+                      ? '已关闭'
+                      : `每 ${scheduler?.discovery?.intervalHours ?? 12} 小时 · 下次 ${
+                          scheduler?.discovery?.nextAt ? formatDateTime(scheduler.discovery.nextAt) : '待定'
+                        }`}
+                  </span>
+                  {scheduler?.discovery?.lastError && <span className="text-bad small">上次失败：{scheduler.discovery.lastError}</span>}
+                </div>
+                <button type="button" className="ghost-button" onClick={() => void run('discovery')} disabled={busy !== null}>
+                  {busy === 'discovery' ? '触发中…' : '立即发现'}
                 </button>
               </div>
               <div className="schedule-item">

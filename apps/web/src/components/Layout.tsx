@@ -32,7 +32,8 @@ const GROUPS: Array<{ title: string; items: NavItem[] }> = [
     title: '其他',
     items: [
       { to: '/admin', label: '控制面板', icon: '⚙' },
-      { to: '/about', label: '设置与说明', icon: 'i' },
+      { to: '/admin/settings', label: '设置', icon: '☷' },
+      { to: '/about', label: '说明', icon: 'i' },
     ],
   },
 ];

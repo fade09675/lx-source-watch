@@ -12,6 +12,7 @@ import { OverviewPage } from './pages/Overview';
 import { ProxiesPage } from './pages/Proxies';
 import { RunDetailPage } from './pages/RunDetail';
 import { RunsPage } from './pages/Runs';
+import { SettingsPage } from './pages/Settings';
 import { SourceDetailPage } from './pages/SourceDetail';
 import { WorkbenchPage } from './pages/Workbench';
 
@@ -55,6 +56,7 @@ export function App() {
               <Route path="/runs/:runId" element={<RunDetailPage />} />
               <Route path="/admin" element={<AdminPage />} />
               <Route path="/admin/sources" element={<ManageSourcesPage />} />
+              <Route path="/admin/settings" element={<SettingsPage />} />
               <Route path="/admin/proxies" element={<ProxiesPage />} />
               <Route path="/about" element={<AboutPage />} />
             </Route>

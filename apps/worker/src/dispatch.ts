@@ -9,6 +9,12 @@ export interface ProbeDispatchInput {
   limit?: string;
   deep?: boolean;
   preferMirror?: boolean;
+  /** 单轮源并发。 */
+  concurrency?: number;
+  /** 本轮是否跑国内补测。 */
+  cn?: boolean;
+  /** 本轮是否顺带做自动发现。 */
+  discover?: boolean;
   /** 强制国内补测使用指定代理节点；留空则自动挑选。 */
   proxyId?: string;
 }
@@ -58,11 +64,15 @@ function clean(value: unknown, max = 200): string {
 
 /** 触发一次探测工作流。GitHub 的派发接口成功时返回 204。 */
 export async function dispatchProbe(env: Env, input: ProbeDispatchInput): Promise<DispatchResult> {
+  const concurrency = Math.max(1, Math.min(8, Number(input.concurrency) || 4));
   return dispatchWorkflow(env, 'probe.yml', {
     only: clean(input.only),
     limit: clean(input.limit, 10),
+    concurrency: String(concurrency),
     deep: input.deep ? 'true' : 'false',
     prefer_mirror: input.preferMirror ? 'true' : 'false',
+    cn: input.cn === false ? 'false' : 'true',
+    discover: input.discover ? 'true' : 'false',
     proxy_id: clean(input.proxyId, 64),
   });
 }
