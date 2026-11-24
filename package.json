@@ -12,6 +12,7 @@
   "scripts": {
     "probe": "tsx apps/runner/src/index.ts probe",
     "discover": "tsx apps/runner/src/index.ts discover",
+    "candidates": "tsx apps/runner/src/index.ts candidates",
     "cn": "tsx apps/runner/src/index.ts cn",
     "proxy-test": "tsx apps/runner/src/index.ts proxy-test",
     "ingest": "tsx apps/runner/src/index.ts publish",

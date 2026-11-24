@@ -148,4 +148,21 @@ describe('probe.yml', () => {
     expect(String(doc.jobs.cn.if)).toContain('inputs.cn');
     expect(String(doc.jobs.cn.if)).not.toContain("!= 'false'");
   });
+
+  it('工作流里调用的 pnpm 子命令都存在于 package.json', async () => {
+    const pkg = JSON.parse(await readFile(`${root}/package.json`, 'utf8')) as {
+      scripts?: Record<string, string>;
+    };
+    const doc = await loadWorkflow();
+    const ignored = new Set(['install', 'exec', 'run', 'dlx']);
+    const commands = Object.values(doc.jobs)
+      .flatMap((job) => job.steps)
+      .flatMap((step) => [...String(step.run ?? '').matchAll(/\bpnpm\s+([a-z][a-z0-9:-]*)/g)])
+      .map((match) => match[1] as string);
+    expect(commands.length).toBeGreaterThan(0);
+    for (const command of new Set(commands)) {
+      if (ignored.has(command)) continue;
+      expect(pkg.scripts?.[command], `缺少 pnpm 脚本：${command}`).toBeTruthy();
+    }
+  });
 });
