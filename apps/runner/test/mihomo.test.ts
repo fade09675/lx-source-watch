@@ -69,6 +69,42 @@ describe('buildKernelConfig', () => {
     expect(doc.rules).toEqual(['MATCH,PROXY']);
   });
 
+  it('保留 Clash YAML 片段里的 TLS 与 REALITY 字段', () => {
+    const config = buildKernelConfig([
+      {
+        id: 'r',
+        name: '河北邯郸-REALITY',
+        protocol: 'vless',
+        config:
+          '- name: "河北邯郸-REALITY"\n' +
+          '  type: vless\n' +
+          '  server: 45.136.14.245\n' +
+          '  port: 443\n' +
+          '  uuid: u-reality\n' +
+          '  network: tcp\n' +
+          '  tls: true\n' +
+          '  flow: xtls-rprx-vision\n' +
+          '  servername: www.microsoft.com\n' +
+          '  client-fingerprint: chrome\n' +
+          '  reality-opts:\n' +
+          '    public-key: pub-key\n' +
+          '    short-id: "642eecb4"',
+      },
+    ]);
+    expect(config.usable).toHaveLength(1);
+    expect(docOf(config.yaml).proxies[0]).toMatchObject({
+      name: 'node-0',
+      type: 'vless',
+      server: '45.136.14.245',
+      port: 443,
+      tls: true,
+      flow: 'xtls-rprx-vision',
+      servername: 'www.microsoft.com',
+      'client-fingerprint': 'chrome',
+      'reality-opts': { 'public-key': 'pub-key', 'short-id': '642eecb4' },
+    });
+  });
+
   it('兼容子键缩进 4 格的 Clash YAML（IPTV 导出的实际格式）', () => {
     const config = buildKernelConfig([
       {

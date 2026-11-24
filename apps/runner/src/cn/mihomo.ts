@@ -49,6 +49,13 @@ export function clashProxyFromJson(record: Record<string, unknown>): Record<stri
   const rawType = String(record.type ?? record.protocol ?? '').toLowerCase();
   const type = rawType === 'shadowsocks' ? 'ss' : rawType;
   if (!['ss', 'vmess', 'vless', 'trojan', 'hysteria2', 'tuic', 'anytls'].includes(type)) return null;
+  // Clash 片段（server_port 缺失、port 存在）原样保留字段：
+  // tls/servername/reality-opts/client-fingerprint/ws-opts 等不能按 sing-box 字段重建。
+  if (record.server_port === undefined && record.port !== undefined && record.server !== undefined) {
+    const proxy: Record<string, unknown> = { ...record, type };
+    delete proxy.protocol;
+    return proxy;
+  }
   const server = String(record.server ?? record.address ?? '');
   const port = Number(record.server_port ?? record.port);
   if (!server || !Number.isFinite(port) || port <= 0) return null;
