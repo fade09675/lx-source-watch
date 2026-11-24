@@ -22,7 +22,9 @@ import {
   getEvents,
   getFailureAggregate,
   getLastRun,
+  getPlatformSummary,
   getRun,
+  getRunEndpointRows,
   getRunEndpointStats,
   getRunPlatforms,
   getRuns,
@@ -410,13 +412,14 @@ export function createApi(): Hono<Ctx> {
         { status: 404, headers: { 'cache-control': CACHE_PRIVATE } },
       );
     }
-    const [sources, platforms, endpoints] = await Promise.all([
+    const [sources, platforms, endpoints, endpointRows] = await Promise.all([
       getRunSources(c.env.DB, runId),
       getRunPlatforms(c.env.DB, runId),
       getRunEndpointStats(c.env.DB, runId),
+      getRunEndpointRows(c.env.DB, runId),
     ]);
     return Response.json(
-      { run, sources, platforms, endpoints },
+      { run, sources, platforms, endpoints, endpointRows },
       { headers: { 'cache-control': 'private, max-age=30' } },
     );
   });
@@ -449,6 +452,14 @@ export function createApi(): Hono<Ctx> {
     const days = Number.isFinite(raw) ? Math.max(1, Math.min(30, Math.trunc(raw))) : 7;
     const aggregate = await getFailureAggregate(c.env.DB, days);
     return Response.json(aggregate, { headers: { 'cache-control': 'private, max-age=60' } });
+  });
+
+  // 平台汇总：一段时间内每个平台的通过率、耗时和首要错误。
+  api.get('/admin/platforms', async (c) => {
+    const raw = Number(c.req.query('days') ?? 7);
+    const days = Number.isFinite(raw) ? Math.max(1, Math.min(90, Math.trunc(raw))) : 7;
+    const summary = await getPlatformSummary(c.env.DB, days);
+    return Response.json(summary, { headers: { 'cache-control': 'private, max-age=60' } });
   });
 
   // 工作台：探测 + 测活两类工作流的最近运行。

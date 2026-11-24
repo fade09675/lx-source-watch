@@ -456,6 +456,25 @@ interface RunRow {
   taskId?: string | null;
   startedAt?: string | null;
   logKey?: string | null;
+  steps?: string | null;
+  warnings?: string | null;
+  endpointsOk?: number;
+  endpointsTotal?: number;
+  cnTested?: number;
+  cnOk?: number;
+  candidatesAdded?: number;
+  candidatesPromoted?: number;
+  proxiesUsed?: number;
+}
+
+function parseRunJsonArray<T>(raw: string | null | undefined): T[] {
+  if (!raw) return [];
+  try {
+    const value = JSON.parse(raw);
+    return Array.isArray(value) ? (value as T[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 function toRunSummary(row: RunRow): RunSummary {
@@ -477,10 +496,21 @@ function toRunSummary(row: RunRow): RunSummary {
     taskId: row.taskId ?? null,
     startedAt: row.startedAt ?? null,
     logKey: row.logKey ?? null,
+    steps: parseRunJsonArray(row.steps),
+    counts: {
+      endpointsOk: row.endpointsOk ?? 0,
+      endpointsTotal: row.endpointsTotal ?? 0,
+      cnTested: row.cnTested ?? 0,
+      cnOk: row.cnOk ?? 0,
+      candidatesAdded: row.candidatesAdded ?? 0,
+      candidatesPromoted: row.candidatesPromoted ?? 0,
+      proxiesUsed: row.proxiesUsed ?? 0,
+    },
+    warningCount: parseRunJsonArray<string>(row.warnings).length,
   };
 }
 
-const RUN_COLUMNS = `run_id AS id, generated_at AS finishedAt, duration_ms AS durationMs, total, available, partial, unavailable, untested, platforms_ok AS platformsOk, platforms_tested AS platformsTested, status, trigger, message, error, task_id AS taskId, started_at AS startedAt, log_key AS logKey`;
+const RUN_COLUMNS = `run_id AS id, generated_at AS finishedAt, duration_ms AS durationMs, total, available, partial, unavailable, untested, platforms_ok AS platformsOk, platforms_tested AS platformsTested, status, trigger, message, error, task_id AS taskId, started_at AS startedAt, log_key AS logKey, steps, warnings, endpoints_ok AS endpointsOk, endpoints_total AS endpointsTotal, cn_tested AS cnTested, cn_ok AS cnOk, candidates_added AS candidatesAdded, candidates_promoted AS candidatesPromoted, proxies_used AS proxiesUsed`;
 
 export async function getRuns(db: D1Database, limit = 50): Promise<RunSummary[]> {
   const rows = await db
@@ -741,6 +771,10 @@ export interface RunSourceDetail {
   tested: number;
   total: number;
   durationMs: number;
+  version: string | null;
+  scriptSha: string | null;
+  endpointsOk: number;
+  endpointsTotal: number;
 }
 
 export interface RunPlatformDetail {
@@ -750,7 +784,12 @@ export interface RunPlatformDetail {
   declared: boolean;
   tested: boolean;
   ok: boolean;
+  quality: string | null;
+  resolveMs: number | null;
+  ttfbMs: number | null;
   totalMs: number | null;
+  httpStatus: number | null;
+  contentType: string | null;
   errorKind: string | null;
   error: string | null;
   urlHost: string | null;
@@ -780,7 +819,9 @@ export async function getRunSources(db: D1Database, runId: string): Promise<RunS
     .prepare(
       `SELECT sr.source_id AS sourceId, COALESCE(s.title, sr.source_id) AS title,
               COALESCE(s.category, '') AS category, sr.status, sr.init_ok AS initOk, sr.init_error AS initError,
-              sr.ok, sr.tested, sr.total, sr.duration_ms AS durationMs
+              sr.ok, sr.tested, sr.total, sr.duration_ms AS durationMs,
+              sr.version AS version, sr.script_sha AS scriptSha,
+              sr.endpoints_ok AS endpointsOk, sr.endpoints_total AS endpointsTotal
        FROM source_runs sr
        LEFT JOIN sources s ON s.id = sr.source_id
        WHERE sr.run_id = ?
@@ -799,6 +840,10 @@ export async function getRunSources(db: D1Database, runId: string): Promise<RunS
       tested: number;
       total: number;
       durationMs: number;
+      version: string | null;
+      scriptSha: string | null;
+      endpointsOk: number;
+      endpointsTotal: number;
     }>();
 
   return rows.results.map((row) => ({
@@ -812,13 +857,19 @@ export async function getRunSources(db: D1Database, runId: string): Promise<RunS
     tested: row.tested,
     total: row.total,
     durationMs: row.durationMs,
+    version: row.version,
+    scriptSha: row.scriptSha,
+    endpointsOk: row.endpointsOk,
+    endpointsTotal: row.endpointsTotal,
   }));
 }
 
 export async function getRunPlatforms(db: D1Database, runId: string): Promise<RunPlatformDetail[]> {
   const rows = await db
     .prepare(
-      `SELECT source_id AS sourceId, platform, name, declared, tested, ok, total_ms AS totalMs,
+      `SELECT source_id AS sourceId, platform, name, declared, tested, ok, quality,
+              resolve_ms AS resolveMs, ttfb_ms AS ttfbMs, total_ms AS totalMs,
+              http_status AS httpStatus, content_type AS contentType,
               error_kind AS errorKind, error, url_host AS urlHost,
               cn_tested AS cnTested, cn_ok AS cnOk, cn_error AS cnError
        FROM platform_results
@@ -833,7 +884,12 @@ export async function getRunPlatforms(db: D1Database, runId: string): Promise<Ru
       declared: number;
       tested: number;
       ok: number;
+      quality: string | null;
+      resolveMs: number | null;
+      ttfbMs: number | null;
       totalMs: number | null;
+      httpStatus: number | null;
+      contentType: string | null;
       errorKind: string | null;
       error: string | null;
       urlHost: string | null;
@@ -849,7 +905,12 @@ export async function getRunPlatforms(db: D1Database, runId: string): Promise<Ru
     declared: Boolean(row.declared),
     tested: Boolean(row.tested),
     ok: Boolean(row.ok),
+    quality: row.quality,
+    resolveMs: row.resolveMs,
+    ttfbMs: row.ttfbMs,
     totalMs: row.totalMs,
+    httpStatus: row.httpStatus,
+    contentType: row.contentType,
     errorKind: row.errorKind,
     error: row.error,
     urlHost: row.urlHost,
@@ -879,6 +940,147 @@ export async function getRunEndpointStats(db: D1Database, runId: string): Promis
     failed: row.failed,
     error: row.error,
   }));
+}
+
+export interface RunEndpointRow extends EndpointRow {
+  sourceId: string;
+}
+
+/** 一轮运行内全部接入点的下载明细（主地址 + 镜像），供详情页三级展开。 */
+export async function getRunEndpointRows(db: D1Database, runId: string): Promise<RunEndpointRow[]> {
+  const rows = await db
+    .prepare(
+      `SELECT source_id AS sourceId, url, role, ok, status, sha, version, version_state, bytes, ms, error, checked_at
+       FROM source_endpoints
+       WHERE run_id = ?
+       ORDER BY source_id, CASE role WHEN 'primary' THEN 0 ELSE 1 END, ok DESC, ms ASC`,
+    )
+    .bind(runId)
+    .all<{
+      sourceId: string;
+      url: string;
+      role: string;
+      ok: number;
+      status: number | null;
+      sha: string | null;
+      version: string | null;
+      version_state: string | null;
+      bytes: number | null;
+      ms: number;
+      error: string | null;
+      checked_at: string;
+    }>();
+
+  return rows.results.map((row) => ({
+    sourceId: row.sourceId,
+    url: row.url,
+    role: row.role === 'primary' ? 'primary' : 'candidate',
+    ok: Boolean(row.ok),
+    status: row.status,
+    sha: row.sha,
+    version: row.version,
+    versionState:
+      row.version_state === 'synced' || row.version_state === 'lagging' || row.version_state === 'unknown'
+        ? row.version_state
+        : null,
+    bytes: row.bytes,
+    ms: row.ms,
+    error: row.error,
+    checkedAt: row.checked_at,
+  }));
+}
+
+export interface PlatformSummaryRow {
+  platform: string;
+  name: string;
+  runs: number;
+  tested: number;
+  ok: number;
+  failed: number;
+  cnTested: number;
+  cnOk: number;
+  avgTotalMs: number | null;
+  avgResolveMs: number | null;
+  avgTtfbMs: number | null;
+  topError: { kind: string | null; error: string; count: number } | null;
+}
+
+export interface PlatformSummary {
+  days: number;
+  runCount: number;
+  rows: PlatformSummaryRow[];
+}
+
+/** 一段时间内按平台聚合的通过率与耗时，供“平台汇总”页签使用。 */
+export async function getPlatformSummary(db: D1Database, days = 7): Promise<PlatformSummary> {
+  const windowDays = Math.min(90, Math.max(1, Math.trunc(days)));
+  const cutoff = new Date(Date.now() - windowDays * 24 * 3600 * 1000).toISOString();
+
+  const [totals, errors] = await Promise.all([
+    db
+      .prepare(
+        `SELECT pr.platform AS platform, MAX(pr.name) AS name,
+                COUNT(DISTINCT pr.run_id) AS runs,
+                SUM(CASE WHEN pr.tested = 1 THEN 1 ELSE 0 END) AS tested,
+                SUM(CASE WHEN pr.tested = 1 AND pr.ok = 1 THEN 1 ELSE 0 END) AS ok,
+                SUM(CASE WHEN pr.tested = 1 AND pr.ok = 0 THEN 1 ELSE 0 END) AS failed,
+                SUM(CASE WHEN pr.cn_tested = 1 THEN 1 ELSE 0 END) AS cnTested,
+                SUM(CASE WHEN pr.cn_tested = 1 AND pr.cn_ok = 1 THEN 1 ELSE 0 END) AS cnOk,
+                AVG(CASE WHEN pr.tested = 1 AND pr.ok = 1 THEN pr.total_ms END) AS avgTotalMs,
+                AVG(CASE WHEN pr.tested = 1 AND pr.ok = 1 THEN pr.resolve_ms END) AS avgResolveMs,
+                AVG(CASE WHEN pr.tested = 1 AND pr.ok = 1 THEN pr.ttfb_ms END) AS avgTtfbMs
+         FROM platform_results pr
+         JOIN runs r ON r.run_id = pr.run_id
+         WHERE r.generated_at >= ?
+         GROUP BY pr.platform
+         ORDER BY tested DESC, pr.platform ASC`,
+      )
+      .bind(cutoff)
+      .all<{
+        platform: string;
+        name: string;
+        runs: number;
+        tested: number;
+        ok: number;
+        failed: number;
+        cnTested: number;
+        cnOk: number;
+        avgTotalMs: number | null;
+        avgResolveMs: number | null;
+        avgTtfbMs: number | null;
+      }>(),
+    db
+      .prepare(
+        `SELECT pr.platform AS platform, pr.error_kind AS kind, pr.error AS error, COUNT(*) AS count
+         FROM platform_results pr
+         JOIN runs r ON r.run_id = pr.run_id
+         WHERE r.generated_at >= ? AND pr.tested = 1 AND pr.ok = 0
+         GROUP BY pr.platform, pr.error_kind, pr.error
+         ORDER BY platform, count DESC`,
+      )
+      .bind(cutoff)
+      .all<{ platform: string; kind: string | null; error: string | null; count: number }>(),
+  ]);
+
+  const topError = new Map<string, { kind: string | null; error: string; count: number }>();
+  for (const row of errors.results) {
+    if (topError.has(row.platform)) continue;
+    topError.set(row.platform, { kind: row.kind, error: row.error ?? '未返回错误信息', count: row.count });
+  }
+
+  const runRow = await db
+    .prepare('SELECT COUNT(*) AS count FROM runs WHERE generated_at >= ?')
+    .bind(cutoff)
+    .first<{ count: number }>();
+
+  return {
+    days: windowDays,
+    runCount: runRow?.count ?? 0,
+    rows: totals.results.map((row) => ({
+      ...row,
+      topError: topError.get(row.platform) ?? null,
+    })),
+  };
 }
 
 export interface FailureKind {

@@ -9,15 +9,27 @@ function stripAnsi(text: string): string {
   return text.replace(ANSI, '');
 }
 
-export function RunLog({ runId }: { runId: string }) {
+interface RunLogProps {
+  runId: string;
+  query?: string;
+  onQueryChange?: (value: string) => void;
+}
+
+export function RunLog({ runId, query: externalQuery, onQueryChange }: RunLogProps) {
   const [log, setLog] = useState('');
   const [available, setAvailable] = useState(false);
   const [bytes, setBytes] = useState(0);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [query, setQuery] = useState('');
+  const [internalQuery, setInternalQuery] = useState('');
   const [onlyErrors, setOnlyErrors] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  const query = externalQuery ?? internalQuery;
+  const updateQuery = (value: string) => {
+    if (onQueryChange) onQueryChange(value);
+    else setInternalQuery(value);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -82,7 +94,7 @@ export function RunLog({ runId }: { runId: string }) {
   }
 
   return (
-    <section>
+    <section id="run-log">
       <div className="panel-head">
         <h2>运行日志</h2>
         <span className="muted small">
@@ -104,7 +116,7 @@ export function RunLog({ runId }: { runId: string }) {
               className="log-search"
               placeholder="搜索日志（源、平台、地址、错误）"
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => updateQuery(event.target.value)}
             />
             <label className="check">
               <input type="checkbox" checked={onlyErrors} onChange={(event) => setOnlyErrors(event.target.checked)} />

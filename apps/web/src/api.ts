@@ -324,6 +324,10 @@ export interface RunSourceDetail {
   tested: number;
   total: number;
   durationMs: number;
+  version: string | null;
+  scriptSha: string | null;
+  endpointsOk: number;
+  endpointsTotal: number;
 }
 
 export interface RunPlatformDetail {
@@ -333,7 +337,12 @@ export interface RunPlatformDetail {
   declared: boolean;
   tested: boolean;
   ok: boolean;
+  quality: string | null;
+  resolveMs: number | null;
+  ttfbMs: number | null;
   totalMs: number | null;
+  httpStatus: number | null;
+  contentType: string | null;
   errorKind: string | null;
   error: string | null;
   urlHost: string | null;
@@ -350,11 +359,48 @@ export interface RunEndpointStat {
   error: string | null;
 }
 
+export interface RunEndpointRow {
+  sourceId: string;
+  url: string;
+  role: 'primary' | 'candidate';
+  ok: boolean;
+  status: number | null;
+  sha: string | null;
+  version: string | null;
+  versionState: 'synced' | 'lagging' | 'unknown' | null;
+  bytes: number | null;
+  ms: number;
+  error: string | null;
+  checkedAt: string;
+}
+
 export interface RunDetailResult {
   run: RunSummary;
   sources: RunSourceDetail[];
   platforms: RunPlatformDetail[];
   endpoints: RunEndpointStat[];
+  endpointRows: RunEndpointRow[];
+}
+
+export interface PlatformSummaryRow {
+  platform: string;
+  name: string;
+  runs: number;
+  tested: number;
+  ok: number;
+  failed: number;
+  cnTested: number;
+  cnOk: number;
+  avgTotalMs: number | null;
+  avgResolveMs: number | null;
+  avgTtfbMs: number | null;
+  topError: { kind: string | null; error: string; count: number } | null;
+}
+
+export interface PlatformSummary {
+  days: number;
+  runCount: number;
+  rows: PlatformSummaryRow[];
 }
 
 export interface RunLogResult {
@@ -578,6 +624,7 @@ export const api = {
   snapshot: (runId: string) => request<RunDetailResult>(`/api/admin/snapshots/${encodeURIComponent(runId)}`),
   runLog: (runId: string) => request<RunLogResult>(`/api/admin/snapshots/${encodeURIComponent(runId)}/log`),
   failures: (days = 7) => request<FailureAggregate>(`/api/admin/failures?days=${days}`),
+  platforms: (days = 7) => request<PlatformSummary>(`/api/admin/platforms?days=${days}`),
 
   mirrors: () => request<MirrorConfigView>('/api/admin/mirrors'),
   saveMirrors: (templates: MirrorTemplate[]) =>

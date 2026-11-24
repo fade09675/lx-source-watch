@@ -7,10 +7,11 @@ import {
   formatDuration,
   formatMs,
   platformMeta,
+  safeUrlHost,
   type ErrorKind,
   type SourceStatus,
 } from '@lx/shared';
-import { ApiError, api, type RunDetailResult } from '../api';
+import { ApiError, api, type RunDetailResult, type RunEndpointRow } from '../api';
 import { ErrorBox, Spinner } from '../components/Feedback';
 import { RunLog } from '../components/RunLog';
 
@@ -21,6 +22,20 @@ function errorLabel(kind: string | null): string {
 
 function sourceTone(status: string): string {
   return STATUS_META[status as SourceStatus]?.tone ?? 'idle';
+}
+
+const VERSION_STATE_LABEL: Record<string, { label: string; tone: string }> = {
+  synced: { label: '已同步', tone: 'ok' },
+  lagging: { label: '版本落后', tone: 'warn' },
+  unknown: { label: '未知', tone: 'idle' },
+};
+
+function versionState(state: string | null): { label: string; tone: string } {
+  return (state && VERSION_STATE_LABEL[state]) || { label: '未知', tone: 'idle' };
+}
+
+function endLabel(endpoint: RunEndpointRow): string {
+  return endpoint.role === 'primary' ? '主地址' : '镜像';
 }
 
 interface FailureGroup {
@@ -35,6 +50,7 @@ export function RunDetailPage() {
   const { runId = '' } = useParams();
   const [data, setData] = useState<RunDetailResult | null>(null);
   const [error, setError] = useState('');
+  const [logQuery, setLogQuery] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -70,8 +86,15 @@ export function RunDetailPage() {
     );
   }
 
-  const { run, sources, platforms, endpoints } = data;
+  const { run, sources, platforms, endpoints, endpointRows } = data;
   const endpointMap = new Map(endpoints.map((item) => [item.sourceId, item]));
+  const endpointGroups = new Map<string, RunEndpointRow[]>();
+  for (const row of endpointRows) {
+    const list = endpointGroups.get(row.sourceId) ?? [];
+    list.push(row);
+    endpointGroups.set(row.sourceId, list);
+  }
+  const counts = run.counts;
 
   const failures: FailureGroup[] = [];
   const failureIndex = new Map<string, FailureGroup>();
@@ -95,6 +118,13 @@ export function RunDetailPage() {
   }
   failures.sort((a, b) => b.count - a.count);
   const maxFailure = Math.max(1, ...failures.map((item) => item.count));
+
+  const searchLog = (value: string) => {
+    setLogQuery(value.slice(0, 60));
+    window.requestAnimationFrame(() => {
+      document.getElementById('run-log')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
 
   return (
     <div className="page">
@@ -141,6 +171,60 @@ export function RunDetailPage() {
         </div>
       </div>
 
+      {counts && (
+        <div className="stats-grid compact">
+          <div className="stat-card">
+            <span className="muted">接入点</span>
+            <strong>
+              <span className="text-ok">{counts.endpointsOk}</span>/{counts.endpointsTotal}
+            </strong>
+            <span className="muted small">主地址 + 镜像下载成功</span>
+          </div>
+          <div className="stat-card">
+            <span className="muted">国内补测</span>
+            <strong>
+              <span className={counts.cnOk > 0 ? 'text-ok' : 'text-bad'}>{counts.cnOk}</span>/{counts.cnTested}
+            </strong>
+            <span className="muted small">经国内代理可达</span>
+          </div>
+          <div className="stat-card">
+            <span className="muted">候选</span>
+            <strong>
+              +{counts.candidatesAdded}/{counts.candidatesPromoted}
+            </strong>
+            <span className="muted small">新增 / 自动收录</span>
+          </div>
+          <div className="stat-card">
+            <span className="muted">代理</span>
+            <strong>{counts.proxiesUsed}</strong>
+            <span className="muted small">本轮使用节点</span>
+          </div>
+        </div>
+      )}
+
+      {run.steps && run.steps.length > 0 && (
+        <section>
+          <div className="panel-head">
+            <h2>执行步骤</h2>
+            <span className="muted">{run.steps.length} 步</span>
+          </div>
+          <div className="run-steps">
+            {run.steps.map((step) => (
+              <div className={`run-step tone-${step.status}`} key={step.key}>
+                <span className="run-step-dot" />
+                <div>
+                  <strong>{step.label}</strong>
+                  <span className="muted small">
+                    {step.durationMs != null ? ` · ${formatMs(step.durationMs)}` : ''}
+                    {step.message ? ` · ${step.message}` : ''}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section>
         <div className="panel-head">
           <h2>失败原因</h2>
@@ -157,6 +241,9 @@ export function RunDetailPage() {
                   <span className="muted">
                     {item.count} 个平台 · {item.platforms.join('、')}
                   </span>
+                  <button type="button" className="link-button" onClick={() => searchLog(item.error)}>
+                    在日志中查
+                  </button>
                 </div>
                 <div className="failure-bar">
                   <span style={{ width: `${Math.max(3, Math.round((item.count / maxFailure) * 100))}%` }} />
@@ -168,7 +255,7 @@ export function RunDetailPage() {
         )}
       </section>
 
-      <RunLog runId={run.id} />
+      <RunLog runId={run.id} query={logQuery} onQueryChange={setLogQuery} />
 
       <section>
         <div className="panel-head">
@@ -179,12 +266,8 @@ export function RunDetailPage() {
           {sources.map((source) => {
             const meta = STATUS_META[source.status as SourceStatus];
             const endpoint = endpointMap.get(source.sourceId);
-            const failedPlatforms = platforms.filter(
-              (item) => item.sourceId === source.sourceId && item.tested && !item.ok,
-            );
-            const passedPlatforms = platforms.filter(
-              (item) => item.sourceId === source.sourceId && item.tested && item.ok,
-            );
+            const sourceEndpoints = endpointGroups.get(source.sourceId) ?? [];
+            const sourcePlatforms = platforms.filter((item) => item.sourceId === source.sourceId);
             return (
               <details
                 className={`run-source tone-${sourceTone(source.status)}`}
@@ -205,43 +288,125 @@ export function RunDetailPage() {
                 </summary>
                 <div className="run-source-body">
                   {source.initError && <p className="failure-sample">初始化失败：{source.initError}</p>}
-                  <div className="chip-line">
-                    {passedPlatforms.map((item) => {
-                      const platform = platformMeta(item.platform);
-                      return (
-                        <span className="platform-chip tone-ok" key={`${item.sourceId}-${item.platform}`}>
-                          <span className="platform-name">{platform.short}</span>
-                          <span className="platform-value">{item.totalMs ? formatMs(item.totalMs) : '通过'}</span>
-                        </span>
-                      );
-                    })}
-                    {failedPlatforms.map((item) => {
-                      const platform = platformMeta(item.platform);
-                      return (
-                        <span
-                          className="platform-chip tone-bad"
-                          key={`${item.sourceId}-${item.platform}`}
-                          title={item.error ?? errorLabel(item.errorKind)}
-                        >
-                          <span className="platform-name">{platform.short}</span>
-                          <span className="platform-value">失败</span>
-                        </span>
-                      );
-                    })}
+                  <div className="source-facts">
+                    <span>版本：{source.version ?? '未知'}</span>
+                    <span>sha：{source.scriptSha ? source.scriptSha.slice(0, 12) : '—'}</span>
+                    <span>
+                      接入点：<span className="text-ok">{source.endpointsOk}</span>/{source.endpointsTotal}
+                    </span>
+                    <span>
+                      平台：<span className="text-ok">{source.ok}</span>/{source.tested}
+                    </span>
+                    <span>声明：{source.total} 个平台</span>
                   </div>
-                  {failedPlatforms.length > 0 && (
-                    <ul className="failure-list">
-                      {failedPlatforms.map((item) => (
-                        <li key={`${item.sourceId}-${item.platform}-reason`}>
-                          <span className="platform-name">{platformMeta(item.platform).short}</span>
-                          <span>{item.error ?? errorLabel(item.errorKind)}</span>
-                          {item.cnTested && (
-                            <span className={item.cnOk ? 'cn-dot cn-ok' : 'cn-dot cn-bad'} title={item.cnError ?? ''} />
-                          )}
-                        </li>
-                      ))}
-                    </ul>
+
+                  <h3 className="subhead">接入点</h3>
+                  {sourceEndpoints.length === 0 ? (
+                    <p className="muted small">本轮没有接入点明细（旧格式运行）。</p>
+                  ) : (
+                    <div className="table-wrap">
+                      <table className="data-table compact-table">
+                        <thead>
+                          <tr>
+                            <th>地址</th>
+                            <th>角色</th>
+                            <th>下载</th>
+                            <th>版本</th>
+                            <th>耗时</th>
+                            <th>错误</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sourceEndpoints.map((endpoint) => {
+                            const state = versionState(endpoint.versionState);
+                            return (
+                              <tr key={endpoint.url}>
+                                <td className="mono small" title={endpoint.url}>
+                                  {safeUrlHost(endpoint.url)}
+                                </td>
+                                <td>{endLabel(endpoint)}</td>
+                                <td>
+                                  <span className={`pill tone-${endpoint.ok ? 'ok' : 'bad'}`}>
+                                    {endpoint.ok ? '成功' : '失败'}
+                                  </span>
+                                </td>
+                                <td>
+                                  {endpoint.version ?? '—'}{' '}
+                                  <span className={`pill tone-${state.tone}`}>{state.label}</span>
+                                </td>
+                                <td className="mono">{formatMs(endpoint.ms)}</td>
+                                <td className="small" title={endpoint.error ?? ''}>
+                                  {endpoint.error ?? '—'}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   )}
+
+                  <h3 className="subhead">平台</h3>
+                  <div className="table-wrap">
+                    <table className="data-table compact-table">
+                      <thead>
+                        <tr>
+                          <th>平台</th>
+                          <th>音质</th>
+                          <th>结果</th>
+                          <th>取链</th>
+                          <th>首字节</th>
+                          <th>总耗时</th>
+                          <th>国内</th>
+                          <th>错误</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sourcePlatforms.map((item) => {
+                          const platform = platformMeta(item.platform);
+                          return (
+                            <tr key={`${item.sourceId}-${item.platform}`}>
+                              <td>
+                                <span className="platform-name-cell">{platform.short}</span>
+                                <span className="muted small">{platform.name}</span>
+                              </td>
+                              <td className="mono small">{item.quality ?? '—'}</td>
+                              <td>
+                                <span
+                                  className={`pill tone-${item.tested ? (item.ok ? 'ok' : 'bad') : 'idle'}`}
+                                  title={item.error ?? ''}
+                                >
+                                  {item.tested ? (item.ok ? '通过' : '失败') : '未测'}
+                                </span>
+                              </td>
+                              <td className="mono">{item.resolveMs != null ? formatMs(item.resolveMs) : '—'}</td>
+                              <td className="mono">{item.ttfbMs != null ? formatMs(item.ttfbMs) : '—'}</td>
+                              <td className="mono">{item.totalMs != null ? formatMs(item.totalMs) : '—'}</td>
+                              <td>
+                                {item.cnTested ? (
+                                  <span className={item.cnOk ? 'cn-dot cn-ok' : 'cn-dot cn-bad'} title={item.cnError ?? ''} />
+                                ) : (
+                                  <span className="muted small">未测</span>
+                                )}
+                              </td>
+                              <td className="small" title={item.error ?? ''}>
+                                {item.error ?? (item.httpStatus ? `HTTP ${item.httpStatus}` : '—')}
+                                {item.error && (
+                                  <button
+                                    type="button"
+                                    className="link-button small"
+                                    onClick={() => searchLog(item.error ?? '')}
+                                  >
+                                    查日志
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </details>
             );

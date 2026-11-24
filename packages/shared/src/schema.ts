@@ -358,6 +358,12 @@ export interface RunSummary {
   taskId?: string | null;
   startedAt?: string | null;
   logKey?: string | null;
+  /** 整轮运行的关键计数，1A 起写入；旧运行可能为空。 */
+  counts?: RunCounts;
+  /** 分步耗时（取清单、下载接入点、平台测试、国内补测、上报等）。 */
+  steps?: RunStep[];
+  /** 运行期间收集到的警告条数（详情里再展开具体内容）。 */
+  warningCount?: number;
 }
 
 export interface EventItem {
