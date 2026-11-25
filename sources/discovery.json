@@ -1,9 +1,38 @@
 {
   "version": 1,
   "maxFetchPerRun": 20,
+  "maxFetchPerRepo": 5,
   "repos": [
     {
       "repo": "pdone/lx-music-source",
+      "branch": "main",
+      "pathPrefixes": [],
+      "exclude": ["node_modules", ".min.js", "dist/", "docs/"],
+      "enabled": true
+    },
+    {
+      "repo": "shellsec/lx-music-source",
+      "branch": "master",
+      "pathPrefixes": ["sources/"],
+      "exclude": ["node_modules", ".min.js", "dist/", "docs/"],
+      "enabled": true
+    },
+    {
+      "repo": "cdyUuu/lx-music-xinghai-source",
+      "branch": "main",
+      "pathPrefixes": [],
+      "exclude": ["node_modules", ".min.js", "dist/", "docs/"],
+      "enabled": true
+    },
+    {
+      "repo": "wangxanshen/lx-music-source",
+      "branch": "main",
+      "pathPrefixes": [],
+      "exclude": ["node_modules", ".min.js", "dist/", "docs/"],
+      "enabled": true
+    },
+    {
+      "repo": "hwxlikemi/lxs",
       "branch": "main",
       "pathPrefixes": [],
       "exclude": ["node_modules", ".min.js", "dist/", "docs/"],

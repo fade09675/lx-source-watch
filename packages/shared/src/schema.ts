@@ -323,6 +323,8 @@ export const DiscoveryConfigSchema = z.object({
   repos: z.array(DiscoveryRepoSchema).max(50),
   /** 每次最多抓取多少个新脚本。 */
   maxFetchPerRun: z.number().int().positive().max(80).default(20),
+  /** 每个仓库每次最多抓取多少个，避免一个大仓库占满全局名额。 */
+  maxFetchPerRepo: z.number().int().positive().max(40).default(5),
 });
 export type DiscoveryConfig = z.infer<typeof DiscoveryConfigSchema>;
 

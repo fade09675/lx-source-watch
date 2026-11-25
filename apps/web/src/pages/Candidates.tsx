@@ -26,6 +26,7 @@ export function CandidatesPage() {
   const [data, setData] = useState<CandidateList | null>(null);
   const [state, setState] = useState('');
   const [query, setQuery] = useState('');
+  const [repoFilter, setRepoFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -50,6 +51,10 @@ export function CandidatesPage() {
 
   const counts = data?.counts ?? {};
   const total = Object.values(counts).reduce((sum, n) => sum + n, 0);
+  const repos = Array.from(new Set((data?.candidates ?? []).map((candidate) => candidate.repo))).sort();
+  const visibleCandidates = repoFilter
+    ? (data?.candidates ?? []).filter((candidate) => candidate.repo === repoFilter)
+    : (data?.candidates ?? []);
 
   const removeRow = (candidate: Candidate) => {
     setData((current) =>
@@ -190,6 +195,19 @@ export function CandidatesPage() {
             搜索
           </button>
         </div>
+        <select
+          className="search-input"
+          value={repoFilter}
+          onChange={(event) => setRepoFilter(event.target.value)}
+          aria-label="按仓库筛选"
+        >
+          <option value="">全部仓库</option>
+          {repos.map((repo) => (
+            <option key={repo} value={repo}>
+              {repo}
+            </option>
+          ))}
+        </select>
         <div className="chip-row">
           {STATE_TABS.map((tab) => (
             <button
@@ -207,11 +225,11 @@ export function CandidatesPage() {
 
       {loading ? <Spinner label="加载候选" /> : null}
 
-      {!loading && data && data.candidates.length === 0 ? (
+      {!loading && data && visibleCandidates.length === 0 ? (
         <EmptyBox message="没有候选：点「立即发现」从配置的仓库里找新脚本，首次运行可能要等十几秒。" />
       ) : null}
 
-      {!loading && data && data.candidates.length > 0 ? (
+      {!loading && data && visibleCandidates.length > 0 ? (
         <div className="table-wrap">
           <table className="data-table source-table">
             <thead>
@@ -226,7 +244,7 @@ export function CandidatesPage() {
               </tr>
             </thead>
             <tbody>
-              {data.candidates.map((candidate) => {
+              {visibleCandidates.map((candidate) => {
                 const meta = STATE_META[candidate.state] ?? STATE_FALLBACK;
                 return (
                   <tr key={candidate.id}>

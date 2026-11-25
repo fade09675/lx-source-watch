@@ -6,6 +6,7 @@ import {
   type Candidate,
   type CandidateFile,
   type DiscoveryConfig,
+  type DiscoveryRepo,
 } from '@lx/shared';
 import { log } from './logger.js';
 import { httpRequest, type ProxyConfig } from './net/http.js';
@@ -109,6 +110,14 @@ function rawUrl(repo: string, branch: string, path: string): string {
   return `https://raw.githubusercontent.com/${repo}/${branch}/${encoded}`;
 }
 
+/** 过滤、打分并排序一个仓库的文件树；抽成纯函数便于测试。 */
+export function rankEntries(entries: TreeEntry[], repo: DiscoveryRepo): TreeEntry[] {
+  return entries
+    .filter((e) => e.type === 'blob' && shouldInclude(e.path, repo))
+    .filter((e) => (e.size ?? 0) <= 2 * 1024 * 1024)
+    .sort((a, b) => scorePath(b.path) - scorePath(a.path) || (a.size ?? 0) - (b.size ?? 0));
+}
+
 /**
  * 扫描配置里的 GitHub 仓库，找出 .js 候选脚本。
  * 只记录链接与元数据，不复制第三方脚本到本仓库。
@@ -117,6 +126,7 @@ export async function discoverCandidates(opts: DiscoverOptions): Promise<Discove
   const configRaw = await readFile(opts.configPath, 'utf8');
   const config = DiscoveryConfigSchema.parse(JSON.parse(configRaw));
   const maxFetch = Math.max(1, opts.maxFetchPerRun ?? config.maxFetchPerRun);
+  const perRepo = Math.min(maxFetch, config.maxFetchPerRepo);
   const token = opts.token ?? process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
   const previous = await readJson<CandidateFile>(opts.outPath);
   const existing = new Map<string, Candidate>();
@@ -142,13 +152,11 @@ export async function discoverCandidates(opts: DiscoverOptions): Promise<Discove
       continue;
     }
     if (tree.truncated) log.warn(`${repo.repo} 文件树被截断，只扫描了部分文件`);
-    const entries = (tree.tree ?? [])
-      .filter((e) => e.type === 'blob' && shouldInclude(e.path, repo))
-      .filter((e) => (e.size ?? 0) <= 2 * 1024 * 1024)
-      .sort((a, b) => scorePath(b.path) - scorePath(a.path) || (a.size ?? 0) - (b.size ?? 0));
+    const entries = rankEntries(tree.tree ?? [], repo);
 
+    let repoFound = 0;
     for (const entry of entries) {
-      if (found.length >= maxFetch) break;
+      if (found.length >= maxFetch || repoFound >= perRepo) break;
       const id = sha1Short(`${repo.repo}/${entry.path}`, 12);
       if (seen.has(id)) continue;
       seen.add(id);
@@ -175,6 +183,7 @@ export async function discoverCandidates(opts: DiscoverOptions): Promise<Discove
         firstSeen: prev?.firstSeen ?? now,
         lastSeen: now,
       });
+      repoFound += 1;
     }
     stats.files += entries.length;
   }
