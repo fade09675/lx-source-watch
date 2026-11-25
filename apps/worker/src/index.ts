@@ -14,11 +14,11 @@ const app = new Hono<{ Bindings: Env }>();
 
 const CSP = [
   "default-src 'self'",
-  "script-src 'self'",
+  "script-src 'self' https://static.cloudflareinsights.com",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data:",
   "font-src 'self'",
-  "connect-src 'self'",
+  "connect-src 'self' https://cloudflareinsights.com",
   "frame-ancestors 'none'",
   "base-uri 'none'",
   "form-action 'self'",
@@ -84,14 +84,15 @@ app.use('*', async (c, next) => {
 // 后台操作记录：所有会改数据的请求都留痕；只读请求不记，失败也记。
 app.use('/api/*', async (c, next) => {
   const path = new URL(c.req.url).pathname;
-  const target = path.startsWith('/api/admin') || path === '/api/auth/change-password';
-  if (!target) return next();
+  const tracked = path.startsWith('/api/admin') || path === '/api/auth/change-password';
+  if (!tracked) return next();
   const method = c.req.method.toUpperCase();
   const mutating = method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE';
   await next();
   if (!mutating || path.endsWith('/admin/proxies/preview')) return;
 
   let message = '';
+  let recordTarget = '';
   if (c.res.status >= 400) {
     try {
       const body = (await c.res.clone().json()) as { message?: unknown; error?: unknown };
@@ -100,8 +101,15 @@ app.use('/api/*', async (c, next) => {
     } catch {
       // 非 JSON 错误体就不记录详情。
     }
+  } else if (path === '/api/admin/tasks' && method === 'POST') {
+    try {
+      const body = (await c.res.clone().json()) as { task?: { id?: unknown } };
+      if (typeof body.task?.id === 'string') recordTarget = body.task.id;
+    } catch {
+      // 响应不是 JSON 时忽略。
+    }
   }
-  const task = recordAdminActivity(c.env, { method, path, status: c.res.status, message });
+  const task = recordAdminActivity(c.env, { method, path, status: c.res.status, message, target: recordTarget });
   try {
     c.executionCtx.waitUntil(task);
   } catch {

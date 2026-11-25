@@ -18,11 +18,24 @@ function shortSha(value: string): string {
 function shortUrl(value: string): string {
   try {
     const url = new URL(value);
-    const path = url.pathname.length > 40 ? `${url.pathname.slice(0, 40)}…` : url.pathname;
+    const decoded = decodeURIComponent(url.pathname);
+    const path = decoded.length > 40 ? `${decoded.slice(0, 40)}…` : decoded;
     return `${url.host}${path}`;
   } catch {
     return value;
   }
+}
+
+function candidateStateLabel(value: string | null | undefined): string {
+  const labels: Record<string, string> = {
+    promoted: '已收录',
+    qualified: '可收录',
+    new: '待验证',
+    duplicate: '重复',
+    rejected: '已拒绝',
+    ignored: '已忽略',
+  };
+  return labels[value ?? ''] ?? value ?? '候选';
 }
 
 function time(value: string): string {
@@ -33,7 +46,9 @@ function time(value: string): string {
 }
 
 function entryState(entry: DuplicateEntryView, group: DuplicateGroup): { label: string; tone: string } {
-  if (entry.url === group.canonical.url) return { label: '主源', tone: 'ok' };
+  if (entry.url === group.canonical.url) {
+    return { label: entry.kind === 'candidate' ? '候选主记录' : '主源', tone: 'ok' };
+  }
   if (entry.kind === 'candidate' && entry.state === 'duplicate') return { label: '候选重复', tone: 'warn' };
   if (entry.kind === 'candidate' && !entry.enabled) return { label: '候选', tone: 'idle' };
   if (!entry.enabled) return { label: '已停用', tone: 'idle' };
@@ -156,19 +171,22 @@ export function DuplicatesPage() {
                       <span className={`pill ${group.merged ? 'tone-ok' : 'tone-warn'}`}>
                         {group.merged ? '已合并' : '待合并'}
                       </span>
+                      {!canMerge && !group.merged && (
+                        <span className="muted small">主记录是候选，先收录为正式源</span>
+                      )}
                       <button
                         className="row-link"
                         disabled={!canMerge || busy === group.sha256}
                         title={
                           group.canonical.kind !== 'registry'
-                            ? '主源还是候选，先在候选页收录'
+                            ? '主记录还是候选，先在候选页收录'
                             : group.merged
                               ? '已经全部合并'
-                              : '把重复地址并入主源'
+                              : '把重复地址并入主记录'
                         }
                         onClick={() => void merge(group)}
                       >
-                        {busy === group.sha256 ? '合并中…' : '合并到主源'}
+                        {busy === group.sha256 ? '合并中…' : '合并到主记录'}
                       </button>
                     </div>
                   </header>
@@ -206,7 +224,7 @@ export function DuplicatesPage() {
           actions={<span className="muted small">{counts.similar} 组</span>}
         >
           <div className="table-wrap">
-            <table className="data-table">
+            <table className="data-table responsive-table">
               <thead>
                 <tr>
                   <th>名称</th>
@@ -220,14 +238,14 @@ export function DuplicatesPage() {
                 {similar.flatMap((group) =>
                   group.entries.map((entry) => (
                     <tr key={`similar:${entry.id}`}>
-                      <td>{group.title}</td>
-                      <td>{group.author}</td>
-                      <td className="mono" title={entry.url}>
+                      <td data-label="名称">{group.title}</td>
+                      <td data-label="作者">{group.author}</td>
+                      <td className="mono" title={entry.url} data-label="地址">
                         {shortUrl(entry.url)}
                       </td>
-                      <td className="mono">{shortSha(entry.sha256 ?? '')}</td>
-                      <td>
-                        <span className="mini-chip">{entry.state || '候选'}</span>
+                      <td className="mono" data-label="sha256">{shortSha(entry.sha256 ?? '')}</td>
+                      <td data-label="状态">
+                        <span className="mini-chip">{candidateStateLabel(entry.state)}</span>
                       </td>
                     </tr>
                   )),
@@ -247,7 +265,7 @@ export function DuplicatesPage() {
           <EmptyBox message="还没有别名记录" />
         ) : (
           <div className="table-wrap">
-            <table className="data-table alias-table">
+            <table className="data-table alias-table responsive-table">
               <thead>
                 <tr>
                   <th>别名地址</th>
@@ -261,21 +279,21 @@ export function DuplicatesPage() {
               <tbody>
                 {aliasesPager.pageItems.map((alias) => (
                   <tr key={alias.url} className={alias.state === 'ignored' ? 'row-disabled' : undefined}>
-                    <td className="mono" title={alias.url}>
+                    <td className="mono" title={alias.url} data-label="别名地址">
                       {shortUrl(alias.url)}
                     </td>
-                    <td>
+                    <td data-label="主源">
                       {alias.canonicalTitle}
                       <span className="muted"> · {alias.canonicalSourceId}</span>
                     </td>
-                    <td>{alias.source}</td>
-                    <td>
+                    <td data-label="来源">{alias.source}</td>
+                    <td data-label="状态">
                       <span className={`pill tone-${alias.state === 'active' ? 'ok' : 'idle'}`}>
                         {alias.state === 'active' ? '生效' : '忽略'}
                       </span>
                     </td>
-                    <td>{time(alias.updatedAt)}</td>
-                    <td>
+                    <td data-label="更新时间">{time(alias.updatedAt)}</td>
+                    <td className="row-actions" data-label="">
                       <button
                         className="link-button"
                         disabled={busy === alias.url}

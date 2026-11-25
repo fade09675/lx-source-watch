@@ -377,7 +377,7 @@ export function AdminPage() {
         ) : runs.length === 0 ? (
           <EmptyBox message="暂无运行记录。" />
         ) : (
-          <table className="simple-table">
+          <table className="simple-table responsive-table">
             <thead>
               <tr>
                 <th>完成时间</th>
@@ -390,15 +390,15 @@ export function AdminPage() {
             <tbody>
               {runPager.pageItems.map((run) => (
                 <tr key={run.id}>
-                  <td>{formatDateTime(run.finishedAt)}</td>
-                  <td className="mono">{run.total}</td>
-                  <td className="mono">
+                  <td data-label="完成时间">{formatDateTime(run.finishedAt)}</td>
+                  <td className="mono" data-label="总源数">{run.total}</td>
+                  <td className="mono" data-label="可用 / 部分 / 失效 / 未测">
                     {run.available} / {run.partial} / {run.unavailable} / {run.untested}
                   </td>
-                  <td className="mono">
+                  <td className="mono" data-label="平台">
                     {run.platformsOk}/{run.platformsTested}
                   </td>
-                  <td className="mono muted">{formatDuration(run.durationMs)}</td>
+                  <td className="mono muted" data-label="耗时">{formatDuration(run.durationMs)}</td>
                 </tr>
               ))}
             </tbody>

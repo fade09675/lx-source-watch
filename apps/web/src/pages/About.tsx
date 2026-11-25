@@ -59,7 +59,7 @@ export function AboutPage() {
 
         <SectionCard title="数据与隐私" description="单管理员站点，整站登录">
           <p className="about-copy">
-            站点只保存检测结果、任务记录和代理配置；代理密码使用 AES-GCM 加密，密钥只存在于 Worker Secret。页面不加载第三方统计脚本。
+            站点只保存检测结果、任务记录和代理配置；代理密码使用 AES-GCM 加密，密钥只存在于 Worker Secret。Cloudflare 可能注入匿名访问统计，不使用 Cookie 做广告追踪。
           </p>
         </SectionCard>
       </div>

@@ -1116,10 +1116,14 @@ export function createApi(): Hono<Ctx> {
     const snapshot = await readSnapshot(c.env);
     if (!snapshot) return notReady();
 
+    const cn = c.req.query('cn');
+    if (cn && !['failed', 'ok', 'untested'].includes(cn)) {
+      return c.json({ error: 'bad_request', message: '国内筛选只支持 failed、ok、untested' }, 400);
+    }
     const filtered = filterSnapshot(snapshot, {
       platforms: parseList(c.req.query('platform')),
       statuses: parseList(c.req.query('status')),
-      cn: c.req.query('cn'),
+      cn,
       q: c.req.query('q'),
     });
     const envelope: StatusEnvelope = {

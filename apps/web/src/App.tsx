@@ -9,6 +9,7 @@ import { CandidatesPage } from './pages/Candidates';
 import { DuplicatesPage } from './pages/Duplicates';
 import { LoginPage } from './pages/Login';
 import { ManageSourcesPage } from './pages/ManageSources';
+import { NotFoundPage } from './pages/NotFound';
 import { OverviewPage } from './pages/Overview';
 import { ProxiesPage } from './pages/Proxies';
 import { ProxyTestsPage } from './pages/ProxyTests';
@@ -25,7 +26,19 @@ function RequireAuth({ children }: { children: ReactNode }) {
   if (status === 'loading') {
     return (
       <div className="boot">
-        <span className="spinner" /> 正在验证登录状态…
+        <div className="boot-panel">
+          <div className="boot-brand">
+            <span className="brand-mark">LX</span>
+            <strong>LX 音源监测</strong>
+          </div>
+          <div className="boot-skeleton" aria-hidden="true">
+            <span className="boot-line w40" />
+            <span className="boot-line w70" />
+            <span className="boot-block" />
+            <span className="boot-line w55" />
+          </div>
+          <p className="muted small">正在验证登录状态…</p>
+        </div>
       </div>
     );
   }
@@ -63,8 +76,8 @@ export function App() {
               <Route path="/admin/proxies" element={<ProxiesPage />} />
               <Route path="/admin/proxy-tests" element={<ProxyTestsPage />} />
               <Route path="/about" element={<AboutPage />} />
+              <Route path="*" element={<NotFoundPage />} />
             </Route>
-            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </BrowserRouter>
       </AuthProvider>

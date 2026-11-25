@@ -353,7 +353,7 @@ export function ProxiesPage() {
 
         {subs && subs.length > 0 && (
           <div className="table-wrap">
-            <table className="data-table">
+            <table className="data-table responsive-table proxy-sub-table">
               <thead>
                 <tr>
                   <th>订阅名称</th>
@@ -366,7 +366,7 @@ export function ProxiesPage() {
               <tbody>
                 {subPager.pageItems.map((item) => (
                   <tr key={item.id}>
-                    <td>
+                    <td data-label="订阅">
                       {editingId === item.id ? (
                         <div className="row-actions">
                           <input
@@ -397,20 +397,22 @@ export function ProxiesPage() {
                         </div>
                       )}
                     </td>
-                    <td className="small">{item.nodeCount}</td>
-                    <td className="small muted">{shortTime(item.lastFetchAt)}</td>
-                    <td className="small">
-                      <span className={`pill ${item.enabled ? 'pill-ok' : 'pill-idle'}`}>{item.enabled ? '启用' : '停用'}</span>
-                      <div className="muted" title={item.lastStatus}>
-                        {item.lastStatus.length > 34 ? `${item.lastStatus.slice(0, 34)}…` : item.lastStatus}
-                      </div>
-                      {fetchFallbackId === item.id ? (
-                        <div className="small" style={{ color: 'var(--bad)' }}>
-                          Worker 返回 403，请用 Actions 拉取
+                    <td className="small" data-label="节点">{item.nodeCount}</td>
+                    <td className="small muted" data-label="最近拉取">{shortTime(item.lastFetchAt)}</td>
+                    <td className="small" data-label="状态">
+                      <div className="cell-stack">
+                        <span className={`pill ${item.enabled ? 'pill-ok' : 'pill-idle'}`}>{item.enabled ? '启用' : '停用'}</span>
+                        <div className="muted" title={item.lastStatus}>
+                          {item.lastStatus.length > 34 ? `${item.lastStatus.slice(0, 34)}…` : item.lastStatus}
                         </div>
-                      ) : null}
+                        {fetchFallbackId === item.id ? (
+                          <div className="small" style={{ color: 'var(--bad)' }}>
+                            Worker 返回 403，请用 Actions 拉取
+                          </div>
+                        ) : null}
+                      </div>
                     </td>
-                    <td className="row-actions">
+                    <td className="row-actions" data-label="">
                       {deletingId === item.id ? (
                         <>
                           <button type="button" className="ghost-button danger" disabled={busy} onClick={() => void removeSub(item, 'delete_all')}>
@@ -631,7 +633,7 @@ export function ProxiesPage() {
           {items.length === 0 && <p className="muted">还没有节点。导入订阅后，Actions 的 cn job 会自动测活并回写结果。</p>}
           {visible.length > 0 && (
             <div className="table-wrap">
-              <table className="data-table">
+              <table className="data-table responsive-table proxy-node-table">
                 <thead>
                   <tr>
                     <th>名称 / 来源</th>
@@ -646,35 +648,42 @@ export function ProxiesPage() {
                 <tbody>
                   {nodePager.pageItems.map((item) => (
                     <tr key={item.id}>
-                      <td>
-                        <div>{item.name}</div>
-                        <div className="small muted">
-                          {item.subscriptionName ?? '手动'}
-                          {item.kernelOnly && <span className="pill pill-idle"> 内核</span>}
+                      <td data-label="名称">
+                        <div className="cell-stack cell-stack-left">
+                          <div>{item.name}</div>
+                          <div className="small muted">
+                            {item.subscriptionName ?? '手动'}
+                            {item.kernelOnly && <span className="pill pill-idle"> 内核</span>}
+                          </div>
                         </div>
                       </td>
-                      <td className="mono small">
+                      <td className="mono small" data-label="地址">
                         {item.protocol}://{item.host}:{item.port}
                       </td>
-                      <td className="small muted">{item.lastOkAt ? shortTime(item.lastOkAt) : item.lastError ?? '未测'}</td>
-                      <td className="small mono">
-                        {item.egressIp ?? '—'}
-                        {(item.country || item.asn) && (
-                          <div className="muted">
-                            {[item.country, item.asn].filter(Boolean).join(' · ')}
-                          </div>
-                        )}
+                      <td className="small muted" data-label="最近测活">{item.lastOkAt ? shortTime(item.lastOkAt) : item.lastError ?? '未测'}</td>
+                      <td className="small mono" data-label="出口">
+                        <div className="cell-stack">
+                          <div>{item.egressIp ?? '—'}</div>
+                          {(item.country || item.asn) && (
+                            <div className="muted">
+                              {[item.country, item.asn].filter(Boolean).join(' · ')}
+                            </div>
+                          )}
+                        </div>
                       </td>
-                      <td className="small muted">
+                      <td className="small muted" data-label="成功率">
                         {item.successCount + item.failCount > 0
                           ? `${item.successCount}/${item.successCount + item.failCount}`
                           : '—'}
                       </td>
-                      <td>
-                        <span className={`pill ${item.enabled ? 'pill-ok' : 'pill-idle'}`}>{item.enabled ? '启用' : '停用'}</span>
-                        {item.lastLatencyMs ? <span className="small muted"> {item.lastLatencyMs}ms</span> : null}
+                      <td data-label="状态">
+                        <div className="cell-stack">
+                          <span className={`pill ${item.enabled ? 'pill-ok' : 'pill-idle'}`}>{item.enabled ? '已启用' : '停用'}</span>
+                          {item.lastLatencyMs ? <span className="small muted"> {item.lastLatencyMs}ms</span> : null}
+                          {item.enabled && !item.lastOkAt ? <span className="small text-bad"> 最近未测活成功</span> : null}
+                        </div>
                       </td>
-                      <td className="row-actions">
+                      <td className="row-actions" data-label="">
                         <button
                           type="button"
                           className="ghost-button"

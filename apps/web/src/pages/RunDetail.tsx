@@ -12,9 +12,10 @@ import {
   type SourceStatus,
 } from '@lx/shared';
 import { ApiError, api, type RunDetailResult, type RunEndpointRow } from '../api';
-import { ErrorBox, Spinner } from '../components/Feedback';
+import { Spinner } from '../components/Feedback';
 import { Pagination, useClientPager } from '../components/Pagination';
 import { RunLog } from '../components/RunLog';
+import { EmptyState, PageHeader, SectionCard } from '../components/ui';
 
 function errorLabel(kind: string | null): string {
   if (!kind) return '未知';
@@ -81,8 +82,24 @@ export function RunDetailPage() {
   if (error) {
     return (
       <div className="page">
-        <ErrorBox message={error} />
-        <Link to="/runs">← 返回运行与日志</Link>
+        <PageHeader
+          eyebrow="RUN DETAIL"
+          title="无法打开运行记录"
+          description="这条运行可能已被清理，或者地址不正确。"
+          actions={
+            <Link className="primary-button" to="/runs">
+              返回运行与日志
+            </Link>
+          }
+        />
+        <SectionCard>
+          <EmptyState
+            icon="alert"
+            title="找不到这条运行记录"
+            description={error}
+            action={<Link to="/runs">返回运行与日志</Link>}
+          />
+        </SectionCard>
       </div>
     );
   }
@@ -291,7 +308,7 @@ export function RunDetailPage() {
       <section>
         <div className="panel-head">
           <h2>逐源结果</h2>
-          <span className="muted">点开源名可看历史</span>
+          <span className="muted">点开源名可看该源详情</span>
         </div>
         <div className="run-source-list">
           {sourcePager.pageItems.map((source) => {

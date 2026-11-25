@@ -69,7 +69,7 @@ function routeMeta(pathname: string): { group: string; label: string } {
   if (pathname.startsWith('/runs/')) return { group: '运行', label: '运行详情' };
   const exact = ROUTE_LABELS.find((item) => item.path === pathname);
   if (exact) return exact;
-  return { group: '监测', label: '工作台' };
+  return { group: '系统', label: '页面不存在' };
 }
 
 export function Layout() {

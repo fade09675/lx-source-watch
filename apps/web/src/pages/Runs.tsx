@@ -233,7 +233,7 @@ export function RunsPage() {
             <p className="muted">没有符合条件的运行记录。</p>
           ) : (
             <div className="table-wrap">
-              <table className="data-table run-table">
+              <table className="data-table run-table responsive-table">
                 <thead>
                   <tr>
                     <th>时间</th>
@@ -253,29 +253,33 @@ export function RunsPage() {
                     const status = runTone(run);
                     return (
                       <tr key={run.id}>
-                        <td>
-                          <div>{formatDateTime(run.finishedAt)}</div>
-                          <span className="muted small">{formatRelative(run.finishedAt)}</span>
+                        <td data-label="时间">
+                          <div className="cell-stack">
+                            <div>{formatDateTime(run.finishedAt)}</div>
+                            <span className="muted small">{formatRelative(run.finishedAt)}</span>
+                          </div>
                         </td>
-                        <td>
+                        <td data-label="状态">
                           <span className={`pill tone-${status.tone}`}>{status.label}</span>
                         </td>
-                        <td>{triggerLabel(run.trigger)}</td>
-                        <td className="mono">
+                        <td data-label="触发">{triggerLabel(run.trigger)}</td>
+                        <td className="mono" data-label="源">
                           <span className="text-ok">{run.available}</span>/{run.total}
                         </td>
-                        <td className="mono">
+                        <td className="mono" data-label="平台">
                           {run.platformsOk}/{run.platformsTested}
                         </td>
-                        <td className="mono">
+                        <td className="mono" data-label="接入点">
                           {countPair(run.counts?.endpointsOk, run.counts?.endpointsTotal)}
                         </td>
-                        <td className="mono">{countPair(run.counts?.cnOk, run.counts?.cnTested)}</td>
-                        <td className="mono">
+                        <td className="mono" data-label="国内">
+                          {countPair(run.counts?.cnOk, run.counts?.cnTested)}
+                        </td>
+                        <td className="mono" data-label="候选">
                           {run.counts ? `+${run.counts.candidatesAdded ?? 0}/${run.counts.candidatesPromoted ?? 0}` : '—'}
                         </td>
-                        <td className="mono">{formatDuration(run.durationMs)}</td>
-                        <td>
+                        <td className="mono" data-label="耗时">{formatDuration(run.durationMs)}</td>
+                        <td className="row-actions" data-label="">
                           <Link to={`/runs/${run.id}`}>详情</Link>
                         </td>
                       </tr>

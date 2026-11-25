@@ -717,8 +717,8 @@ export function WorkbenchPage() {
                       </span>
                       <span className={`schedule-chip-last ${schedule.state?.lastOk === false ? 'bad' : ''}`}>
                         {schedule.state?.lastAt
-                          ? `上次 ${schedule.state.lastOk === false ? '失败' : '成功'} · ${formatRelative(schedule.state.lastAt)}`
-                          : '上次 未运行'}
+                          ? `上次定时 ${schedule.state.lastOk === false ? '失败' : '成功'} · ${formatRelative(schedule.state.lastAt)}`
+                          : '上次定时 未运行'}
                       </span>
                     </div>
                     <button

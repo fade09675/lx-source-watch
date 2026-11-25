@@ -121,7 +121,7 @@ function JobStatus({ title, job }: { title: string; job?: { intervalHours: numbe
     <div className="schedule-item">
       <strong>{title}</strong>
       <span>每 {job.intervalHours} 小时</span>
-      <span>下次：{formatWhen(job.nextAt)}</span>
+      <span>{job.enabled === false ? '已关闭，未安排下次运行' : `下次：${formatWhen(job.nextAt)}`}</span>
       <span className={job.enabled === false ? 'text-bad' : 'text-ok'}>
         {job.enabled === false ? '已关闭' : job.lastOk === false ? `上次失败：${job.lastError ?? '未知原因'}` : '正常'}
       </span>

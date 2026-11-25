@@ -10,9 +10,10 @@ import {
   type SourceDetailResponse,
 } from '@lx/shared';
 import { ApiError, api } from '../api';
-import { EmptyBox, ErrorBox, Spinner } from '../components/Feedback';
+import { EmptyBox, Spinner } from '../components/Feedback';
 import { Icon } from '../components/Icon';
 import { StatusBadge } from '../components/StatusBadge';
+import { EmptyState, PageHeader, SectionCard } from '../components/ui';
 import { hostOf, pickRecommended } from '../lib/endpoints';
 
 type DetailTab = 'overview' | 'platforms' | 'endpoints' | 'history';
@@ -60,8 +61,37 @@ export function SourceDetailPage() {
     }
   }
 
-  if (error) return <ErrorBox message={error} />;
-  if (!data) return <Spinner label="正在加载音源详情…" />;
+  if (error) {
+    return (
+      <div className="page">
+        <PageHeader
+          eyebrow="SOURCE"
+          title="无法打开音源详情"
+          description="这个音源可能已被删除、停用，或者地址不正确。"
+          actions={
+            <Link className="primary-button" to="/sources">
+              返回音源总览
+            </Link>
+          }
+        />
+        <SectionCard>
+          <EmptyState
+            icon="alert"
+            title="找不到这个音源"
+            description={error}
+            action={<Link to="/sources">返回音源总览</Link>}
+          />
+        </SectionCard>
+      </div>
+    );
+  }
+  if (!data) {
+    return (
+      <div className="page">
+        <Spinner label="正在加载音源详情…" />
+      </div>
+    );
+  }
 
   const { source, history, daily, platformDaily } = data;
   const platformKeys = source.platforms.filter((item) => item.declared).map((item) => item.key);
