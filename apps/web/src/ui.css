@@ -1027,6 +1027,14 @@ body {
     grid-template-columns: 1fr;
   }
 
+  .ui-stat-grid-compact {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ui-stat-grid-compact .ui-stat-card {
+    min-height: 78px;
+  }
+
   .data-table {
     font-size: 12px;
   }
@@ -3470,5 +3478,176 @@ body {
   .endpoint-url,
   .endpoint-error {
     max-width: 180px;
+  }
+}
+
+/* 行内文字操作，替代一排小方块按钮 */
+.row-link {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 4px 2px;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  cursor: pointer;
+  border-radius: 5px;
+}
+
+.row-link:hover {
+  background: var(--accent-soft);
+}
+
+.row-link:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+  background: transparent;
+}
+
+.row-link.danger {
+  color: var(--bad);
+}
+
+.row-link.danger:hover {
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
+}
+
+.row-link.muted-action {
+  color: var(--muted);
+}
+
+.admin-source-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.candidate-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* 候选页：筛选与状态切换收进同一行，避免多个白框叠加 */
+.candidate-toolbar {
+  padding: 0 0 12px;
+  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 2px;
+}
+
+.candidate-search {
+  flex: 1 1 220px;
+  max-width: 340px;
+  height: 34px;
+}
+
+.candidate-repo {
+  width: 190px;
+  height: 34px;
+}
+
+.candidate-state-tabs {
+  margin-left: auto;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.candidate-state-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.candidate-state-tabs .segmented-item {
+  white-space: nowrap;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.segmented-count {
+  margin-left: 5px;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 500;
+}
+
+.segmented-item.active .segmented-count {
+  color: var(--accent);
+}
+
+/* 备用导入默认是页内折叠条，不再单独占一张大卡片 */
+.fold-panel-inline {
+  border: 1px dashed var(--border);
+  background: transparent;
+  margin-bottom: 4px;
+}
+
+details.panel > summary.panel-head {
+  cursor: pointer;
+  list-style: none;
+}
+
+details.panel > summary.panel-head::-webkit-details-marker {
+  display: none;
+}
+
+details.panel > summary.panel-head::after {
+  content: '展开';
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+details.panel[open] > summary.panel-head::after {
+  content: '收起';
+}
+
+.fold-panel-inline > summary {
+  padding: 9px 12px;
+}
+
+.fold-panel-inline .fold-body {
+  border-top: 1px dashed var(--border);
+  padding-top: 12px;
+}
+
+/* 音源管理行：指标和操作在窄屏下换行 */
+@media (max-width: 900px) {
+  .admin-source-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .admin-source-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    justify-content: flex-start;
+    text-align: left;
+    gap: 14px;
+  }
+
+  .admin-source-actions {
+    justify-content: flex-start;
+    padding-top: 2px;
+  }
+
+  .admin-source-links-toggle {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  .candidate-repo {
+    width: 100%;
+  }
+
+  .candidate-state-tabs {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .candidate-toolbar {
+    align-items: stretch;
   }
 }

@@ -166,36 +166,28 @@ export function ManageSourcesPage() {
 
       {message && <div className="notice">{message}</div>}
 
-      <div className="admin-summary">
-        <span>
-          <strong>{data.sources.length}</strong> 个音源
-        </span>
-        <span>
-          <strong>{enabled}</strong> 个启用
-        </span>
-        <span>
-          <strong>{data.sources.length - enabled}</strong> 个停用
-        </span>
-      </div>
-
-      <details className="fold-panel">
-        <summary>
-          <span>
-            <Icon name="import" size={15} />
-            备用线路导入
-          </span>
-          <span className="muted small">按标题/作者自动匹配，或手动指定音源，追加到 mirrors</span>
-        </summary>
-        <div className="fold-body">
-          <BackupImportPanel sources={data.sources} onDone={load} />
-        </div>
-      </details>
-
       <SectionCard
         title="音源清单"
         description="主地址 + 自定义镜像；测试只触发该音源的单独探测"
-        actions={<span className="muted small">共 {data.sources.length} 个</span>}
+        actions={
+          <span className="muted small">
+            共 {data.sources.length} 个 · 启用 {enabled} · 停用 {data.sources.length - enabled}
+          </span>
+        }
       >
+        <details className="fold-panel fold-panel-inline">
+          <summary>
+            <span>
+              <Icon name="import" size={15} />
+              备用线路导入
+            </span>
+            <span className="muted small">按标题/作者自动匹配，或手动指定音源，追加到 mirrors</span>
+          </summary>
+          <div className="fold-body">
+            <BackupImportPanel sources={data.sources} onDone={load} />
+          </div>
+        </details>
+
         <div className="admin-source-list">
           {sourcePager.pageItems.map((source) => {
             const linksOpen = openLinks === source.id;
@@ -239,16 +231,16 @@ export function ManageSourcesPage() {
                 </div>
 
                 <div className="admin-source-actions">
-                  <button className="ghost-button" onClick={() => startEdit(source)} disabled={busy}>
+                  <button className="row-link" onClick={() => startEdit(source)} disabled={busy}>
                     编辑
                   </button>
-                  <button className="ghost-button" onClick={() => void test(source)} disabled={busy || !source.enabled}>
+                  <button className="row-link" onClick={() => void test(source)} disabled={busy || !source.enabled}>
                     测试
                   </button>
-                  <button className="ghost-button" onClick={() => void toggle(source)} disabled={busy}>
+                  <button className="row-link muted-action" onClick={() => void toggle(source)} disabled={busy}>
                     {source.enabled ? '停用' : '启用'}
                   </button>
-                  <button className="ghost-button danger" onClick={() => void remove(source)} disabled={busy}>
+                  <button className="row-link danger" onClick={() => void remove(source)} disabled={busy}>
                     删除
                   </button>
                 </div>
@@ -267,7 +259,7 @@ export function ManageSourcesPage() {
                           {link.primary ? ' · 推荐' : ''}
                         </span>
                         <code className="mono">{link.url}</code>
-                        <button className="ghost-button" onClick={() => void copy(link.url)}>
+                        <button className="row-link" onClick={() => void copy(link.url)}>
                           复制
                         </button>
                       </div>
