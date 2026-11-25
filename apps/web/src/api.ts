@@ -316,7 +316,40 @@ export interface WorkflowRunsResult {
 /* ------------------------------- tasks ---------------------------------- */
 
 export type TaskType = 'probe' | 'discovery' | 'source-test' | 'proxy-test' | 'proxy-fetch-sub';
-export type TaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+export type TaskStatus = 'queued' | 'running' | 'succeeded' | 'partial' | 'failed' | 'cancelled';
+export type TaskSource = 'manual' | 'schedule' | 'api' | 'retry' | 'local';
+
+export interface TaskResultSource {
+  id: string;
+  title: string;
+  status: string;
+  error?: string;
+}
+
+export interface TaskResultPlatform {
+  sourceId: string;
+  name: string;
+  errorKind?: string;
+  error?: string;
+}
+
+export interface TaskResultSubscription {
+  id?: string;
+  name: string;
+  total: number;
+  ok: number;
+  fail: number;
+}
+
+export interface TaskResult {
+  kind: TaskType;
+  summary: string;
+  counts: Record<string, number>;
+  failedSources?: TaskResultSource[];
+  failedPlatforms?: TaskResultPlatform[];
+  subscriptions?: TaskResultSubscription[];
+  warnings?: string[];
+}
 
 export interface TaskView {
   id: string;
@@ -343,6 +376,7 @@ export interface TaskView {
   startedAt?: string;
   finishedAt?: string;
   error?: string;
+  result?: TaskResult;
 }
 
 export interface TaskStateSnapshot {
@@ -354,9 +388,31 @@ export interface TaskStateSnapshot {
 
 export interface TaskListResult {
   tasks: TaskView[];
+  total: number;
+  limit: number;
+  offset: number;
   counts: Record<TaskStatus, number>;
   state: TaskStateSnapshot;
   labels: { types: Record<string, string>; statuses: Record<string, string> };
+}
+
+export interface AdminActivityView {
+  id: string;
+  at: string;
+  method: string;
+  path: string;
+  action: string;
+  target: string;
+  ok: boolean;
+  status: number;
+  message: string;
+}
+
+export interface ActivityListResult {
+  items: AdminActivityView[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 export interface CreateTaskResult {
@@ -778,8 +834,18 @@ export const api = {
     }),
   workflowRuns: () => request<RunStatusResult>('/api/admin/runs'),
   workflows: () => request<WorkflowRunsResult>('/api/admin/workflows'),
-  tasks: (status?: TaskStatus, limit = 50) =>
-    request<TaskListResult>(`/api/admin/tasks?limit=${limit}${status ? `&status=${status}` : ''}`),
+  tasks: (query: { status?: TaskStatus | 'finished'; type?: TaskType; source?: TaskSource; q?: string; limit?: number; offset?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (query.status) params.set('status', query.status);
+    if (query.type) params.set('type', query.type);
+    if (query.source) params.set('source', query.source);
+    if (query.q) params.set('q', query.q);
+    params.set('limit', String(query.limit ?? 20));
+    params.set('offset', String(query.offset ?? 0));
+    return request<TaskListResult>(`/api/admin/tasks?${params.toString()}`);
+  },
+  activity: (limit = 20, offset = 0) =>
+    request<ActivityListResult>(`/api/admin/activity?limit=${limit}&offset=${offset}`),
   createTask: (input: { type: TaskType; payload?: TaskView['payload']; priority?: number }) =>
     request<CreateTaskResult>('/api/admin/tasks', { method: 'POST', body: JSON.stringify(input) }),
   cancelTask: (id: string) =>

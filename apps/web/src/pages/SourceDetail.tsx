@@ -7,6 +7,7 @@ import {
   formatMs,
   platformMeta,
   platformTone,
+  type EndpointRow,
   type SourceDetailResponse,
 } from '@lx/shared';
 import { ApiError, api } from '../api';
@@ -17,7 +18,8 @@ export function SourceDetailPage() {
   const { id = '' } = useParams();
   const [data, setData] = useState<SourceDetailResponse | null>(null);
   const [error, setError] = useState('');
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState('');
+  const [copyTarget, setCopyTarget] = useState('recommended');
 
   useEffect(() => {
     let cancelled = false;
@@ -36,14 +38,18 @@ export function SourceDetailPage() {
     };
   }, [id]);
 
-  async function copyUrl() {
-    if (!data) return;
+  const endpoints = data?.endpoints ?? [];
+  const recommended = pickRecommended(endpoints, data?.source.url ?? '');
+  const copyUrl = copyTarget === 'recommended' ? recommended.url : (endpoints.find((item) => item.url === copyTarget)?.url ?? data?.source.url ?? '');
+
+  async function copyLink() {
+    if (!copyUrl) return;
     try {
-      await navigator.clipboard.writeText(data.source.url);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
+      await navigator.clipboard.writeText(copyUrl);
+      setCopied(copyTarget === 'recommended' ? '已复制推荐地址' : '已复制所选地址');
+      window.setTimeout(() => setCopied(''), 1800);
     } catch {
-      setCopied(false);
+      setCopied('');
     }
   }
 
@@ -73,12 +79,24 @@ export function SourceDetailPage() {
         </div>
         <div className="detail-actions">
           <StatusBadge status={source.status} />
-          <button type="button" className="primary-button" onClick={() => void copyUrl()}>
-            {copied ? '已复制' : '复制导入链接'}
+          <label className="field compact">
+            <span>导入地址</span>
+            <select className="select" value={copyTarget} onChange={(event) => setCopyTarget(event.target.value)}>
+              <option value="recommended">推荐：{recommended.kind}</option>
+              {endpoints.map((endpoint, index) => (
+                <option key={`${endpoint.url}-${index}`} value={endpoint.url}>
+                  {endpoint.role === 'primary' ? '主地址' : `镜像（${hostOf(endpoint.url)}）`}
+                  {endpoint.ok ? ' · 可用' : ' · 失败'}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="button" className="primary-button" onClick={() => void copyLink()}>
+            {copied || '复制导入链接'}
           </button>
           {source.homepage && (
             <a className="ghost-button" href={source.homepage} target="_blank" rel="noreferrer">
-              项目主页
+              脚本主页
             </a>
           )}
         </div>
@@ -91,6 +109,9 @@ export function SourceDetailPage() {
         <MiniStat label="本轮耗时" value={formatMs(source.durationMs)} />
         <MiniStat label="检测时间" value={formatDateTime(source.checkedAt)} />
       </div>
+      {cnPlatforms.length === 0 && (
+        <p className="muted small">国内补测只覆盖海外失败的播放地址；这里显示“未测”表示本轮没有需要补测的平台，不代表国内不可用。</p>
+      )}
 
       {!source.initOk && (
         <div className="error-box">
@@ -241,4 +262,27 @@ function MiniStat({ label, value }: { label: string; value: string | number }) {
       <span className="stat-label">{label}</span>
     </div>
   );
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
+function pickRecommended(endpoints: EndpointRow[], fallback: string): { url: string; kind: string } {
+  const primary = endpoints.find((item) => item.role === 'primary');
+  if (primary?.ok) return { url: primary.url, kind: '主地址' };
+  const mirrors = endpoints
+    .filter((item) => item.role === 'candidate' && item.ok)
+    .sort((a, b) => {
+      const synced = Number(b.versionState === 'synced') - Number(a.versionState === 'synced');
+      if (synced !== 0) return synced;
+      return a.ms - b.ms;
+    });
+  if (mirrors[0]) return { url: mirrors[0].url, kind: `镜像 ${hostOf(mirrors[0].url)}` };
+  if (primary) return { url: primary.url, kind: '主地址（当前不可用）' };
+  return { url: fallback, kind: '源地址' };
 }

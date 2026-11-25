@@ -67,6 +67,8 @@ import { markCandidateDuplicate, mergeIntoCanonical } from './mergeSources';
 import { listAliases, setAliasState } from './aliases';
 import {
   cancelTask,
+  countTasks,
+  countTasksFiltered,
   createTask,
   dispatchNext,
   getTask,
@@ -77,9 +79,11 @@ import {
   TASK_STATUS_LABEL,
   TASK_TYPE_LABEL,
   type TaskPayload,
+  type TaskSource,
   type TaskStatus,
   type TaskType,
 } from './tasks';
+import { listAdminActivity } from './activity';
 
 type Ctx = { Bindings: Env };
 
@@ -865,29 +869,66 @@ export function createApi(): Hono<Ctx> {
   });
 
   const TASK_TYPES: TaskType[] = ['probe', 'discovery', 'source-test', 'proxy-test', 'proxy-fetch-sub'];
-  const TASK_STATUSES: TaskStatus[] = ['queued', 'running', 'succeeded', 'failed', 'cancelled'];
+  const TASK_STATUSES: TaskStatus[] = ['queued', 'running', 'succeeded', 'partial', 'failed', 'cancelled'];
+  const TASK_SOURCES: TaskSource[] = ['manual', 'schedule', 'api', 'retry', 'local'];
+  const FINISHED_STATUSES: TaskStatus[] = ['succeeded', 'partial', 'failed', 'cancelled'];
 
   api.get('/admin/tasks', async (c) => {
     const status = c.req.query('status');
     const type = c.req.query('type');
-    if (status && !TASK_STATUSES.includes(status as TaskStatus)) {
+    const source = c.req.query('source');
+    const q = c.req.query('q');
+    if (status && status !== 'finished' && !TASK_STATUSES.includes(status as TaskStatus)) {
       return Response.json({ error: 'bad_status', message: `未知任务状态：${status}` }, { status: 400 });
     }
     if (type && !TASK_TYPES.includes(type as TaskType)) {
       return Response.json({ error: 'bad_type', message: `未知任务类型：${type}` }, { status: 400 });
     }
-    const limit = clampInt(c.req.query('limit'), 50, 1, 200);
-    const [tasks, state] = await Promise.all([
-      listTasks(c.env.DB, { status: status as TaskStatus | undefined, type: type as TaskType | undefined, limit }),
+    if (source && !TASK_SOURCES.includes(source as TaskSource)) {
+      return Response.json({ error: 'bad_source', message: `未知任务来源：${source}` }, { status: 400 });
+    }
+    const limit = clampInt(c.req.query('limit'), 20, 0, 100);
+    const offset = clampInt(c.req.query('offset'), 0, 0, 100_000);
+    const filter = {
+      status: status && status !== 'finished' ? (status as TaskStatus) : undefined,
+      statuses: status === 'finished' ? FINISHED_STATUSES : undefined,
+      type: type as TaskType | undefined,
+      source: source as TaskSource | undefined,
+      q: q?.slice(0, 100),
+      limit,
+      offset,
+    };
+    const [tasks, total, state, counts] = await Promise.all([
+      listTasks(c.env.DB, filter),
+      countTasksFiltered(c.env.DB, filter),
       getTaskState(c.env.DB),
+      countTasks(c.env.DB),
     ]);
     return Response.json(
       {
         tasks,
-        counts: state.counts,
-        state,
+        total,
+        limit,
+        offset,
+        counts,
+        state: { ...state, counts },
         labels: { types: TASK_TYPE_LABEL, statuses: TASK_STATUS_LABEL },
       },
+      { headers: { 'cache-control': CACHE_PRIVATE } },
+    );
+  });
+
+  api.get('/admin/activity', async (c) => {
+    const limit = clampInt(c.req.query('limit'), 20, 0, 100);
+    const offset = clampInt(c.req.query('offset'), 0, 0, 100_000);
+    const okRaw = c.req.query('ok');
+    const result = await listAdminActivity(c.env.DB, {
+      limit,
+      offset,
+      ok: okRaw === undefined ? undefined : okRaw === '1' || okRaw === 'true',
+    });
+    return Response.json(
+      { items: result.items, total: result.total, limit, offset },
       { headers: { 'cache-control': CACHE_PRIVATE } },
     );
   });

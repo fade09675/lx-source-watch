@@ -50,22 +50,24 @@
 ### 5.1 工作台 `/`
 
 - 额度卡片：KV 写、D1 写、Actions 运行次数与阈值。
-- 任务中心：当前/排队/最近任务，可手动触发探测、测活、发现。
-- 最近运行与运行日志摘要。
+- 任务中心：正在运行、排队中、最近任务、操作记录四区；最近任务按类型筛选并显示结果摘要、失败源/失败平台/订阅统计，默认每页 10 条（10/20/50/全部）。
+- 所有后台写操作记录到操作记录（时间、操作、目标、成功/失败、说明）。
+- 可手动触发探测、测活、发现；顶部额度卡片与定时计划。
 
 ### 5.2 音源总览 `/sources`
 
 - 统计卡：源总数、可用/部分/失效/未测、平台通过/已测、国内可达平台数、最近更新时间。
 - 源行：名称、分类、版本、作者、状态、通过数/已测数、国内可达数、接入点数、最近检测时间、镜像落后标记。
 - 筛选：平台、状态、分类、关键词、只看国内失败；平台矩阵每格显示状态与延迟，悬浮显示失败原因。
-- 操作：详情、复制导入链接。
+- 操作：详情、复制导入链接（默认推荐地址，可下拉选择主地址或任一镜像）。
+- 国内可达卡：未测时提示“海外全通过的平台不再补测，未测不等于不可用”。
 
 ### 5.3 源详情 `/s/:id`
 
 - 元数据：名称、版本、作者、描述、主页、脚本地址、镜像、脚本 SHA、大小、分类、托管方式。
 - 平台表：平台、状态、音质、取链耗时、首字节、总耗时、HTTP 状态、content-type、URL host、失败原因、国内可达。
 - 接入点表：主/镜像、下载状态、sha、版本状态（同版本/落后/未知）、耗时、国内可达。
-- 历史与日汇总；复制导入链接/原始地址。
+- 历史与日汇总；复制导入链接（默认推荐地址，可切换主地址/镜像）、原始地址、脚本主页。
 
 ### 5.4 候选 `/candidates`
 
@@ -122,7 +124,8 @@
 - `endpointRows`：逐接入点下载结果与 cn。
 - `platform_results`：逐平台结果。
 - `source_daily/platform_daily`：日汇总，供趋势图。
-- `tasks/task_locks/task_state`：单并发任务队列、锁、调度的最近时间。
+- `tasks/task_locks/task_state`：单并发任务队列、锁、调度的最近时间；`tasks.result` 存类型化结果摘要（源/平台/接入点、失败源、失败平台、订阅统计、警告）。
+- `admin_activity`：后台写操作记录（时间、方法、路径、操作名、目标、状态、说明）。
 - `proxy_test_runs/proxy_test_results`：测活轮次与逐节点结果。
 - `source_registry/source_aliases`：音源注册表与重复源别名。
 
@@ -157,6 +160,8 @@
 | GET | `/api/runner/proxies` | Actions 拉取代理池（Bearer） |
 | POST | `/api/runner/proxy-subscription-result` | Actions 回传订阅拉取结果（Bearer） |
 | POST | `/api/admin/runs/purge` | 运行记录清理预览/执行 |
+| GET | `/api/admin/tasks` | 任务列表；支持 status（含 finished）/type/source/q/limit/offset |
+| GET | `/api/admin/activity` | 后台操作记录；支持 limit/offset/ok |
 
 缓存：`/api/status` 允许短缓存；测活详情 `private, max-age=15`；上报不缓存。
 
@@ -185,7 +190,7 @@
 
 - Worker cron `*/5 * * * *` 每 5 分钟检查一次；到点创建任务并派发对应 GitHub workflow。
 - 单并发：同一时间只跑一个任务，其余排队；45 分钟看门狗把超时任务置失败。
-- 任务类型：`probe`、`discovery`、`proxy-test`、`proxy-fetch-sub`。
+- 任务类型：`probe`、`source-test`、`discovery`、`proxy-test`、`proxy-fetch-sub`；任务结果写 `tasks.result`，含摘要、计数、失败源/失败平台、按订阅统计、警告。
 - 手动触发时间参与下次到期计算；派发失败写入 runs/tasks 并在工作台显示。
 - 额度达到护栏阈值时暂停派发，恢复后继续。
 
@@ -214,7 +219,7 @@
 - Cloudflare：Worker + KV + D1 + 自定义域；详见 `docs/DEPLOY.md`。
 - GitHub Actions secrets：`CF_API_TOKEN`、`INGEST_SECRET`、`INGEST_URL`、`RUNNER_TOKEN`。
 - Worker secrets：`INGEST_SECRET`、`RUNNER_TOKEN`、`PROXY_ENC_KEY`、`CF_ANALYTICS_TOKEN`、`GH_DISPATCH_TOKEN`、`ADMIN_PASSWORD_HASH`、`SESSION_SECRET`。
-- 迁移：`0001`–`0018`，新增迁移必须同时更新部署手册。
+- 迁移：`0001`–`0019`，新增迁移必须同时更新部署手册。
 
 ## 13. 阶段验收
 

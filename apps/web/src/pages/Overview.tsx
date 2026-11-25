@@ -161,6 +161,7 @@ export function OverviewPage() {
                     ? 'warn'
                     : 'bad'
             }
+            hint={cnStats.tested === 0 ? '海外全通过的平台不再补测，未测不等于不可用' : '经国内代理补测可达 / 已补测平台'}
           />
         </div>
       )}
@@ -302,11 +303,22 @@ export function OverviewPage() {
   }
 }
 
-function StatCard({ label, value, tone }: { label: string; value: number | string; tone: 'ok' | 'warn' | 'bad' | 'idle' }) {
+function StatCard({
+  label,
+  value,
+  tone,
+  hint,
+}: {
+  label: string;
+  value: number | string;
+  tone: 'ok' | 'warn' | 'bad' | 'idle';
+  hint?: string;
+}) {
   return (
     <div className={`stat-card tone-${tone}`}>
       <span className="stat-value">{value}</span>
       <span className="stat-label">{label}</span>
+      {hint && <span className="stat-hint">{hint}</span>}
     </div>
   );
 }

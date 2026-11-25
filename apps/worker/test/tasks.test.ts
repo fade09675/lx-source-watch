@@ -114,6 +114,13 @@ describe('tasks 纯函数', () => {
 
   it('类型与状态都有中文标签', () => {
     expect(Object.keys(TASK_TYPE_LABEL).sort()).toEqual(['discovery', 'probe', 'proxy-fetch-sub', 'proxy-test', 'source-test']);
-    expect(Object.keys(TASK_STATUS_LABEL).sort()).toEqual(['cancelled', 'failed', 'queued', 'running', 'succeeded']);
+    expect(Object.keys(TASK_STATUS_LABEL).sort()).toEqual([
+      'cancelled',
+      'failed',
+      'partial',
+      'queued',
+      'running',
+      'succeeded',
+    ]);
   });
 });

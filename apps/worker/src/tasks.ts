@@ -11,8 +11,41 @@ import {
 import { checkQuota } from './usage';
 
 export type TaskType = 'probe' | 'discovery' | 'source-test' | 'proxy-test' | 'proxy-fetch-sub';
-export type TaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+export type TaskStatus = 'queued' | 'running' | 'succeeded' | 'partial' | 'failed' | 'cancelled';
 export type TaskSource = 'manual' | 'schedule' | 'api' | 'retry' | 'local';
+
+export interface TaskResultSource {
+  id: string;
+  title: string;
+  status: string;
+  error?: string;
+}
+
+export interface TaskResultPlatform {
+  sourceId: string;
+  name: string;
+  errorKind?: string;
+  error?: string;
+}
+
+export interface TaskResultSubscription {
+  id?: string;
+  name: string;
+  total: number;
+  ok: number;
+  fail: number;
+}
+
+/** 任务完成时写回的类型化结果；任务卡按 kind 渲染。 */
+export interface TaskResult {
+  kind: TaskType;
+  summary: string;
+  counts: Record<string, number>;
+  failedSources?: TaskResultSource[];
+  failedPlatforms?: TaskResultPlatform[];
+  subscriptions?: TaskResultSubscription[];
+  warnings?: string[];
+}
 
 export const TASK_TYPE_LABEL: Record<TaskType, string> = {
   probe: '音源探测',
@@ -26,6 +59,7 @@ export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
   queued: '排队中',
   running: '运行中',
   succeeded: '成功',
+  partial: '部分成功',
   failed: '失败',
   cancelled: '已取消',
 };
@@ -64,6 +98,7 @@ export interface TaskView {
   startedAt?: string;
   finishedAt?: string;
   error?: string;
+  result?: TaskResult;
 }
 
 interface TaskRow {
@@ -86,6 +121,7 @@ interface TaskRow {
   started_at: string | null;
   finished_at: string | null;
   error: string | null;
+  result: string | null;
 }
 
 function randomId(length = 12): string {
@@ -109,6 +145,16 @@ function parsePayload(raw: string): TaskPayload {
   }
 }
 
+function parseResult(raw: string | null): TaskResult | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? (parsed as TaskResult) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function toView(row: TaskRow): TaskView {
   return {
     id: row.id,
@@ -128,6 +174,7 @@ function toView(row: TaskRow): TaskView {
     startedAt: row.started_at ?? undefined,
     finishedAt: row.finished_at ?? undefined,
     error: row.error ?? undefined,
+    result: parseResult(row.result),
   };
 }
 
@@ -171,34 +218,71 @@ export async function getTask(db: D1Database, id: string): Promise<TaskView | nu
   return row ? toView(row) : null;
 }
 
-export async function listTasks(
-  db: D1Database,
-  options: { status?: TaskStatus; type?: TaskType; limit?: number } = {},
-): Promise<TaskView[]> {
+export interface TaskFilter {
+  status?: TaskStatus;
+  statuses?: TaskStatus[];
+  type?: TaskType;
+  source?: TaskSource;
+  q?: string;
+  limit?: number;
+  offset?: number;
+}
+
+function taskWhere(options: TaskFilter): { where: string; binds: unknown[] } {
   const clauses: string[] = [];
   const binds: unknown[] = [];
   if (options.status) {
     clauses.push('status = ?');
     binds.push(options.status);
+  } else if (options.statuses && options.statuses.length > 0) {
+    clauses.push(`status IN (${options.statuses.map(() => '?').join(',')})`);
+    binds.push(...options.statuses);
   }
   if (options.type) {
     clauses.push('type = ?');
     binds.push(options.type);
   }
-  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
-  const limit = Math.max(1, Math.min(200, options.limit ?? 50));
+  if (options.source) {
+    clauses.push('source = ?');
+    binds.push(options.source);
+  }
+  if (options.q?.trim()) {
+    clauses.push('(id LIKE ? OR message LIKE ? OR error LIKE ?)');
+    const like = `%${options.q.trim()}%`;
+    binds.push(like, like, like);
+  }
+  return { where: clauses.length ? `WHERE ${clauses.join(' AND ')}` : '', binds };
+}
+
+export async function listTasks(db: D1Database, options: TaskFilter = {}): Promise<TaskView[]> {
+  const { where, binds } = taskWhere(options);
+  const limit = options.limit === 0 ? 5000 : Math.max(1, Math.min(200, options.limit ?? 50));
+  const offset = Math.max(0, options.offset ?? 0);
   const rows = await db
-    .prepare(`SELECT * FROM tasks ${where} ORDER BY created_at DESC LIMIT ${limit}`)
-    .bind(...binds)
+    .prepare(`SELECT * FROM tasks ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`)
+    .bind(...binds, limit, offset)
     .all<TaskRow>();
   return rows.results.map(toView);
+}
+
+export async function countTasksFiltered(db: D1Database, options: TaskFilter = {}): Promise<number> {
+  const { where, binds } = taskWhere(options);
+  const row = await db.prepare(`SELECT COUNT(*) AS n FROM tasks ${where}`).bind(...binds).first<{ n: number }>();
+  return row?.n ?? 0;
 }
 
 export async function countTasks(db: D1Database): Promise<Record<TaskStatus, number>> {
   const rows = await db
     .prepare('SELECT status, COUNT(*) AS n FROM tasks GROUP BY status')
     .all<{ status: string; n: number }>();
-  const counts: Record<TaskStatus, number> = { queued: 0, running: 0, succeeded: 0, failed: 0, cancelled: 0 };
+  const counts: Record<TaskStatus, number> = {
+    queued: 0,
+    running: 0,
+    succeeded: 0,
+    partial: 0,
+    failed: 0,
+    cancelled: 0,
+  };
   for (const row of rows.results) {
     if (row.status in counts) counts[row.status as TaskStatus] = row.n;
   }
@@ -219,6 +303,7 @@ async function updateTask(
     progressDone?: number;
     progressTotal?: number;
     progressUnit?: string;
+    result?: TaskResult | null;
   },
 ): Promise<void> {
   const sets: string[] = [];
@@ -262,6 +347,10 @@ async function updateTask(
   if (patch.progressUnit !== undefined) {
     sets.push('progress_unit = ?');
     binds.push(patch.progressUnit);
+  }
+  if (patch.result !== undefined) {
+    sets.push('result = ?');
+    binds.push(patch.result === null ? null : JSON.stringify(patch.result).slice(0, 12_000));
   }
   if (!sets.length) return;
   binds.push(id);
@@ -485,6 +574,177 @@ export async function dispatchNext(
   }
 }
 
+interface RunResultRow {
+  total: number;
+  available: number;
+  partial: number;
+  unavailable: number;
+  untested: number;
+  platforms_ok: number;
+  platforms_tested: number;
+  endpoints_ok: number;
+  endpoints_total: number;
+  cn_tested: number;
+  cn_ok: number;
+  candidates_added: number;
+  candidates_promoted: number;
+  proxies_used: number;
+  message: string;
+  status: string;
+  warnings: string;
+}
+
+/** 把一次运行翻译成任务卡能直接渲染的摘要。 */
+async function buildTaskResult(env: Env, task: TaskView, runId: string): Promise<TaskResult | undefined> {
+  const run = await env.DB.prepare(
+    `SELECT total, available, partial, unavailable, untested,
+            platforms_ok, platforms_tested, endpoints_ok, endpoints_total,
+            cn_tested, cn_ok, candidates_added, candidates_promoted,
+            proxies_used, message, status, warnings
+       FROM runs WHERE run_id = ?`,
+  )
+    .bind(runId)
+    .first<RunResultRow>();
+  if (!run) return undefined;
+
+  const counts: Record<string, number> = {
+    total: run.total,
+    available: run.available,
+    partial: run.partial,
+    unavailable: run.unavailable,
+    untested: run.untested,
+    platformsOk: run.platforms_ok,
+    platformsTested: run.platforms_tested,
+    endpointsOk: run.endpoints_ok,
+    endpointsTotal: run.endpoints_total,
+    cnTested: run.cn_tested,
+    cnOk: run.cn_ok,
+    candidatesAdded: run.candidates_added,
+    candidatesPromoted: run.candidates_promoted,
+  };
+
+  if (task.type === 'proxy-test') {
+    const [summary, subs] = await Promise.all([
+      env.DB.prepare(
+        'SELECT total, ok, kernel_ok, skipped_udp, duration_ms FROM proxy_test_runs WHERE run_id = ?',
+      )
+        .bind(runId)
+        .first<{ total: number; ok: number; kernel_ok: number; skipped_udp: number; duration_ms: number }>(),
+      env.DB.prepare(
+        `SELECT r.subscription_id AS id, COALESCE(s.name, '未归属订阅') AS name,
+                COUNT(*) AS total,
+                SUM(CASE WHEN r.ok = 1 THEN 1 ELSE 0 END) AS ok
+           FROM proxy_test_results r
+           LEFT JOIN proxy_subscriptions s ON s.id = r.subscription_id
+          WHERE r.run_id = ?
+          GROUP BY r.subscription_id
+          ORDER BY total DESC`,
+      )
+        .bind(runId)
+        .all<{ id: string | null; name: string; total: number; ok: number }>(),
+    ]);
+    const total = summary?.total ?? 0;
+    const ok = summary?.ok ?? 0;
+    counts.proxyTotal = total;
+    counts.proxyOk = ok;
+    counts.proxyFail = Math.max(0, total - ok);
+    counts.kernelOk = summary?.kernel_ok ?? 0;
+    counts.skippedUdp = summary?.skipped_udp ?? 0;
+    counts.durationMs = summary?.duration_ms ?? 0;
+    return {
+      kind: task.type,
+      summary: `测活 ${ok}/${total} 可用，内核 ${summary?.kernel_ok ?? 0} 个，跳过 UDP ${summary?.skipped_udp ?? 0} 个`,
+      counts,
+      subscriptions: subs.results.map((row) => ({
+        id: row.id ?? undefined,
+        name: row.name,
+        total: row.total,
+        ok: row.ok,
+        fail: Math.max(0, row.total - row.ok),
+      })),
+    };
+  }
+
+  if (task.type === 'proxy-fetch-sub') {
+    const sub = task.payload.subscriptionId
+      ? await env.DB.prepare('SELECT name FROM proxy_subscriptions WHERE id = ?')
+          .bind(task.payload.subscriptionId)
+          .first<{ name: string }>()
+      : null;
+    const match = run.message.match(/新增\s*(\d+).*?更新\s*(\d+).*?共\s*(\d+)/);
+    const added = match ? Number(match[1]) : 0;
+    const updated = match ? Number(match[2]) : 0;
+    const total = match ? Number(match[3]) : run.proxies_used;
+    counts.added = added;
+    counts.updated = updated;
+    counts.total = total;
+    return {
+      kind: task.type,
+      summary: `订阅「${sub?.name ?? '未知订阅'}」新增 ${added}、更新 ${updated}，共 ${total} 个节点`,
+      counts,
+    };
+  }
+
+  if (task.type === 'discovery') {
+    return {
+      kind: task.type,
+      summary: `新增候选 ${run.candidates_added} 个，自动转正 ${run.candidates_promoted} 个`,
+      counts,
+      warnings: warningsOf(run.warnings),
+    };
+  }
+
+  const [failedSources, failedPlatforms] = await Promise.all([
+    env.DB.prepare(
+      `SELECT sr.source_id AS id, COALESCE(r.title, sr.source_id) AS title,
+              sr.status, sr.init_error AS error
+         FROM source_runs sr
+         LEFT JOIN source_registry r ON r.id = sr.source_id
+        WHERE sr.run_id = ? AND sr.status <> 'available'
+        ORDER BY CASE sr.status WHEN 'unavailable' THEN 0 WHEN 'partial' THEN 1 ELSE 2 END, sr.source_id
+        LIMIT 6`,
+    )
+      .bind(runId)
+      .all<{ id: string; title: string; status: string; error: string | null }>(),
+    env.DB.prepare(
+      `SELECT source_id AS sourceId, COALESCE(name, platform) AS name, error_kind AS errorKind, error
+         FROM platform_results
+        WHERE run_id = ? AND tested = 1 AND ok = 0
+        ORDER BY source_id, platform
+        LIMIT 6`,
+    )
+      .bind(runId)
+      .all<{ sourceId: string; name: string; errorKind: string | null; error: string | null }>(),
+  ]);
+  return {
+    kind: task.type,
+    summary: `源 ${run.total}（可用 ${run.available} / 部分 ${run.partial} / 失效 ${run.unavailable} / 未测 ${run.untested}），平台 ${run.platforms_ok}/${run.platforms_tested}，接入点 ${run.endpoints_ok}/${run.endpoints_total}`,
+    counts,
+    failedSources: failedSources.results.map((row) => ({
+      id: row.id,
+      title: row.title,
+      status: row.status,
+      error: row.error ?? undefined,
+    })),
+    failedPlatforms: failedPlatforms.results.map((row) => ({
+      sourceId: row.sourceId,
+      name: row.name,
+      errorKind: row.errorKind ?? undefined,
+      error: row.error ?? undefined,
+    })),
+    warnings: warningsOf(run.warnings),
+  };
+}
+
+function warningsOf(raw: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(raw || '[]');
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string').slice(0, 5) : [];
+  } catch {
+    return [];
+  }
+}
+
 /** 上报完成后，按运行结果给对应任务收尾。 */
 export async function completeTaskForRun(env: Env, runId: string): Promise<void> {
   const run = await env.DB.prepare('SELECT task_id, status, message, error FROM runs WHERE run_id = ?')
@@ -494,14 +754,17 @@ export async function completeTaskForRun(env: Env, runId: string): Promise<void>
   const task = await getTask(env.DB, run.task_id);
   if (!task || (task.status !== 'running' && task.status !== 'queued')) return;
 
-  const failed = run.status === 'failed';
+  const status: TaskStatus =
+    run.status === 'failed' ? 'failed' : run.status === 'partial' ? 'partial' : 'succeeded';
+  const result = await buildTaskResult(env, task, runId);
   await updateTask(env.DB, task.id, {
-    status: failed ? 'failed' : 'succeeded',
-    message: run.message || (failed ? '运行失败' : '运行完成'),
-    error: failed ? run.error : null,
+    status,
+    message: run.message || (status === 'failed' ? '运行失败' : '运行完成'),
+    error: status === 'failed' ? run.error : null,
     finishedAt: new Date().toISOString(),
-    progressDone: failed ? 0 : 1,
+    progressDone: 1,
     progressTotal: 1,
+    result: result ?? null,
   });
 }
 
