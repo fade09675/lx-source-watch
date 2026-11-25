@@ -51,6 +51,10 @@ export interface AppSettings {
   retentionDailyDays: number;
   /** 事件保留天数。 */
   retentionEventDays: number;
+  /** 派发护栏：KV 每日写入达到该值时暂停派发。 */
+  quotaKvWrites: number;
+  /** 派发护栏：D1 每日写入达到该值时暂停派发。 */
+  quotaD1Writes: number;
   updatedAt?: string;
 }
 
@@ -78,6 +82,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   retentionDetailDays: 14,
   retentionDailyDays: 180,
   retentionEventDays: 180,
+  quotaKvWrites: 920,
+  quotaD1Writes: 90_000,
 };
 
 type Raw = Record<string, unknown>;
@@ -125,6 +131,8 @@ export function normalizeSettings(input: unknown): AppSettings {
     retentionDetailDays: int(raw.retentionDetailDays, d.retentionDetailDays, 3, 60),
     retentionDailyDays: int(raw.retentionDailyDays, d.retentionDailyDays, 30, 365),
     retentionEventDays: int(raw.retentionEventDays, d.retentionEventDays, 7, 365),
+    quotaKvWrites: int(raw.quotaKvWrites, d.quotaKvWrites, 100, 1_000),
+    quotaD1Writes: int(raw.quotaD1Writes, d.quotaD1Writes, 10_000, 100_000),
     updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : undefined,
   };
 }

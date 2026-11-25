@@ -28,6 +28,8 @@ const EMPTY_DRAFT: Draft = {
   retentionDetailDays: 14,
   retentionDailyDays: 180,
   retentionEventDays: 180,
+  quotaKvWrites: 920,
+  quotaD1Writes: 90_000,
 };
 
 function formatWhen(value?: string | null): string {
@@ -466,6 +468,31 @@ export function SettingsPage() {
               max={365}
               value={draft.retentionEventDays}
               onChange={(value) => update('retentionEventDays', value)}
+            />
+          </div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-head">
+            <h2>额度护栏</h2>
+            <span className="muted">达到阈值时暂停自动派发</span>
+          </div>
+          <div className="settings-body">
+            <NumberField
+              label="KV 每日写入上限"
+              hint="默认 920；免费额度为 1000 次/天"
+              min={100}
+              max={1_000}
+              value={draft.quotaKvWrites}
+              onChange={(value) => update('quotaKvWrites', value)}
+            />
+            <NumberField
+              label="D1 每日写入上限"
+              hint="默认 90000；免费额度为 100000 行/天"
+              min={10_000}
+              max={100_000}
+              value={draft.quotaD1Writes}
+              onChange={(value) => update('quotaD1Writes', value)}
             />
           </div>
         </section>

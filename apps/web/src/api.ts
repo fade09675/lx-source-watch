@@ -109,7 +109,24 @@ export interface AppSettingsView {
   retentionDetailDays: number;
   retentionDailyDays: number;
   retentionEventDays: number;
+  quotaKvWrites: number;
+  quotaD1Writes: number;
   updatedAt?: string;
+}
+
+export interface RunPurgePreview {
+  days: number;
+  cutoff: string;
+  proxyCutoff: string;
+  latestRunAt: string | null;
+  latestProxyTestAt: string | null;
+  clamped: boolean;
+  runs: number;
+  sourceRuns: number;
+  platformResults: number;
+  tasks: number;
+  proxyTestRuns: number;
+  proxyTestResults: number;
 }
 
 export interface SettingsResult {
@@ -742,6 +759,16 @@ export const api = {
   saveSettings: (patch: Partial<AppSettingsView>) =>
     request<SettingsResult>('/api/admin/settings', { method: 'PUT', body: JSON.stringify(patch) }),
   resetSettings: () => request<SettingsResult>('/api/admin/settings/reset', { method: 'POST' }),
+  previewRunPurge: (days: number) =>
+    request<{ preview: RunPurgePreview }>('/api/admin/runs/purge', {
+      method: 'POST',
+      body: JSON.stringify({ days, dryRun: true }),
+    }),
+  purgeRuns: (days: number) =>
+    request<{ result: RunPurgePreview }>('/api/admin/runs/purge', {
+      method: 'POST',
+      body: JSON.stringify({ days, dryRun: false }),
+    }),
   system: () => request<SystemView>('/api/admin/system'),
   runProxyTest: (input: RunProxyTestInput = {}) =>
     request<{ ok: boolean; dispatchedAt: string }>('/api/admin/run/proxy-test', {

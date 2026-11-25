@@ -1,4 +1,5 @@
 import type { Env } from './env';
+import { loadSettings } from './settings';
 
 const USAGE_KEY = 'usage:state';
 const DAY_MS = 86_400_000;
@@ -366,32 +367,41 @@ export interface QuotaCheck {
   message?: string;
   kvWrites: number;
   d1Writes: number;
+  kvLimit: number;
+  d1Limit: number;
 }
 
 export async function checkQuota(env: Env): Promise<QuotaCheck> {
   try {
     const usage = await getUsage(env, { maxAgeMs: 15 * 60_000 });
+    const settings = env.DB ? await loadSettings(env.DB).catch(() => null) : null;
     const kvWrites = usage.kv?.writes ?? 0;
     const d1Writes = usage.d1?.rowsWritten ?? 0;
-    if (kvWrites >= QUOTA_KV_WRITES) {
+    const kvLimit = settings?.quotaKvWrites ?? QUOTA_KV_WRITES;
+    const d1Limit = settings?.quotaD1Writes ?? QUOTA_D1_WRITES;
+    if (kvWrites >= kvLimit) {
       return {
         ok: false,
-        message: `KV 写入已用 ${kvWrites}/1000，暂停派发，等 UTC 零点重置`,
+        message: `KV 写入已用 ${kvWrites}/${kvLimit}，达到护栏值，暂停派发，等 UTC 零点重置`,
         kvWrites,
         d1Writes,
+        kvLimit,
+        d1Limit,
       };
     }
-    if (d1Writes >= QUOTA_D1_WRITES) {
+    if (d1Writes >= d1Limit) {
       return {
         ok: false,
-        message: `D1 写入已用 ${d1Writes}/100000，暂停派发，等 UTC 零点重置`,
+        message: `D1 写入已用 ${d1Writes}/${d1Limit}，达到护栏值，暂停派发，等 UTC 零点重置`,
         kvWrites,
         d1Writes,
+        kvLimit,
+        d1Limit,
       };
     }
-    return { ok: true, kvWrites, d1Writes };
+    return { ok: true, kvWrites, d1Writes, kvLimit, d1Limit };
   } catch {
     // 额度读取失败不应阻断正常调度。
-    return { ok: true, kvWrites: 0, d1Writes: 0 };
+    return { ok: true, kvWrites: 0, d1Writes: 0, kvLimit: QUOTA_KV_WRITES, d1Limit: QUOTA_D1_WRITES };
   }
 }

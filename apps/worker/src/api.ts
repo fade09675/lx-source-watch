@@ -61,6 +61,7 @@ import {
 import { getSchedulerStatus } from './scheduler';
 import { autoPromoteCandidates, promoteCandidate } from './candidatePromotion';
 import { loadSettings, resetSettings, saveSettings } from './settings';
+import { executeRunPurge, planRunPurge } from './maintenance';
 import { listDuplicateOverview } from './dedup';
 import { markCandidateDuplicate, mergeIntoCanonical } from './mergeSources';
 import { listAliases, setAliasState } from './aliases';
@@ -239,6 +240,28 @@ export function createApi(): Hono<Ctx> {
     const settings = await resetSettings(c.env.DB);
     const scheduler = await getSchedulerStatus(c.env);
     return c.json({ settings, scheduler }, 200, { 'cache-control': CACHE_PRIVATE });
+  });
+
+  // 清理旧运行：先预览，确认后再删；永远保留最新一轮探测与测活。
+  api.post('/admin/runs/purge', async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'bad_request', message: '请求体不是合法 JSON' }, 400);
+    }
+    const input = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+    const days = Number(input.days ?? 30);
+    if (!Number.isInteger(days) || days < 1 || days > 3650) {
+      return c.json({ error: 'bad_days', message: '保留天数必须是 1–3650 的整数' }, 400);
+    }
+    const dryRun = input.dryRun === true;
+    const plan = await planRunPurge(c.env, days);
+    if (dryRun) {
+      return c.json({ preview: plan }, 200, { 'cache-control': CACHE_PRIVATE });
+    }
+    await executeRunPurge(c.env, plan);
+    return c.json({ result: plan }, 200, { 'cache-control': CACHE_PRIVATE });
   });
 
   // 系统信息：用来确认部署版本与三类令牌是否配置。

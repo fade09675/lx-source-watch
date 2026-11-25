@@ -62,4 +62,15 @@ describe('normalizeSettings', () => {
     expect(DEFAULT_SETTINGS.proxyTestConcurrency).toBe(5);
     expect(DEFAULT_SETTINGS.proxyTestTimeoutMs).toBe(20_000);
   });
+
+  it('阶段五额度护栏会夹取到安全范围', () => {
+    const settings = normalizeSettings({ quotaKvWrites: 5000, quotaD1Writes: 1 });
+    expect(settings.quotaKvWrites).toBe(1_000);
+    expect(settings.quotaD1Writes).toBe(10_000);
+  });
+
+  it('阶段五默认护栏：KV 920、D1 90000', () => {
+    expect(DEFAULT_SETTINGS.quotaKvWrites).toBe(920);
+    expect(DEFAULT_SETTINGS.quotaD1Writes).toBe(90_000);
+  });
 });

@@ -208,4 +208,25 @@ describe('checkQuota', () => {
     expect(result.ok).toBe(false);
     expect(result.message).toContain('D1 写入');
   });
+
+  it('护栏阈值从设置读取', async () => {
+    const env = envWith(600, 1000);
+    (env as unknown as { DB: unknown }).DB = {
+      prepare() {
+        return {
+          bind() {
+            return {
+              async first() {
+                return { value: JSON.stringify({ quotaKvWrites: 500, quotaD1Writes: 90_000 }) };
+              },
+            };
+          },
+        };
+      },
+    };
+    const result = await checkQuota(env);
+    expect(result.ok).toBe(false);
+    expect(result.kvLimit).toBe(500);
+    expect(result.message).toContain('600/500');
+  });
 });
