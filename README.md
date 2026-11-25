@@ -2,7 +2,7 @@
 
 LX Music 音源可用性监测。定时在 GitHub Actions 里加载音源脚本，逐个平台取播放地址并做真实拉流校验，把结果汇总成「平台 × 可用性 × 延迟」的矩阵，托管在 Cloudflare 上。站点整站登录，面向单人或小团队自用。
 
-> 状态：P0–P5、阶段 4A–4F 与阶段 5 已完成并上线；阶段 6A（多仓库自动发现、每仓库抓取上限、候选按仓库筛选）已本地完成，等待随下次提交部署。线上站点：<https://dash.dpdns.org>。
+> 状态：P0–P5、阶段 4A–4F、阶段 5 与阶段 6A/6B 已完成并上线（2026-11-25）；阶段 6C 回归收尾进行中。线上站点：<https://dash.dpdns.org>。
 
 ## 它回答什么问题
 
@@ -79,6 +79,8 @@ pnpm build          # 构建前端产物到 apps/web/dist，供 wrangler 静态�
 | `pnpm ingest -- --snapshot out/status.json --dry-run` | 生成本轮上报体，不发网络 |
 | `pnpm validate` | 校验清单与快照 schema |
 | `pnpm db:migrate` | 本地 D1 应用迁移 |
+
+`cn`、`proxy-test`、`proxy-fetch`、`ingest` 需要运行参数：本地可传 `--proxy`/`--endpoint`/`--token`，或设 `CN_PROXY_URL`、`INGEST_URL`、`RUNNER_TOKEN`。`proxy-fetch` 还必须有对应的占位运行 `--run-id`。
 
 ## 目录
 

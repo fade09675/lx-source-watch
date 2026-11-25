@@ -391,6 +391,11 @@ async function cmdValidate(): Promise<void> {
 async function main(): Promise<void> {
   installProcessGuards();
   const args = parseArgs(process.argv.slice(2));
+  if (args.flags.has('help')) {
+    // eslint-disable-next-line no-console
+    console.log(HELP);
+    return;
+  }
   const cmd = args.positionals[0];
   switch (cmd) {
     case 'probe':

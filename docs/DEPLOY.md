@@ -28,8 +28,7 @@ Cloudflare 资源：
 任选一种：
 
 ```powershell
-cd apps\worker
-corepack pnpm exec wrangler login
+corepack pnpm --filter @lx/worker exec wrangler login
 ```
 
 或使用 API Token（推荐 CI/无浏览器环境）：
@@ -37,7 +36,7 @@ corepack pnpm exec wrangler login
 ```powershell
 $env:CLOUDFLARE_API_TOKEN = '<token>'
 $env:CLOUDFLARE_ACCOUNT_ID = '<account id>'
-corepack pnpm exec wrangler whoami
+corepack pnpm --filter @lx/worker exec wrangler whoami
 ```
 
 Token 权限：Workers Scripts 编辑、KV 编辑、D1 编辑、Account Analytics 读；自动部署还需要能写 Worker 自定义域。
@@ -47,13 +46,11 @@ Token 权限：Workers Scripts 编辑、KV 编辑、D1 编辑、Account Analytic
 ## 2. 创建 KV 与 D1
 
 ```powershell
-cd apps\worker
-
-corepack pnpm exec wrangler kv namespace create SNAPSHOT
-corepack pnpm exec wrangler d1 create lx-source-watch
+corepack pnpm --filter @lx/worker exec wrangler kv namespace create SNAPSHOT
+corepack pnpm --filter @lx/worker exec wrangler d1 create lx-source-watch
 ```
 
-把输出的 `id` / `database_id` 填入 `apps/worker/wrangler.jsonc`：
+把输出的 `id` / `database_id` 填入 `apps/worker/wrangler.jsonc`。仓库里的值是维护者线上实例的 ID；部署自己的实例必须换成你刚创建的值，不要直接复用。
 
 ```jsonc
 "kv_namespaces": [
@@ -82,14 +79,13 @@ corepack pnpm exec wrangler d1 create lx-source-watch
 ## 3. 远程建表
 
 ```powershell
-cd apps\worker
-corepack pnpm exec wrangler d1 migrations apply lx-source-watch --remote
+corepack pnpm --filter @lx/worker exec wrangler d1 migrations apply lx-source-watch --remote
 ```
 
 迁移从 `0001_init.sql` 到 `0017_endpoint_cn.sql`，应全部成功。验证：
 
 ```powershell
-corepack pnpm exec wrangler d1 execute lx-source-watch --remote --command "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+corepack pnpm --filter @lx/worker exec wrangler d1 execute lx-source-watch --remote --command "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
 ```
 
 应包含：`candidates`、`events`、`platform_daily`、`platform_results`、`proxy_subscriptions`、`proxy_test_results`、`proxy_test_runs`、`proxies`、`runs`、`settings`、`source_aliases`、`source_daily`、`source_endpoints`、`source_registry`、`source_runs`、`sources`、`task_locks`、`task_state`、`tasks`。
@@ -112,16 +108,16 @@ corepack pnpm exec wrangler d1 execute lx-source-watch --remote --command "SELEC
 | `GH_DISPATCH_TOKEN` | Worker 派发 GitHub workflow（Actions 读写） |
 | `CF_ANALYTICS_TOKEN` | 读取 KV/D1 用量；可用具备 Account Analytics 读权限的部署令牌代替 |
 
-逐个写入（在 `apps/worker` 下）：
+逐个写入（在仓库根目录执行；`--filter` 会让 wrangler 在 `apps/worker` 下运行）：
 
 ```powershell
-corepack pnpm exec wrangler secret put INGEST_SECRET
-corepack pnpm exec wrangler secret put RUNNER_TOKEN
-corepack pnpm exec wrangler secret put PROXY_ENC_KEY
-corepack pnpm exec wrangler secret put ADMIN_PASSWORD_HASH
-corepack pnpm exec wrangler secret put SESSION_SECRET
-corepack pnpm exec wrangler secret put GH_DISPATCH_TOKEN
-corepack pnpm exec wrangler secret put CF_ANALYTICS_TOKEN
+corepack pnpm --filter @lx/worker exec wrangler secret put INGEST_SECRET
+corepack pnpm --filter @lx/worker exec wrangler secret put RUNNER_TOKEN
+corepack pnpm --filter @lx/worker exec wrangler secret put PROXY_ENC_KEY
+corepack pnpm --filter @lx/worker exec wrangler secret put ADMIN_PASSWORD_HASH
+corepack pnpm --filter @lx/worker exec wrangler secret put SESSION_SECRET
+corepack pnpm --filter @lx/worker exec wrangler secret put GH_DISPATCH_TOKEN
+corepack pnpm --filter @lx/worker exec wrangler secret put CF_ANALYTICS_TOKEN
 ```
 
 生成随机串（用系统加密随机源）：
@@ -162,8 +158,7 @@ $hash = $kdf.GetBytes(32)
 
 ```powershell
 corepack pnpm --filter @lx/web build
-cd apps\worker
-corepack pnpm exec wrangler deploy
+corepack pnpm --filter @lx/worker exec wrangler deploy
 ```
 
 自动部署：`.github/workflows/deploy.yml` 在 push 到 `main` 且改动涉及 `apps/worker/**`、`apps/web/**`、`packages/shared/**`、依赖或 workflow 时触发。它需要仓库 Actions secret：

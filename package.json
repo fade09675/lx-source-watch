@@ -21,10 +21,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p packages/shared/tsconfig.json && tsc -p apps/runner/tsconfig.json && tsc -p apps/worker/tsconfig.json --noEmit && tsc -p apps/web/tsconfig.json --noEmit",
-    "build": "pnpm --filter @lx/web build",
-    "dev:web": "pnpm --filter @lx/web dev",
-    "dev:worker": "pnpm --filter @lx/worker dev",
-    "db:migrate": "pnpm --filter @lx/worker db:migrate"
+    "build": "corepack pnpm --filter @lx/web build",
+    "dev:web": "corepack pnpm --filter @lx/web dev",
+    "dev:worker": "corepack pnpm --filter @lx/worker dev",
+    "db:migrate": "corepack pnpm --filter @lx/worker db:migrate"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
