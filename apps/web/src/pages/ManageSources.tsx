@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ApiError, api, type AdminSource, type SourceInputPayload, type SourceListResult } from '../api';
 import { ErrorBox, Spinner } from '../components/Feedback';
 import { Pagination, useClientPager } from '../components/Pagination';
+import { BackupImportPanel } from './BackupImportPanel';
 
 interface FormState {
   title: string;
@@ -200,6 +201,8 @@ export function ManageSourcesPage() {
           </div>
         </div>
       </section>
+
+      <BackupImportPanel sources={data.sources} onDone={load} />
 
       <section className="panel">
         <div className="panel-head">

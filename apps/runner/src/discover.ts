@@ -3,6 +3,7 @@ import { dirname } from 'node:path';
 import {
   CandidateFileSchema,
   DiscoveryConfigSchema,
+  DiscoveryRepoSchema,
   type Candidate,
   type CandidateFile,
   type DiscoveryConfig,
@@ -20,6 +21,10 @@ export interface DiscoverOptions {
   token?: string;
   proxy?: ProxyConfig;
   branchFallback?: string;
+  /** 网页管理的自定义仓库配置地址；为空时读 LX_DISCOVERY_URL。 */
+  discoveryUrl?: string;
+  /** 测试/本地开发允许访问 localhost。 */
+  allowPrivate?: boolean;
 }
 
 export interface DiscoverStats {
@@ -84,6 +89,39 @@ async function fetchTree(
   return JSON.parse(res.body.toString('utf8')) as TreeResponse;
 }
 
+async function fetchCustomRepos(
+  url: string,
+  proxy: ProxyConfig | undefined,
+  allowPrivate = false,
+): Promise<DiscoveryRepo[]> {
+  const res = await httpRequest(url, {
+    headers: { accept: 'application/json' },
+    timeoutMs: 10_000,
+    maxBytes: 1024 * 1024,
+    proxy,
+    allowPrivate,
+  });
+  if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
+  const payload = JSON.parse(res.body.toString('utf8')) as { repos?: unknown };
+  const parsed = DiscoveryRepoSchema.array().max(50).safeParse(payload.repos ?? []);
+  if (!parsed.success) {
+    throw new Error(`自定义仓库格式不正确：${parsed.error.issues[0]?.message ?? 'unknown'}`);
+  }
+  return parsed.data.filter((repo) => repo.enabled);
+}
+
+export function mergeRepos(builtin: DiscoveryRepo[], custom: DiscoveryRepo[]): DiscoveryRepo[] {
+  const seen = new Set(builtin.map((repo) => `${repo.repo}@${repo.branch}`));
+  const merged = [...builtin];
+  for (const repo of custom) {
+    const key = `${repo.repo}@${repo.branch}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(repo);
+  }
+  return merged;
+}
+
 function shouldInclude(path: string, repo: DiscoveryConfig['repos'][number]): boolean {
   if (!path.endsWith('.js')) return false;
   if (repo.exclude.some((p) => path.includes(p))) return false;
@@ -125,6 +163,17 @@ export function rankEntries(entries: TreeEntry[], repo: DiscoveryRepo): TreeEntr
 export async function discoverCandidates(opts: DiscoverOptions): Promise<DiscoverOutput> {
   const configRaw = await readFile(opts.configPath, 'utf8');
   const config = DiscoveryConfigSchema.parse(JSON.parse(configRaw));
+  const discoveryUrl = opts.discoveryUrl ?? process.env.LX_DISCOVERY_URL;
+  let repos = config.repos;
+  if (discoveryUrl) {
+    try {
+      const custom = await fetchCustomRepos(discoveryUrl, opts.proxy, opts.allowPrivate);
+      repos = mergeRepos(config.repos, custom);
+      if (custom.length) log.info(`已合并 ${custom.length} 个网页自定义仓库`);
+    } catch (e) {
+      log.warn(`自定义仓库读取失败，仅使用内置仓库：${errorMessage(e)}`);
+    }
+  }
   const maxFetch = Math.max(1, opts.maxFetchPerRun ?? config.maxFetchPerRun);
   const perRepo = Math.min(maxFetch, config.maxFetchPerRepo);
   const token = opts.token ?? process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
@@ -137,7 +186,7 @@ export async function discoverCandidates(opts: DiscoverOptions): Promise<Discove
   const seen = new Set<string>();
   const now = nowIso();
 
-  for (const repo of config.repos) {
+  for (const repo of repos) {
     if (!repo.enabled) continue;
     if (found.length >= maxFetch) break;
     stats.repos += 1;

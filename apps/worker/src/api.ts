@@ -85,6 +85,14 @@ import {
   type TaskType,
 } from './tasks';
 import { listAdminActivity } from './activity';
+import {
+  createDiscoveryRepo,
+  deleteDiscoveryRepo,
+  listDiscoveryRepos,
+  publicDiscoveryRepos,
+  updateDiscoveryRepo,
+} from './discoveryRepos';
+import { importBackupUrls, previewBackupUrls, type BackupImportItem } from './sourceBackups';
 
 type Ctx = { Bindings: Env };
 
@@ -879,6 +887,79 @@ export function createApi(): Hono<Ctx> {
     );
   });
 
+  api.get('/admin/discovery-repos', async (c) => {
+    const repos = await listDiscoveryRepos(c.env.DB);
+    return Response.json({ repos }, { headers: { 'cache-control': CACHE_PRIVATE } });
+  });
+
+  api.post('/admin/discovery-repos', async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return Response.json({ error: 'bad_request', message: '请求体不是合法 JSON' }, { status: 400 });
+    }
+    const result = await createDiscoveryRepo(c.env.DB, body as Record<string, unknown>);
+    if (!result.ok) {
+      return Response.json(
+        { error: result.status === 409 ? 'conflict' : 'bad_repo', message: result.errors.join('；'), errors: result.errors },
+        { status: result.status ?? 400 },
+      );
+    }
+    return Response.json({ repo: result.row }, { status: 201, headers: { 'cache-control': CACHE_PRIVATE } });
+  });
+
+  api.patch('/admin/discovery-repos/:id', async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return Response.json({ error: 'bad_request', message: '请求体不是合法 JSON' }, { status: 400 });
+    }
+    const result = await updateDiscoveryRepo(c.env.DB, c.req.param('id'), body as Record<string, unknown>);
+    if (!result.ok) {
+      return Response.json(
+        { error: result.status === 404 ? 'not_found' : result.status === 409 ? 'conflict' : 'bad_repo', message: result.errors.join('；'), errors: result.errors },
+        { status: result.status ?? 400 },
+      );
+    }
+    return Response.json({ repo: result.row }, { headers: { 'cache-control': CACHE_PRIVATE } });
+  });
+
+  api.delete('/admin/discovery-repos/:id', async (c) => {
+    const ok = await deleteDiscoveryRepo(c.env.DB, c.req.param('id'));
+    if (!ok) return Response.json({ error: 'not_found', message: '仓库不存在' }, { status: 404 });
+    return Response.json({ ok: true }, { headers: { 'cache-control': CACHE_PRIVATE } });
+  });
+
+  api.post('/admin/sources/backups/preview', async (c) => {
+    let body: { text?: string; urls?: string[]; sourceId?: string };
+    try {
+      body = (await c.req.json()) as typeof body;
+    } catch {
+      return Response.json({ error: 'bad_request', message: '请求体不是合法 JSON' }, { status: 400 });
+    }
+    if (!body.text?.trim() && !body.urls?.length) {
+      return Response.json({ error: 'bad_request', message: '请粘贴至少一个备用地址' }, { status: 400 });
+    }
+    const preview = await previewBackupUrls(c.env, body);
+    return Response.json(preview, { headers: { 'cache-control': CACHE_PRIVATE } });
+  });
+
+  api.post('/admin/sources/backups/import', async (c) => {
+    let body: { items?: BackupImportItem[] };
+    try {
+      body = (await c.req.json()) as typeof body;
+    } catch {
+      return Response.json({ error: 'bad_request', message: '请求体不是合法 JSON' }, { status: 400 });
+    }
+    if (!Array.isArray(body.items) || !body.items.length) {
+      return Response.json({ error: 'bad_request', message: '没有可导入的地址' }, { status: 400 });
+    }
+    const result = await importBackupUrls(c.env, body.items);
+    return Response.json(result, { headers: { 'cache-control': CACHE_PRIVATE } });
+  });
+
   const TASK_TYPES: TaskType[] = ['probe', 'discovery', 'source-test', 'proxy-test', 'proxy-fetch-sub'];
   const TASK_STATUSES: TaskStatus[] = ['queued', 'running', 'succeeded', 'partial', 'failed', 'cancelled'];
   const TASK_SOURCES: TaskSource[] = ['manual', 'schedule', 'api', 'retry', 'local'];
@@ -1012,6 +1093,13 @@ export function createApi(): Hono<Ctx> {
   api.get('/config/sources', async (c) => {
     const rows = await listSourceRegistry(c.env.DB);
     return Response.json(toPublicRegistry(rows), {
+      headers: { 'cache-control': 'public, max-age=60, s-maxage=300' },
+    });
+  });
+
+  api.get('/config/discovery', async (c) => {
+    const config = await publicDiscoveryRepos(c.env.DB);
+    return Response.json(config, {
       headers: { 'cache-control': 'public, max-age=60, s-maxage=300' },
     });
   });

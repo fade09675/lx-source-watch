@@ -59,6 +59,11 @@ export function actionLabel(method: string, path: string): string {
   if (path.endsWith('/admin/tasks/reap')) return '清理卡死任务';
   if (path.endsWith('/admin/tasks') && m === 'POST') return '创建任务';
   if (path.endsWith('/cancel')) return '取消任务';
+  if (path.endsWith('/admin/discovery-repos') && m === 'POST') return '添加发现仓库';
+  if (path.includes('/admin/discovery-repos/') && m === 'PATCH') return '修改发现仓库';
+  if (path.includes('/admin/discovery-repos/') && m === 'DELETE') return '删除发现仓库';
+  if (path.endsWith('/admin/sources/backups/preview')) return '预览备用线路';
+  if (path.endsWith('/admin/sources/backups/import')) return '导入备用线路';
   if (path.endsWith('/admin/sources') && m === 'POST') return '新增音源';
   if (path.includes('/admin/sources/') && path.endsWith('/test')) return '测试音源';
   if (path.includes('/admin/sources/') && m === 'PATCH') return '修改音源';
@@ -77,7 +82,7 @@ export function actionLabel(method: string, path: string): string {
   return `${m} ${path.replace('/api', '')}`;
 }
 
-const ID_LIKE = /^(?:(?:task|run|sub|proxy)_[A-Za-z0-9_-]+|[0-9a-f][0-9a-f-]{7,})$/i;
+const ID_LIKE = /^(?:(?:task|run|sub|proxy|dr|cand)_[A-Za-z0-9_-]+|[0-9a-f][0-9a-f-]{7,})$/i;
 const ACTION_SEGMENTS = new Set([
   'cancel',
   'dispatch',

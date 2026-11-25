@@ -31,6 +31,7 @@ const PUBLIC_PATHS = new Set([
   '/api/runner/proxies',
   '/api/config/mirrors',
   '/api/config/sources',
+  '/api/config/discovery',
   '/api/health',
   '/favicon.ico',
   '/favicon.svg',
@@ -88,7 +89,7 @@ app.use('/api/*', async (c, next) => {
   const method = c.req.method.toUpperCase();
   const mutating = method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE';
   await next();
-  if (!mutating || path.endsWith('/preview')) return;
+  if (!mutating || path.endsWith('/admin/proxies/preview')) return;
 
   let message = '';
   if (c.res.status >= 400) {

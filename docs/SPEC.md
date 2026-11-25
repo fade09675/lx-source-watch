@@ -72,9 +72,11 @@
 ### 5.4 候选 `/candidates`
 
 - 列表：仓库、路径、标题、版本、平台、大小、初始化结果、首次/最近发现、状态（新/合格/拒绝/已转正/重复）。
+- 发现仓库：可添加/停用/删除自定义 GitHub 仓库（`owner/repo`、分支、最多 5 个路径前缀、备注）；内置仓库仍在 `sources/discovery.json`，Actions 启动时读取公开配置并合并，按 `repo@branch` 去重；读取失败只告警并继续内置仓库。
 - 按仓库筛选；每仓库每轮默认最多取 5 个（`maxFetchPerRepo`），避免大仓库占满全局名额；说明候选未做拉流校验，不代表可用；支持手动/自动转正。
 - 列表分页默认每页 10 条，可切 20/50/全部。
 - 去重：内容 sha256 相同直接并为主源别名；标题和作者相同但 sha256 不同视为“相似”，自动转正会跳过并留在合格状态，需人工确认；手动收录可强制。注册表保存作者用于精确匹配。
+- 备用线路：可在音源管理页粘贴第三方托管脚本地址（每行一个，最多 20 个）；自动模式按标题+作者匹配、退回唯一标题匹配，手动模式指定音源。预览显示匹配/已存在/多个同名/未匹配/无效/下载失败，确认后追加为该音源的自定义镜像（每源上限 10），不改变主地址。
 
 ### 5.5 运行 `/runs`、`/runs/:runId`
 
@@ -85,7 +87,7 @@
 
 ### 5.6 管理页
 
-- `/admin/sources`：音源注册表 CRUD、启停、镜像/加速模板、导入链接；列表分页。
+- `/admin/sources`：音源注册表 CRUD、启停、镜像/加速模板、导入链接；备用线路导入（自动匹配/手动指定，预览后追加镜像）；列表分页。
 - `/admin/proxies`：订阅与节点、导入预览/去重、刷新、用 Actions 拉取、独立测活、测活结果与地区；订阅与节点列表分别分页。
 - `/admin/proxy-tests`：测活轮次与逐节点日志、CSV；逐节点结果分页。
 - `/admin/settings`：调度、国内补测、测活、自动发现/收录、保留天数、额度护栏、加速镜像、系统信息。
@@ -135,6 +137,7 @@
 - `admin_activity`：后台写操作记录（时间、方法、路径、操作名、目标、状态、说明）。
 - `proxy_test_runs/proxy_test_results`：测活轮次与逐节点结果。
 - `source_registry/source_aliases`：音源注册表（含 `author`、`origin` 来源仓库/路径）与重复源别名。
+- `discovery_repos`：网页添加的自定义发现仓库（repo/branch/path_prefixes/enabled/notes），与内置 `sources/discovery.json` 合并；`(repo, branch)` 唯一。
 
 ### 6.3 状态规则
 
@@ -160,6 +163,11 @@
 | GET | `/api/candidates` | 候选列表；支持 state/limit；按仓库筛选在前端完成 |
 | GET | `/api/export` | 导入清单（json/csv） |
 | GET | `/api/config/sources` | 公开的注册表，供 Actions 读取 |
+| GET | `/api/config/discovery` | 公开的自定义发现仓库 + 发现上限，供 Actions 合并 |
+| GET/POST | `/api/admin/discovery-repos` | 列出/添加自定义发现仓库 |
+| PATCH/DELETE | `/api/admin/discovery-repos/:id` | 启停/修改/删除自定义发现仓库 |
+| POST | `/api/admin/sources/backups/preview` | 解析备用线路地址并匹配音源，不写库 |
+| POST | `/api/admin/sources/backups/import` | 把匹配结果追加为音源镜像 |
 | GET | `/api/health` | 健康检查 |
 | POST | `/api/ingest` | 仅 publish job，HMAC + runId 幂等 |
 | POST | `/api/admin/proxies/preview` | 导入预览，只统计不写库 |
@@ -227,7 +235,7 @@
 - Cloudflare：Worker + KV + D1 + 自定义域；详见 `docs/DEPLOY.md`。
 - GitHub Actions secrets：`CF_API_TOKEN`、`INGEST_SECRET`、`INGEST_URL`、`RUNNER_TOKEN`。
 - Worker secrets：`INGEST_SECRET`、`RUNNER_TOKEN`、`PROXY_ENC_KEY`、`CF_ANALYTICS_TOKEN`、`GH_DISPATCH_TOKEN`、`ADMIN_PASSWORD_HASH`、`SESSION_SECRET`。
-- 迁移：`0001`–`0020`，新增迁移必须同时更新部署手册。
+- 迁移：`0001`–`0021`，新增迁移必须同时更新部署手册。
 
 ## 13. 阶段验收
 
@@ -238,7 +246,8 @@
 | 阶段 5 | 已完成并上线 | 额度护栏可配置、运行记录预览清理、保留最新一轮 |
 | 阶段 6A | 已上线（2026-11-25） | 多仓库发现、每仓库抓取上限、候选按仓库筛选 |
 | 阶段 6B | 已完成 | README/SPEC/DEPLOY/CN 评审文档与代码一致 |
-| 阶段 6C | 待做 | 全量本地校验、文档链接/命令核对、线上健康核对 |
+| 阶段 6C | 已完成 | 全量本地校验、文档链接/命令核对、线上健康核对 |
+| 自定义仓库/备用线路 | 本地完成，待上线 | 网页添加发现仓库、Actions 合并；第三方脚本按标题/作者或手动指定导入为镜像 |
 
 ## 14. 已知边界
 

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { formatDateTime, formatRelative, platformMeta, type Candidate } from '@lx/shared';
 import { api, type CandidateList } from '../api';
 import { EmptyBox, ErrorBox, Spinner } from '../components/Feedback';
+import { DiscoveryReposPanel } from '../components/DiscoveryReposPanel';
 import { Pagination, useClientPager } from '../components/Pagination';
 
 const STATE_FALLBACK = { label: '待验证', tone: 'warn', hint: '还没通过初始化' } as const;
@@ -150,6 +151,8 @@ export function CandidatesPage() {
 
       {notice ? <p className="notice">{notice}</p> : null}
       {error ? <ErrorBox message={error} /> : null}
+
+      <DiscoveryReposPanel />
 
       <div className="stats-grid stats-grid--compact">
         <div className="stat-card">

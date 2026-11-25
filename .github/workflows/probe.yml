@@ -72,6 +72,8 @@ jobs:
     env:
       # 音源清单由网页管理，探测任务从这里读取；读不到会自动回退仓库内清单。
       LX_REGISTRY_URL: https://dash.dpdns.org/api/config/sources
+      # 网页添加的发现仓库；读不到时只用仓库内置仓库。
+      LX_DISCOVERY_URL: https://dash.dpdns.org/api/config/discovery
     steps:
       - name: 检出
         uses: actions/checkout@v4

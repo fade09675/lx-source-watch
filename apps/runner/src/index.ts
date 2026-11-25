@@ -136,6 +136,8 @@ discover:
   --seed <path>             额外种子候选
   --max-fetch <n>           本跑最多抓取数（默认取配置）
   --token <token>           GitHub Token，默认读 GITHUB_TOKEN
+  --discovery-url <url>     网页自定义仓库配置（默认读 LX_DISCOVERY_URL）
+  --allow-private           允许读取 127.0.0.1（仅本地联调）
 
 cn:
   --urls-in <path>          默认 out/urls.json
@@ -221,6 +223,8 @@ async function cmdDiscover(args: Args): Promise<void> {
     seedPath: str(args, 'seed'),
     maxFetchPerRun: num(args, 'max-fetch'),
     token: str(args, 'token'),
+    discoveryUrl: str(args, 'discovery-url'),
+    allowPrivate: bool(args, 'allow-private'),
     proxy: parseProxy(str(args, 'proxy') ?? process.env.LX_PROXY_URL),
   });
 }

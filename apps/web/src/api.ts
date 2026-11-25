@@ -674,6 +674,62 @@ export interface SourceInputPayload {
   notes?: string;
 }
 
+export interface DiscoveryRepoView {
+  id: string;
+  repo: string;
+  branch: string;
+  pathPrefixes: string[];
+  enabled: boolean;
+  notes: string;
+  lastScannedAt?: string | null;
+  lastError?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DiscoveryRepoInput {
+  repo?: string;
+  branch?: string;
+  pathPrefixes?: string[];
+  enabled?: boolean;
+  notes?: string;
+}
+
+export type BackupItemStatus = 'matched' | 'ambiguous' | 'unmatched' | 'already' | 'invalid' | 'unreachable';
+
+export interface BackupPreviewItem {
+  url: string;
+  title: string;
+  author: string;
+  sha256?: string;
+  bytes?: number;
+  status: BackupItemStatus;
+  matchKind: 'manual' | 'title-author' | 'title' | 'none' | 'ambiguous';
+  sourceId?: string;
+  sourceTitle?: string;
+  message?: string;
+}
+
+export interface BackupPreview {
+  items: BackupPreviewItem[];
+  summary: {
+    total: number;
+    matched: number;
+    ambiguous: number;
+    unmatched: number;
+    already: number;
+    invalid: number;
+    unreachable: number;
+  };
+}
+
+export interface BackupImportResult {
+  imported: number;
+  skipped: number;
+  errors: { url: string; message: string }[];
+  sources: { id: string; title: string; mirrors: string[] }[];
+}
+
 export interface DuplicateEntryView {
   kind: 'registry' | 'candidate';
   id: string;
@@ -903,6 +959,30 @@ export const api = {
       `/api/admin/sources/${encodeURIComponent(id)}/test`,
       { method: 'POST' },
     ),
+  previewBackups: (input: { text?: string; urls?: string[]; sourceId?: string }) =>
+    request<BackupPreview>('/api/admin/sources/backups/preview', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  importBackups: (items: { url: string; sourceId: string }[]) =>
+    request<BackupImportResult>('/api/admin/sources/backups/import', {
+      method: 'POST',
+      body: JSON.stringify({ items }),
+    }),
+
+  discoveryRepos: () => request<{ repos: DiscoveryRepoView[] }>('/api/admin/discovery-repos'),
+  createDiscoveryRepo: (input: DiscoveryRepoInput) =>
+    request<{ repo: DiscoveryRepoView }>('/api/admin/discovery-repos', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateDiscoveryRepo: (id: string, input: DiscoveryRepoInput) =>
+    request<{ repo: DiscoveryRepoView }>(`/api/admin/discovery-repos/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  deleteDiscoveryRepo: (id: string) =>
+    request<{ ok: boolean }>(`/api/admin/discovery-repos/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   duplicates: () => request<DuplicateOverview>('/api/admin/duplicates'),
   mergeDuplicates: (canonicalId: string, duplicates: { url: string; sourceId?: string }[]) =>

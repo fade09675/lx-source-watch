@@ -37,6 +37,13 @@
       "pathPrefixes": [],
       "exclude": ["node_modules", ".min.js", "dist/", "docs/"],
       "enabled": true
+    },
+    {
+      "repo": "tfappstore/lx-music-source",
+      "branch": "main",
+      "pathPrefixes": ["kulao/"],
+      "exclude": ["node_modules", ".min.js", "dist/", "docs/"],
+      "enabled": true
     }
   ]
 }
