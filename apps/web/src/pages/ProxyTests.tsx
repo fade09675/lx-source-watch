@@ -8,6 +8,7 @@ import {
 } from '../api';
 import { ErrorBox, Spinner } from '../components/Feedback';
 import { Pagination, useClientPager } from '../components/Pagination';
+import { PageHeader, SectionCard } from '../components/ui';
 
 const DAYS = [7, 14, 30];
 
@@ -131,42 +132,40 @@ export function ProxyTestsPage() {
 
   return (
     <div className="page">
-      <header className="page-head">
-        <div>
-          <p className="eyebrow">PROXY TEST</p>
-          <h1>代理测活日志</h1>
-          <p className="page-sub">
-            每次测活的节点、测试时间、结果、延迟、出口地区和失败原因都记录在这里。
-          </p>
-        </div>
-        <div className="page-actions">
-          <div className="segmented">
-            {DAYS.map((value) => (
-              <button
-                key={value}
-                type="button"
-                className={days === value ? 'segmented-item active' : 'segmented-item'}
-                onClick={() => setDays(value)}
-              >
-                近 {value} 天
-              </button>
-            ))}
-          </div>
-          <button type="button" className="ghost-button" onClick={() => void loadRuns()}>
-            刷新
-          </button>
-        </div>
-      </header>
+      <PageHeader
+        eyebrow="PROXY TEST"
+        title="代理测活日志"
+        description="每次测活的节点、测试时间、结果、延迟、出口地区和失败原因都记录在这里。"
+        actions={
+          <>
+            <div className="segmented">
+              {DAYS.map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={days === value ? 'segmented-item active' : 'segmented-item'}
+                  onClick={() => setDays(value)}
+                >
+                  近 {value} 天
+                </button>
+              ))}
+            </div>
+            <button type="button" className="ghost-button" onClick={() => void loadRuns()}>
+              刷新
+            </button>
+          </>
+        }
+      />
 
       {error ? <ErrorBox message={error} onRetry={() => void loadRuns()} /> : null}
       {loading ? <Spinner label="正在读测活日志" /> : null}
 
       <div className="proxy-log-layout">
-        <section className="panel proxy-run-list">
-          <div className="panel-head">
-            <h2>测活轮次</h2>
-            <span className="muted">{runs.length} 轮</span>
-          </div>
+        <SectionCard
+          className="proxy-run-list"
+          title="测活轮次"
+          actions={<span className="muted small">{runs.length} 轮</span>}
+        >
           {!runs.length && !loading ? <p className="empty-box">这段时间还没有测活记录。</p> : null}
           {runs.map((run) => {
             const tone = runTone(run);
@@ -196,9 +195,9 @@ export function ProxyTestsPage() {
               </button>
             );
           })}
-        </section>
+        </SectionCard>
 
-        <section className="panel proxy-log-detail">
+        <SectionCard className="proxy-log-detail">
           {!selected ? (
             <p className="empty-box">左侧选一轮测活，看每个代理的结果。</p>
           ) : detailLoading ? (
@@ -295,7 +294,7 @@ export function ProxyTestsPage() {
               <Pagination {...resultPager.pagination} label="个节点" />
             </>
           )}
-        </section>
+        </SectionCard>
       </div>
     </div>
   );

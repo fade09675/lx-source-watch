@@ -9,6 +9,7 @@ import {
 } from '../api';
 import { EmptyBox, ErrorBox, Spinner } from '../components/Feedback';
 import { Pagination, useClientPager } from '../components/Pagination';
+import { PageHeader, SectionCard, StatCard, StatGrid } from '../components/ui';
 
 function shortSha(value: string): string {
   return value ? `${value.slice(0, 12)}…` : '—';
@@ -115,43 +116,26 @@ export function DuplicatesPage() {
 
   return (
     <div className="page">
-      <div className="page-head">
-        <div>
-          <p className="eyebrow">DUPLICATES</p>
-          <h1>重复与别名</h1>
-          <p className="muted">
-            内容指纹相同的音源只保留一个主源：重复地址变成别名和镜像，重复源停用但保留记录；同名不同内容只提示。
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="DUPLICATES"
+        title="重复与别名"
+        description="内容指纹相同的音源只保留一个主源：重复地址变成别名和镜像，重复源停用但保留记录；同名不同内容只提示。"
+      />
 
-      <div className="stats-grid">
-        <div className="stat-card">
-          <span className="stat-label">重复组</span>
-          <strong className="stat-value">{counts.groups}</strong>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">重复地址</span>
-          <strong className="stat-value">{counts.duplicateUrls}</strong>
-          <span className="stat-hint">已合并 {counts.mergedUrls}</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">别名</span>
-          <strong className="stat-value">{counts.aliases}</strong>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">同名疑似</span>
-          <strong className="stat-value">{counts.similar}</strong>
-        </div>
-      </div>
+      <StatGrid compact>
+        <StatCard label="重复组" value={counts.groups} hint="按完整 sha256 分组" />
+        <StatCard label="重复地址" value={counts.duplicateUrls} hint={`已合并 ${counts.mergedUrls}`} />
+        <StatCard label="别名" value={counts.aliases} hint="忽略后仍保留记录" />
+        <StatCard label="同名疑似" value={counts.similar} hint="仅提示，不自动合并" tone="warn" />
+      </StatGrid>
 
       {message ? <div className="notice">{message}</div> : null}
 
-      <section className="panel">
-        <div className="panel-head">
-          <h2>内容重复</h2>
-          <span className="muted">按完整 sha256 分组，只显示至少两个不同地址的组</span>
-        </div>
+      <SectionCard
+        title="内容重复"
+        description="按完整 sha256 分组，只显示至少两个不同地址的组"
+        actions={<span className="muted small">{counts.groups} 组</span>}
+      >
         {groups.length === 0 ? (
           <EmptyBox message="目前没有内容重复的音源" />
         ) : (
@@ -161,7 +145,7 @@ export function DuplicatesPage() {
               return (
                 <article className="dup-group" key={group.sha256}>
                   <header className="dup-head">
-                    <div>
+                    <div className="dup-title">
                       <span className="dup-sha" title={group.sha256}>
                         {shortSha(group.sha256)}
                       </span>
@@ -173,7 +157,7 @@ export function DuplicatesPage() {
                         {group.merged ? '已合并' : '待合并'}
                       </span>
                       <button
-                        className="ghost-button"
+                        className="row-link"
                         disabled={!canMerge || busy === group.sha256}
                         title={
                           group.canonical.kind !== 'registry'
@@ -188,39 +172,24 @@ export function DuplicatesPage() {
                       </button>
                     </div>
                   </header>
-                  <div className="table-wrap">
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          <th>来源</th>
-                          <th>地址</th>
-                          <th>状态</th>
-                          <th>版本</th>
-                          <th>首次发现</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {group.entries.map((entry) => {
-                          const state = entryState(entry, group);
-                          return (
-                            <tr key={`${entry.kind}:${entry.id}`}>
-                              <td>
-                                <span className="mini-chip">{entry.kind === 'registry' ? '音源' : '候选'}</span>
-                                <span className="muted"> {entry.title}</span>
-                              </td>
-                              <td className="mono" title={entry.url}>
-                                {shortUrl(entry.url)}
-                              </td>
-                              <td>
-                                <span className={`pill tone-${state.tone}`}>{state.label}</span>
-                              </td>
-                              <td>{entry.version || '—'}</td>
-                              <td>{time(entry.firstSeen)}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                  <div className="dup-entries">
+                    {group.entries.map((entry) => {
+                      const state = entryState(entry, group);
+                      return (
+                        <div className="dup-entry" key={`${entry.kind}:${entry.id}`}>
+                          <span className="mini-chip">{entry.kind === 'registry' ? '音源' : '候选'}</span>
+                          <div className="dup-entry-main">
+                            <strong>{entry.title}</strong>
+                            <span className="mono" title={entry.url}>
+                              {shortUrl(entry.url)}
+                            </span>
+                          </div>
+                          <span className="dup-entry-meta">{entry.version || '—'}</span>
+                          <span className="dup-entry-meta">{time(entry.firstSeen)}</span>
+                          <span className={`pill tone-${state.tone}`}>{state.label}</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </article>
               );
@@ -228,14 +197,14 @@ export function DuplicatesPage() {
           </div>
         )}
         {groups.length > 0 && <Pagination {...groupsPager.pagination} label="个重复组" />}
-      </section>
+      </SectionCard>
 
       {similar.length > 0 ? (
-        <section className="panel">
-          <div className="panel-head">
-            <h2>同名疑似（仅提示）</h2>
-            <span className="muted">名称和作者相同但内容指纹不同，按你的规则不自动合并</span>
-          </div>
+        <SectionCard
+          title="同名疑似"
+          description="名称和作者相同但内容指纹不同，按你的规则不自动合并"
+          actions={<span className="muted small">{counts.similar} 组</span>}
+        >
           <div className="table-wrap">
             <table className="data-table">
               <thead>
@@ -266,14 +235,14 @@ export function DuplicatesPage() {
               </tbody>
             </table>
           </div>
-        </section>
+        </SectionCard>
       ) : null}
 
-      <section className="panel">
-        <div className="panel-head">
-          <h2>别名</h2>
-          <span className="muted">忽略后不再计入重复，但记录保留</span>
-        </div>
+      <SectionCard
+        title="别名"
+        description="忽略后不再计入重复，但记录保留"
+        actions={<span className="muted small">{counts.aliases} 条</span>}
+      >
         {aliases.length === 0 ? (
           <EmptyBox message="还没有别名记录" />
         ) : (
@@ -322,7 +291,7 @@ export function DuplicatesPage() {
           </div>
         )}
         {aliases.length > 0 && <Pagination {...aliasesPager.pagination} label="条别名" />}
-      </section>
+      </SectionCard>
     </div>
   );
 }
