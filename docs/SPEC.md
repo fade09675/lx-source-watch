@@ -71,6 +71,7 @@
 
 - 列表：仓库、路径、标题、版本、平台、大小、初始化结果、首次/最近发现、状态（新/合格/拒绝/已转正/重复）。
 - 按仓库筛选；每仓库每轮默认最多取 5 个（`maxFetchPerRepo`），避免大仓库占满全局名额；说明候选未做拉流校验，不代表可用；支持手动/自动转正。
+- 去重：内容 sha256 相同直接并为主源别名；标题和作者相同但 sha256 不同视为“相似”，自动转正会跳过并留在合格状态，需人工确认；手动收录可强制。注册表保存作者用于精确匹配。
 
 ### 5.5 运行 `/runs`、`/runs/:runId`
 
@@ -213,7 +214,7 @@
 - Cloudflare：Worker + KV + D1 + 自定义域；详见 `docs/DEPLOY.md`。
 - GitHub Actions secrets：`CF_API_TOKEN`、`INGEST_SECRET`、`INGEST_URL`、`RUNNER_TOKEN`。
 - Worker secrets：`INGEST_SECRET`、`RUNNER_TOKEN`、`PROXY_ENC_KEY`、`CF_ANALYTICS_TOKEN`、`GH_DISPATCH_TOKEN`、`ADMIN_PASSWORD_HASH`、`SESSION_SECRET`。
-- 迁移：`0001`–`0017`，新增迁移必须同时更新部署手册。
+- 迁移：`0001`–`0018`，新增迁移必须同时更新部署手册。
 
 ## 13. 阶段验收
 

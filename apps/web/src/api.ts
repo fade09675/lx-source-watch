@@ -572,6 +572,7 @@ export interface SourceLink {
 export interface AdminSource {
   id: string;
   title: string;
+  author?: string;
   category: string;
   storage: 'remote' | 'repo';
   url: string;

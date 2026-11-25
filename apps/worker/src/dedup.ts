@@ -54,6 +54,7 @@ interface RegistryDedupRow {
   url: string;
   content_sha256: string | null;
   title: string;
+  author: string;
   created_at: string;
   enabled: number;
 }
@@ -197,7 +198,7 @@ export function classifyDuplicate(target: DedupTarget, matches: DedupMatchSet): 
 async function registryEntries(db: D1Database, where: string, binds: unknown[]): Promise<DedupEntry[]> {
   const rows = await db
     .prepare(
-      `SELECT id, url, content_sha256, title, created_at, enabled
+      `SELECT id, url, content_sha256, title, author, created_at, enabled
        FROM source_registry WHERE ${where} LIMIT 50`,
     )
     .bind(...binds)
@@ -207,7 +208,7 @@ async function registryEntries(db: D1Database, where: string, binds: unknown[]):
     url: comparableUrl(row.url),
     sha256: row.content_sha256 ?? null,
     title: row.title,
-    author: '',
+    author: row.author ?? '',
     version: '',
     enabled: row.enabled === 1,
     official: isOfficialUrl(row.url),
@@ -247,7 +248,7 @@ export async function lookupMatches(db: D1Database, target: DedupTarget): Promis
     registryEntries(db, 'url = ?', [target.url]),
     candidateEntries(db, 'url = ?', [target.url]),
     target.title && target.author
-      ? registryEntries(db, 'title = ?', [target.title])
+      ? registryEntries(db, "title = ? AND (author = ? OR author = '')", [target.title, target.author])
       : Promise.resolve([]),
     target.title && target.author
       ? candidateEntries(db, 'title = ? AND author = ?', [target.title, target.author])
@@ -335,7 +336,7 @@ export async function listDuplicateOverview(db: D1Database, now = new Date().toI
   const [registry, candidates, aliasRows, titles] = await Promise.all([
     db
       .prepare(
-        `SELECT id, url, content_sha256, title, created_at, enabled
+        `SELECT id, url, content_sha256, title, author, created_at, enabled
          FROM source_registry WHERE content_sha256 IS NOT NULL AND content_sha256 <> '' LIMIT 1000`,
       )
       .all<RegistryDedupRow>(),
@@ -365,7 +366,7 @@ export async function listDuplicateOverview(db: D1Database, now = new Date().toI
       url: comparableUrl(row.url),
       sha256: row.content_sha256,
       title: row.title,
-      author: '',
+      author: row.author ?? '',
       version: '',
       enabled: row.enabled === 1,
       official: isOfficialUrl(row.url),

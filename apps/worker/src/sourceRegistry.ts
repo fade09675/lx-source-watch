@@ -8,6 +8,7 @@ import {
 export interface SourceRegistryRow {
   id: string;
   title: string;
+  author: string;
   category: string;
   storage: 'remote' | 'repo';
   url: string;
@@ -27,6 +28,7 @@ export interface SourceRegistryRow {
 export interface SourceInput {
   id?: string;
   title?: string;
+  author?: string;
   category?: string;
   url?: string;
   homepage?: string;
@@ -46,6 +48,7 @@ export interface ValidationResult {
 interface RawRow {
   id: string;
   title: string;
+  author: string;
   category: string;
   storage: string;
   url: string;
@@ -76,6 +79,7 @@ export function fromRow(row: RawRow): SourceRegistryRow {
   return {
     id: row.id,
     title: row.title,
+    author: row.author ?? '',
     category: row.category,
     storage: row.storage === 'repo' ? 'repo' : 'remote',
     url: row.url,
@@ -116,6 +120,7 @@ export function slugify(title: string): string {
 export function validateSourceInput(input: SourceInput, base?: SourceRegistryRow): ValidationResult {
   const errors: string[] = [];
   const title = cleanText(input.title ?? base?.title, 80);
+  const author = cleanText(input.author ?? base?.author, 80);
   if (!title) errors.push('标题不能为空');
 
   const url = cleanText(input.url ?? base?.url, 500);
@@ -165,6 +170,7 @@ export function validateSourceInput(input: SourceInput, base?: SourceRegistryRow
     value: {
       id,
       title,
+      author,
       category,
       storage: 'remote',
       url,
@@ -182,7 +188,7 @@ export function validateSourceInput(input: SourceInput, base?: SourceRegistryRow
   };
 }
 
-const COLUMNS = `id, title, category, storage, url, path, homepage, mirrors, content_sha256, enabled, trusted, notes, sort_order, created_at, updated_at`;
+const COLUMNS = `id, title, author, category, storage, url, path, homepage, mirrors, content_sha256, enabled, trusted, notes, sort_order, created_at, updated_at`;
 
 export async function listSourceRegistry(db: D1Database): Promise<SourceRegistryRow[]> {
   const result = await db.prepare(`SELECT ${COLUMNS} FROM source_registry ORDER BY sort_order ASC, title ASC`).all<RawRow>();
@@ -228,11 +234,12 @@ export async function createSourceRegistry(
 
   await db
     .prepare(
-      `INSERT INTO source_registry (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO source_registry (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id,
       source.title,
+      source.author,
       source.category,
       source.storage,
       source.url,
@@ -270,13 +277,14 @@ export async function updateSourceRegistry(
   await db
     .prepare(
       `UPDATE source_registry
-         SET title = ?, category = ?, storage = ?, url = ?, path = ?, homepage = ?, mirrors = ?,
+         SET title = ?, author = ?, category = ?, storage = ?, url = ?, path = ?, homepage = ?, mirrors = ?,
              content_sha256 = COALESCE(?, content_sha256),
              enabled = ?, trusted = ?, notes = ?, updated_at = ?
        WHERE id = ?`,
     )
     .bind(
       value.title,
+      value.author,
       value.category,
       value.storage,
       value.url,
@@ -346,6 +354,7 @@ export function toPublicRegistry(rows: SourceRegistryRow[]): {
       .map((row) => ({
         id: row.id,
         title: row.title,
+        ...(row.author ? { author: row.author } : {}),
         storage: row.storage,
         ...(row.storage === 'repo' ? { path: row.path } : { url: row.url }),
         ...(row.homepage ? { homepage: row.homepage } : {}),

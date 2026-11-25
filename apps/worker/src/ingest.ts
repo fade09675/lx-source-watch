@@ -154,6 +154,8 @@ export async function handleIngest(c: Ctx): Promise<Response> {
     events: stats.events,
     candidates: stats.candidates,
     promoted: promotion.promoted.length,
+    promotionSkipped: promotion.skipped,
+    promotionWarnings: promotion.warnings,
     promotionErrors: promotion.errors,
     merged: mergeResult?.merged ?? 0,
     mergeErrors: mergeResult?.errors ?? [],

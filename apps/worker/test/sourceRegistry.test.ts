@@ -11,6 +11,7 @@ function row(patch: Partial<SourceRegistryRow> = {}): SourceRegistryRow {
   return {
     id: 'demo',
     title: '演示音源',
+    author: '测试作者',
     category: '在线',
     storage: 'remote',
     url: 'https://raw.githubusercontent.com/owner/repo/main/demo.js',
@@ -43,11 +44,13 @@ describe('validateSourceInput', () => {
   it('accepts a normal source and generates an id', () => {
     const result = validateSourceInput({
       title: 'Demo Source',
+      author: '  作者A  ',
       url: 'https://raw.githubusercontent.com/o/r/main/a.js',
       mirrors: ['https://gh-proxy.com/https://raw.githubusercontent.com/o/r/main/a.js'],
     });
     expect(result.ok).toBe(true);
     expect(result.value?.id).toMatch(/^[a-z0-9][a-z0-9_-]{1,40}$/);
+    expect(result.value?.author).toBe('作者A');
     expect(result.value?.enabled).toBe(true);
   });
 
@@ -93,6 +96,7 @@ describe('toPublicRegistry', () => {
     expect(config.sources[1]).toMatchObject({
       mirrors: ['https://m.example.com/a.js'],
       notes: '备注',
+      author: '测试作者',
     });
     expect(config.sources[0]).not.toHaveProperty('enabled');
   });

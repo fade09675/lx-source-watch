@@ -82,7 +82,7 @@ corepack pnpm --filter @lx/worker exec wrangler d1 create lx-source-watch
 corepack pnpm --filter @lx/worker exec wrangler d1 migrations apply lx-source-watch --remote
 ```
 
-迁移从 `0001_init.sql` 到 `0017_endpoint_cn.sql`，应全部成功。验证：
+迁移从 `0001_init.sql` 到 `0018_source_author.sql`，应全部成功。验证：
 
 ```powershell
 corepack pnpm --filter @lx/worker exec wrangler d1 execute lx-source-watch --remote --command "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
