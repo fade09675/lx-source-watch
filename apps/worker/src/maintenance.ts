@@ -1,4 +1,4 @@
-import type { D1Database } from '@cloudflare/workers-types';
+import type { D1Database, D1PreparedStatement } from '@cloudflare/workers-types';
 import type { Env } from './env';
 
 const DAY_MS = 86_400_000;
@@ -16,6 +16,8 @@ export interface RunPurgeCounts {
   proxyTestRuns: number;
   /** 将被删除的测活明细数。 */
   proxyTestResults: number;
+  /** 将被删除的操作记录数。 */
+  activity: number;
 }
 
 export interface RunPurgePlan extends RunPurgeCounts {
@@ -60,7 +62,7 @@ export async function planRunPurge(env: Env, days: number, now = new Date()): Pr
   const runCutoff = clampCutoff(requested, latestRun?.generated_at ?? null);
   const proxyCutoff = clampCutoff(requested, latestProxy?.finished_at ?? null);
 
-  const [runs, sourceRuns, platformResults, tasks, proxyTestRuns, proxyTestResults] = await Promise.all([
+  const [runs, sourceRuns, platformResults, tasks, proxyTestRuns, proxyTestResults, activity] = await Promise.all([
     count(env.DB, 'SELECT COUNT(*) AS n FROM runs WHERE generated_at < ?', runCutoff.cutoff),
     count(
       env.DB,
@@ -84,6 +86,7 @@ export async function planRunPurge(env: Env, days: number, now = new Date()): Pr
       'SELECT COUNT(*) AS n FROM proxy_test_results WHERE run_id IN (SELECT run_id FROM proxy_test_runs WHERE finished_at < ?)',
       proxyCutoff.cutoff,
     ),
+    count(env.DB, 'SELECT COUNT(*) AS n FROM admin_activity WHERE at < ?', runCutoff.cutoff),
   ]);
 
   return {
@@ -99,29 +102,37 @@ export async function planRunPurge(env: Env, days: number, now = new Date()): Pr
     tasks,
     proxyTestRuns,
     proxyTestResults,
+    activity,
   };
 }
 
 /** 按预览结果删除；子表先删，避免留下孤儿记录。 */
 export async function executeRunPurge(env: Env, plan: RunPurgePlan): Promise<void> {
-  if (plan.runs === 0 && plan.proxyTestRuns === 0) return;
-  await env.DB.batch([
-    env.DB
-      .prepare('DELETE FROM proxy_test_results WHERE run_id IN (SELECT run_id FROM proxy_test_runs WHERE finished_at < ?)')
-      .bind(plan.proxyCutoff),
-    // 任务要在 runs / proxy_test_runs 删除前清理，子查询才查得到旧记录。
-    env.DB
-      .prepare(
-        'DELETE FROM tasks WHERE run_id IN (SELECT run_id FROM runs WHERE generated_at < ?) OR run_id IN (SELECT run_id FROM proxy_test_runs WHERE finished_at < ?)',
-      )
-      .bind(plan.cutoff, plan.proxyCutoff),
-    env.DB.prepare('DELETE FROM proxy_test_runs WHERE finished_at < ?').bind(plan.proxyCutoff),
-    env.DB
-      .prepare('DELETE FROM platform_results WHERE run_id IN (SELECT run_id FROM runs WHERE generated_at < ?)')
-      .bind(plan.cutoff),
-    env.DB
-      .prepare('DELETE FROM source_runs WHERE run_id IN (SELECT run_id FROM runs WHERE generated_at < ?)')
-      .bind(plan.cutoff),
-    env.DB.prepare('DELETE FROM runs WHERE generated_at < ?').bind(plan.cutoff),
-  ]);
+  if (plan.runs === 0 && plan.proxyTestRuns === 0 && plan.activity === 0) return;
+  const statements: D1PreparedStatement[] = [];
+  if (plan.activity > 0) {
+    statements.push(env.DB.prepare('DELETE FROM admin_activity WHERE at < ?').bind(plan.cutoff));
+  }
+  if (plan.runs > 0 || plan.proxyTestRuns > 0) {
+    statements.push(
+      env.DB
+        .prepare('DELETE FROM proxy_test_results WHERE run_id IN (SELECT run_id FROM proxy_test_runs WHERE finished_at < ?)')
+        .bind(plan.proxyCutoff),
+      // 任务要在 runs / proxy_test_runs 删除前清理，子查询才查得到旧记录。
+      env.DB
+        .prepare(
+          'DELETE FROM tasks WHERE run_id IN (SELECT run_id FROM runs WHERE generated_at < ?) OR run_id IN (SELECT run_id FROM proxy_test_runs WHERE finished_at < ?)',
+        )
+        .bind(plan.cutoff, plan.proxyCutoff),
+      env.DB.prepare('DELETE FROM proxy_test_runs WHERE finished_at < ?').bind(plan.proxyCutoff),
+      env.DB
+        .prepare('DELETE FROM platform_results WHERE run_id IN (SELECT run_id FROM runs WHERE generated_at < ?)')
+        .bind(plan.cutoff),
+      env.DB
+        .prepare('DELETE FROM source_runs WHERE run_id IN (SELECT run_id FROM runs WHERE generated_at < ?)')
+        .bind(plan.cutoff),
+      env.DB.prepare('DELETE FROM runs WHERE generated_at < ?').bind(plan.cutoff),
+    );
+  }
+  await env.DB.batch(statements);
 }

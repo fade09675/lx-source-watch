@@ -16,6 +16,7 @@ function plan(overrides: Partial<RunPurgePlan> = {}): RunPurgePlan {
     tasks: 0,
     proxyTestRuns: 1,
     proxyTestResults: 0,
+    activity: 0,
     ...overrides,
   };
 }
@@ -39,6 +40,23 @@ describe('executeRunPurge', () => {
     const proxyRuns = sqls.findIndex((sql) => sql.startsWith('DELETE FROM proxy_test_runs'));
     expect(tasks).toBeGreaterThan(-1);
     expect(tasks).toBeLessThan(proxyRuns);
+  });
+
+  it('只有旧操作记录时也能清理', async () => {
+    const sqls: string[] = [];
+    const env = {
+      DB: {
+        prepare(sql: string) {
+          sqls.push(sql);
+          return { bind: () => ({}) };
+        },
+        async batch() {
+          return [];
+        },
+      },
+    } as unknown as Env;
+    await executeRunPurge(env, plan({ runs: 0, proxyTestRuns: 0, activity: 2 }));
+    expect(sqls).toEqual(['DELETE FROM admin_activity WHERE at < ?']);
   });
 
   it('没有可删记录时不动数据库', async () => {

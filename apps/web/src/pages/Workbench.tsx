@@ -145,40 +145,64 @@ function ResultStats({ result }: { result: TaskResult }) {
 }
 
 function TaskFailureDetails({ result }: { result: TaskResult }) {
-  const sources = result.failedSources ?? [];
-  const platforms = result.failedPlatforms ?? [];
+  const failedSources = result.failedSources ?? [];
+  const partialSources = result.partialSources ?? [];
+  const okSources = result.okSources ?? [];
+  const failedPlatforms = result.failedPlatforms ?? [];
+  const okPlatforms = result.okPlatforms ?? [];
   const subscriptions = result.subscriptions ?? [];
-  if (sources.length === 0 && platforms.length === 0 && subscriptions.length === 0) return null;
+  if (
+    failedSources.length === 0 &&
+    partialSources.length === 0 &&
+    okSources.length === 0 &&
+    failedPlatforms.length === 0 &&
+    okPlatforms.length === 0 &&
+    subscriptions.length === 0
+  ) {
+    return null;
+  }
+  const count = (key: string) => result.counts[key] ?? 0;
+  const renderSources = (items: TaskResult['failedSources'], label: string, total: number) =>
+    items && items.length > 0 ? (
+      <details>
+        <summary>
+          {label}（{items.length < total ? `列出 ${items.length} / 共 ${total}` : total}）
+        </summary>
+        <ul>
+          {items.map((source) => (
+            <li key={source.id}>
+              <Link to={`/s/${encodeURIComponent(source.id)}`}>{source.title}</Link>
+              <span className="muted small"> · {source.status}</span>
+              {source.error && <span className="text-bad small"> · {source.error}</span>}
+            </li>
+          ))}
+        </ul>
+      </details>
+    ) : null;
+  const renderPlatforms = (items: TaskResult['failedPlatforms'], label: string, total: number) =>
+    items && items.length > 0 ? (
+      <details>
+        <summary>
+          {label}（{items.length < total ? `列出 ${items.length} / 共 ${total}` : total}）
+        </summary>
+        <ul>
+          {items.map((platform, index) => (
+            <li key={`${platform.sourceId}-${platform.name}-${index}`}>
+              {platform.name}
+              {platform.errorKind && <span className="muted small"> · {platform.errorKind}</span>}
+              {platform.error && <span className="text-bad small"> · {platform.error}</span>}
+            </li>
+          ))}
+        </ul>
+      </details>
+    ) : null;
   return (
     <div className="task-result-details">
-      {sources.length > 0 && (
-        <details>
-          <summary>失败的源（{sources.length}）</summary>
-          <ul>
-            {sources.map((source) => (
-              <li key={source.id}>
-                <Link to={`/sources/${encodeURIComponent(source.id)}`}>{source.title}</Link>
-                <span className="muted small"> · {source.status}</span>
-                {source.error && <span className="text-bad small"> · {source.error}</span>}
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
-      {platforms.length > 0 && (
-        <details>
-          <summary>失败的平台（{platforms.length}）</summary>
-          <ul>
-            {platforms.map((platform, index) => (
-              <li key={`${platform.sourceId}-${platform.name}-${index}`}>
-                {platform.name}
-                {platform.errorKind && <span className="muted small"> · {platform.errorKind}</span>}
-                {platform.error && <span className="text-bad small"> · {platform.error}</span>}
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
+      {renderSources(failedSources, '失效的源', count('unavailable'))}
+      {renderSources(partialSources, '部分或未测的源', count('partial') + count('untested'))}
+      {renderSources(okSources, '通过的源', count('available'))}
+      {renderPlatforms(failedPlatforms, '失败的平台', Math.max(0, count('platformsTested') - count('platformsOk')))}
+      {renderPlatforms(okPlatforms, '通过的平台', count('platformsOk'))}
       {subscriptions.length > 0 && (
         <details>
           <summary>按订阅统计（{subscriptions.length}）</summary>
@@ -255,43 +279,66 @@ export function WorkbenchPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
-  const load = useCallback(async () => {
-    setError('');
+  const loadOverview = useCallback(async () => {
     try {
-      const recentLimit = recentPage.limit;
-      const activityLimit = activityPage.limit;
-      const [statusResult, usageResult, systemResult, runningResult, queuedResult, recentResult, activityResult] =
-        await Promise.all([
-          api.status(),
-          api.usage(),
-          api.system(),
-          api.tasks({ status: 'running', limit: 10 }),
-          api.tasks({ status: 'queued', limit: 100 }),
-          api.tasks({
-            status: 'finished',
-            type: recentType || undefined,
-            limit: recentLimit,
-            offset: recentPage.offset,
-          }),
-          api.activity(activityLimit, activityPage.offset),
-        ]);
+      const [statusResult, usageResult, systemResult, runningResult, queuedResult] = await Promise.all([
+        api.status(),
+        api.usage(),
+        api.system(),
+        api.tasks({ status: 'running', limit: 10 }),
+        api.tasks({ status: 'queued', limit: 100 }),
+      ]);
       setStatus(statusResult);
       setUsage(usageResult.usage);
       setSystem(systemResult);
       setRunning(runningResult.tasks);
       setQueued(queuedResult.tasks);
-      setRecent(recentResult);
-      setActivity(activityResult);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '加载工作台失败');
     } finally {
       setLoaded(true);
     }
-  }, [recentPage, activityPage, recentType]);
+  }, []);
+
+  const loadRecent = useCallback(async () => {
+    try {
+      const result = await api.tasks({
+        status: 'finished',
+        type: recentType || undefined,
+        limit: recentPage.limit,
+        offset: recentPage.offset,
+      });
+      setRecent(result);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : '加载最近任务失败');
+    }
+  }, [recentPage, recentType]);
+
+  const loadActivity = useCallback(async () => {
+    try {
+      const result = await api.activity(activityPage.limit, activityPage.offset);
+      setActivity(result);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : '加载操作记录失败');
+    }
+  }, [activityPage]);
+
+  const load = useCallback(async () => {
+    setError('');
+    await Promise.all([loadOverview(), loadRecent(), loadActivity()]);
+  }, [loadOverview, loadRecent, loadActivity]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void loadOverview();
+  }, [loadOverview]);
+
+  useEffect(() => {
+    void loadRecent();
+  }, [loadRecent]);
+
+  useEffect(() => {
+    if (tab === 'activity') void loadActivity();
+  }, [tab, loadActivity]);
 
   async function runTask(type: TaskType) {
     setBusy(type);

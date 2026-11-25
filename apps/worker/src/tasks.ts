@@ -42,7 +42,10 @@ export interface TaskResult {
   summary: string;
   counts: Record<string, number>;
   failedSources?: TaskResultSource[];
+  partialSources?: TaskResultSource[];
+  okSources?: TaskResultSource[];
   failedPlatforms?: TaskResultPlatform[];
+  okPlatforms?: TaskResultPlatform[];
   subscriptions?: TaskResultSubscription[];
   warnings?: string[];
 }
@@ -289,6 +292,23 @@ export async function countTasks(db: D1Database): Promise<Record<TaskStatus, num
   return counts;
 }
 
+export function serializeTaskResult(result: TaskResult): string {
+  const full = JSON.stringify(result);
+  if (full.length <= 12_000) return full;
+  const trimmed = JSON.stringify({
+    ...result,
+    failedSources: result.failedSources?.slice(0, 3),
+    partialSources: result.partialSources?.slice(0, 3),
+    okSources: result.okSources?.slice(0, 3),
+    failedPlatforms: result.failedPlatforms?.slice(0, 3),
+    okPlatforms: result.okPlatforms?.slice(0, 3),
+    subscriptions: result.subscriptions?.slice(0, 3),
+    warnings: result.warnings?.slice(0, 3),
+  });
+  if (trimmed.length <= 12_000) return trimmed;
+  return JSON.stringify({ kind: result.kind, summary: result.summary.slice(0, 500), counts: result.counts });
+}
+
 async function updateTask(
   db: D1Database,
   id: string,
@@ -350,7 +370,7 @@ async function updateTask(
   }
   if (patch.result !== undefined) {
     sets.push('result = ?');
-    binds.push(patch.result === null ? null : JSON.stringify(patch.result).slice(0, 12_000));
+    binds.push(patch.result === null ? null : serializeTaskResult(patch.result));
   }
   if (!sets.length) return;
   binds.push(id);
@@ -694,44 +714,62 @@ async function buildTaskResult(env: Env, task: TaskView, runId: string): Promise
     };
   }
 
-  const [failedSources, failedPlatforms] = await Promise.all([
+  const sourceQuery = (condition: string, limit: number) =>
     env.DB.prepare(
       `SELECT sr.source_id AS id, COALESCE(r.title, sr.source_id) AS title,
               sr.status, sr.init_error AS error
          FROM source_runs sr
          LEFT JOIN source_registry r ON r.id = sr.source_id
-        WHERE sr.run_id = ? AND sr.status <> 'available'
-        ORDER BY CASE sr.status WHEN 'unavailable' THEN 0 WHEN 'partial' THEN 1 ELSE 2 END, sr.source_id
-        LIMIT 6`,
+        WHERE sr.run_id = ? AND ${condition}
+        ORDER BY sr.source_id
+        LIMIT ${limit}`,
     )
       .bind(runId)
-      .all<{ id: string; title: string; status: string; error: string | null }>(),
+      .all<{ id: string; title: string; status: string; error: string | null }>();
+  const platformQuery = (condition: string, limit: number) =>
     env.DB.prepare(
       `SELECT source_id AS sourceId, COALESCE(name, platform) AS name, error_kind AS errorKind, error
          FROM platform_results
-        WHERE run_id = ? AND tested = 1 AND ok = 0
+        WHERE run_id = ? AND tested = 1 AND ${condition}
         ORDER BY source_id, platform
-        LIMIT 6`,
+        LIMIT ${limit}`,
     )
       .bind(runId)
-      .all<{ sourceId: string; name: string; errorKind: string | null; error: string | null }>(),
+      .all<{ sourceId: string; name: string; errorKind: string | null; error: string | null }>();
+
+  const [failedSources, partialSources, okSources, failedPlatforms, okPlatforms] = await Promise.all([
+    sourceQuery("sr.status = 'unavailable'", 8),
+    sourceQuery("sr.status <> 'available' AND sr.status <> 'unavailable'", 8),
+    sourceQuery("sr.status = 'available'", 8),
+    platformQuery('ok = 0', 8),
+    platformQuery('ok = 1', 20),
   ]);
+  const sourceItem = (row: { id: string; title: string; status: string; error: string | null }): TaskResultSource => ({
+    id: row.id,
+    title: row.title,
+    status: row.status,
+    error: row.error ?? undefined,
+  });
+  const platformItem = (row: {
+    sourceId: string;
+    name: string;
+    errorKind: string | null;
+    error: string | null;
+  }): TaskResultPlatform => ({
+    sourceId: row.sourceId,
+    name: row.name,
+    errorKind: row.errorKind ?? undefined,
+    error: row.error ?? undefined,
+  });
   return {
     kind: task.type,
     summary: `源 ${run.total}（可用 ${run.available} / 部分 ${run.partial} / 失效 ${run.unavailable} / 未测 ${run.untested}），平台 ${run.platforms_ok}/${run.platforms_tested}，接入点 ${run.endpoints_ok}/${run.endpoints_total}`,
     counts,
-    failedSources: failedSources.results.map((row) => ({
-      id: row.id,
-      title: row.title,
-      status: row.status,
-      error: row.error ?? undefined,
-    })),
-    failedPlatforms: failedPlatforms.results.map((row) => ({
-      sourceId: row.sourceId,
-      name: row.name,
-      errorKind: row.errorKind ?? undefined,
-      error: row.error ?? undefined,
-    })),
+    failedSources: failedSources.results.map(sourceItem),
+    partialSources: partialSources.results.map(sourceItem),
+    okSources: okSources.results.map(sourceItem),
+    failedPlatforms: failedPlatforms.results.map(platformItem),
+    okPlatforms: okPlatforms.results.map(platformItem),
     warnings: warningsOf(run.warnings),
   };
 }

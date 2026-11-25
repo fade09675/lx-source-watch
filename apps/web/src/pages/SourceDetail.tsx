@@ -283,15 +283,25 @@ function hostOf(url: string): string {
 
 function pickRecommended(endpoints: EndpointRow[], fallback: string): { url: string; kind: string } {
   const primary = endpoints.find((item) => item.role === 'primary');
-  if (primary?.ok) return { url: primary.url, kind: '主地址' };
-  const mirrors = endpoints
-    .filter((item) => item.role === 'candidate' && item.ok)
-    .sort((a, b) => {
-      const synced = Number(b.versionState === 'synced') - Number(a.versionState === 'synced');
-      if (synced !== 0) return synced;
-      return a.ms - b.ms;
-    });
-  if (mirrors[0]) return { url: mirrors[0].url, kind: `镜像 ${hostOf(mirrors[0].url)}` };
+  const mirrors = endpoints.filter((item) => item.role === 'candidate');
+  const candidates = [primary, ...mirrors].filter((item): item is EndpointRow => Boolean(item?.ok));
+  const score = (item: EndpointRow): number => {
+    const synced = item.versionState === 'synced';
+    if (item.role === 'primary') return synced ? 0 : 3;
+    return synced ? 1 : 2;
+  };
+  candidates.sort((a, b) => {
+    const byScore = score(a) - score(b);
+    if (byScore !== 0) return byScore;
+    return (a.ms ?? Number.POSITIVE_INFINITY) - (b.ms ?? Number.POSITIVE_INFINITY);
+  });
+  const best = candidates[0];
+  if (best) {
+    return {
+      url: best.url,
+      kind: best.role === 'primary' ? (best.versionState === 'synced' ? '主地址' : '主地址（版本落后）') : `镜像 ${hostOf(best.url)}`,
+    };
+  }
   if (primary) return { url: primary.url, kind: '主地址（当前不可用）' };
   return { url: fallback, kind: '源地址' };
 }

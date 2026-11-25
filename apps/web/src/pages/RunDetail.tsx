@@ -13,6 +13,7 @@ import {
 } from '@lx/shared';
 import { ApiError, api, type RunDetailResult, type RunEndpointRow } from '../api';
 import { ErrorBox, Spinner } from '../components/Feedback';
+import { Pagination, useClientPager } from '../components/Pagination';
 import { RunLog } from '../components/RunLog';
 
 function errorLabel(kind: string | null): string {
@@ -51,6 +52,12 @@ export function RunDetailPage() {
   const [data, setData] = useState<RunDetailResult | null>(null);
   const [error, setError] = useState('');
   const [logQuery, setLogQuery] = useState('');
+  const sourcePager = useClientPager(data?.sources ?? [], 10);
+  const resetSourcePage = sourcePager.reset;
+
+  useEffect(() => {
+    resetSourcePage();
+  }, [runId, resetSourcePage]);
 
   useEffect(() => {
     let cancelled = false;
@@ -263,7 +270,7 @@ export function RunDetailPage() {
           <span className="muted">点开源名可看历史</span>
         </div>
         <div className="run-source-list">
-          {sources.map((source) => {
+          {sourcePager.pageItems.map((source) => {
             const meta = STATUS_META[source.status as SourceStatus];
             const endpoint = endpointMap.get(source.sourceId);
             const sourceEndpoints = endpointGroups.get(source.sourceId) ?? [];
@@ -272,7 +279,6 @@ export function RunDetailPage() {
               <details
                 className={`run-source tone-${sourceTone(source.status)}`}
                 key={source.sourceId}
-                open={source.status !== 'available'}
               >
                 <summary>
                   <Link to={`/s/${source.sourceId}`} onClick={(event) => event.stopPropagation()}>
@@ -425,6 +431,7 @@ export function RunDetailPage() {
             );
           })}
         </div>
+        <Pagination {...sourcePager.pagination} label="个音源" />
       </section>
     </div>
   );

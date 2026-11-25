@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { actionLabel } from '../src/activity';
+import { actionLabel, targetOf } from '../src/activity';
 
 describe('actionLabel', () => {
   it('识别常用后台写操作', () => {
@@ -20,5 +20,12 @@ describe('actionLabel', () => {
 
   it('未知路径保留方法和大致的路径', () => {
     expect(actionLabel('POST', '/api/admin/unknown-thing')).toBe('POST /admin/unknown-thing');
+  });
+
+  it('从带动作后缀的路径提取目标 id', () => {
+    expect(targetOf('/api/admin/tasks/task_cancel_e2e/cancel')).toBe('task_cancel_e2e');
+    expect(targetOf('/api/admin/proxies/proxy_1/test')).toBe('proxy_1');
+    expect(targetOf('/api/admin/sources/4f831cf74ccf')).toBe('4f831cf74ccf');
+    expect(targetOf('/api/admin/tasks')).toBe('');
   });
 });

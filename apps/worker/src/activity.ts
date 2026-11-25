@@ -77,11 +77,27 @@ export function actionLabel(method: string, path: string): string {
   return `${m} ${path.replace('/api', '')}`;
 }
 
-function targetOf(path: string): string {
+const ID_LIKE = /^(?:(?:task|run|sub|proxy)_[A-Za-z0-9_-]+|[0-9a-f][0-9a-f-]{7,})$/i;
+const ACTION_SEGMENTS = new Set([
+  'cancel',
+  'dispatch',
+  'reap',
+  'test',
+  'refresh',
+  'merge',
+  'promote',
+  'restore',
+  'ignore',
+  'rejected',
+]);
+
+export function targetOf(path: string): string {
   const clean = path.split('?')[0]?.replace(/\/+$/, '') ?? '';
   const parts = clean.split('/').filter(Boolean);
   const last = parts[parts.length - 1] ?? '';
-  if (/^(task_|run_|sub_|proxy_|[0-9a-f]{6,})/i.test(last)) return last;
+  if (ID_LIKE.test(last)) return last;
+  const previous = parts[parts.length - 2] ?? '';
+  if (ACTION_SEGMENTS.has(last.toLowerCase()) && ID_LIKE.test(previous)) return previous;
   return '';
 }
 

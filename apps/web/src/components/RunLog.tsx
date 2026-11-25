@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ApiError, api } from '../api';
 import { ErrorBox, Spinner } from './Feedback';
+import { Pagination, useClientPager } from './Pagination';
 
 const ANSI = /\u001b\[[0-9;]*m/g;
 const ERROR_LINE = /error|fail|exception|timeout|refused|reset|unreachable|失败|异常|超时|错误/i;
@@ -72,6 +73,12 @@ export function RunLog({ runId, query: externalQuery, onQueryChange }: RunLogPro
   }, [lines, onlyErrors, query]);
 
   const errorCount = useMemo(() => lines.filter((line) => ERROR_LINE.test(line)).length, [lines]);
+  const visiblePager = useClientPager(visible, 200);
+  const resetVisiblePager = visiblePager.reset;
+
+  useEffect(() => {
+    resetVisiblePager();
+  }, [query, onlyErrors, log, resetVisiblePager]);
 
   async function copyLog() {
     try {
@@ -135,18 +142,25 @@ export function RunLog({ runId, query: externalQuery, onQueryChange }: RunLogPro
           {visible.length === 0 ? (
             <p className="muted log-empty">没有匹配的日志行。</p>
           ) : (
-            <pre className="log-view">
-              {visible.map((line) => (
-                <span
-                  className={ERROR_LINE.test(line.text) ? 'log-line is-error' : 'log-line'}
-                  key={line.number}
-                >
-                  <span className="log-ln">{line.number}</span>
-                  {line.text || ' '}
-                  {'\n'}
-                </span>
-              ))}
-            </pre>
+            <>
+              <pre className="log-view">
+                {visiblePager.pageItems.map((line) => (
+                  <span
+                    className={ERROR_LINE.test(line.text) ? 'log-line is-error' : 'log-line'}
+                    key={line.number}
+                  >
+                    <span className="log-ln">{line.number}</span>
+                    {line.text || ' '}
+                    {'\n'}
+                  </span>
+                ))}
+              </pre>
+              <Pagination
+                {...visiblePager.pagination}
+                pageSizes={[200, 500, 1000, 0]}
+                label="行"
+              />
+            </>
           )}
         </div>
       )}

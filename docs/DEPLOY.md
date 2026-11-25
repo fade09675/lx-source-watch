@@ -266,7 +266,7 @@ curl.exe -s https://dash.example.com/api/health
 
 - Worker：`wrangler deployments list` 找上一版，`wrangler rollback <deployment-id>`。
 - 代码：`git revert` 后重新部署；探测逻辑在 `apps/runner`，与展示层解耦。
-- 数据：删除前先 `wrangler d1 export` 备份；`/admin` 的清理只删旧于截止时间的记录，永远保留最新一轮。
+- 数据：删除前先 `wrangler d1 export` 备份；`/admin` 的清理只删旧于截止时间的记录，永远保留最新一轮，并同时清理过期操作记录。
 - 迁移：D1 不支持自动回滚；新增列一般保留，回滚代码不删除列。
 
 ---

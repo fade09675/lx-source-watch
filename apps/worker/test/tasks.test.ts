@@ -3,6 +3,7 @@ import {
   buildDispatch,
   newRunId,
   newTaskId,
+  serializeTaskResult,
   TASK_STATUS_LABEL,
   TASK_TYPE_LABEL,
   triggerOf,
@@ -122,5 +123,22 @@ describe('tasks 纯函数', () => {
       'running',
       'succeeded',
     ]);
+  });
+
+  it('任务结果超长时安全裁剪，不产生非法 JSON', () => {
+    const long = 'x'.repeat(400);
+    const result = {
+      kind: 'probe' as const,
+      summary: long,
+      counts: { total: 3 },
+      failedSources: Array.from({ length: 50 }, (_, i) => ({ id: `s${i}`, title: long, status: 'unavailable' })),
+      okSources: Array.from({ length: 50 }, (_, i) => ({ id: `o${i}`, title: long, status: 'available' })),
+      warnings: Array.from({ length: 20 }, () => long),
+    };
+    const text = serializeTaskResult(result);
+    expect(text.length).toBeLessThanOrEqual(12_000);
+    const parsed = JSON.parse(text) as { summary: string; counts: Record<string, number> };
+    expect(parsed.counts.total).toBe(3);
+    expect(parsed.summary.length).toBeLessThanOrEqual(500);
   });
 });

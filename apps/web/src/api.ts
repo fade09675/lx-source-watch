@@ -127,6 +127,7 @@ export interface RunPurgePreview {
   tasks: number;
   proxyTestRuns: number;
   proxyTestResults: number;
+  activity: number;
 }
 
 export interface SettingsResult {
@@ -346,7 +347,10 @@ export interface TaskResult {
   summary: string;
   counts: Record<string, number>;
   failedSources?: TaskResultSource[];
+  partialSources?: TaskResultSource[];
+  okSources?: TaskResultSource[];
   failedPlatforms?: TaskResultPlatform[];
+  okPlatforms?: TaskResultPlatform[];
   subscriptions?: TaskResultSubscription[];
   warnings?: string[];
 }

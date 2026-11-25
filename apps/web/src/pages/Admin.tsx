@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { formatDateTime, formatDuration, type EventItem, type HealthResponse, type MirrorTemplate, type RunSummary } from '@lx/shared';
 import { ApiError, api, type RunPurgePreview, type WorkflowRunView } from '../api';
 import { EmptyBox, ErrorBox, Spinner } from '../components/Feedback';
+import { Pagination, useClientPager } from '../components/Pagination';
 
 const EVENT_LABEL: Record<EventItem['type'], string> = {
   recovered: '恢复',
@@ -53,10 +54,12 @@ export function AdminPage() {
   const [purgePreview, setPurgePreview] = useState<RunPurgePreview | null>(null);
   const [purgeMessage, setPurgeMessage] = useState('');
   const [purging, setPurging] = useState(false);
+  const runPager = useClientPager(runs ?? [], 10);
+  const eventPager = useClientPager(events ?? [], 10);
 
   async function reloadHistory() {
     try {
-      const result = await api.history(14);
+      const result = await api.history(30);
       setRuns(result);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '读取运行记录失败');
@@ -95,7 +98,7 @@ export function AdminPage() {
     try {
       const result = await api.purgeRuns(purgePreview.days);
       setPurgeMessage(
-        `已删除：运行 ${result.result.runs} 轮、逐源 ${result.result.sourceRuns} 条、平台 ${result.result.platformResults} 条、测活 ${result.result.proxyTestRuns} 轮。`,
+        `已删除：运行 ${result.result.runs} 轮、逐源 ${result.result.sourceRuns} 条、平台 ${result.result.platformResults} 条、测活 ${result.result.proxyTestRuns} 轮、操作记录 ${result.result.activity} 条。`,
       );
       setPurgePreview(null);
       await reloadHistory();
@@ -193,7 +196,7 @@ export function AdminPage() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([api.health(), api.history(14), api.events(50)])
+    Promise.all([api.health(), api.history(30), api.events(200)])
       .then(([healthResult, runsResult, eventsResult]) => {
         if (cancelled) return;
         setHealth(healthResult);
@@ -385,7 +388,7 @@ export function AdminPage() {
               </tr>
             </thead>
             <tbody>
-              {runs.map((run) => (
+              {runPager.pageItems.map((run) => (
                 <tr key={run.id}>
                   <td>{formatDateTime(run.finishedAt)}</td>
                   <td className="mono">{run.total}</td>
@@ -401,6 +404,7 @@ export function AdminPage() {
             </tbody>
           </table>
         )}
+        {runs && runs.length > 0 && <Pagination {...runPager.pagination} label="轮运行" />}
       </section>
 
       <section>
@@ -439,7 +443,7 @@ export function AdminPage() {
             <div>
               将删除：运行 {purgePreview.runs} 轮、逐源 {purgePreview.sourceRuns} 条、平台{' '}
               {purgePreview.platformResults} 条、任务 {purgePreview.tasks} 条、测活 {purgePreview.proxyTestRuns} 轮/
-              {purgePreview.proxyTestResults} 条。
+              {purgePreview.proxyTestResults} 条、操作记录 {purgePreview.activity} 条。
             </div>
             <div className="muted">
               截止 {formatDateTime(purgePreview.cutoff)}；最新探测{' '}
@@ -460,7 +464,7 @@ export function AdminPage() {
           <EmptyBox message="暂无事件。" />
         ) : (
           <ul className="event-list">
-            {events.map((event) => (
+            {eventPager.pageItems.map((event) => (
               <li key={event.id}>
                 <span className={`pill event-${event.type}`}>{EVENT_LABEL[event.type]}</span>
                 <span className="mono muted">{formatDateTime(event.at)}</span>
@@ -470,6 +474,7 @@ export function AdminPage() {
             ))}
           </ul>
         )}
+        {events && events.length > 0 && <Pagination {...eventPager.pagination} label="条事件" />}
       </section>
 
       <section className="narrow">
