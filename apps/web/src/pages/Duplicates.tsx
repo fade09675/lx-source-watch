@@ -8,6 +8,7 @@ import {
   type DuplicateOverview,
 } from '../api';
 import { EmptyBox, ErrorBox, Spinner } from '../components/Feedback';
+import { Pagination, useClientPager } from '../components/Pagination';
 
 function shortSha(value: string): string {
   return value ? `${value.slice(0, 12)}…` : '—';
@@ -45,6 +46,8 @@ export function DuplicatesPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const groupsPager = useClientPager(overview?.groups ?? []);
+  const aliasesPager = useClientPager(overview?.aliases ?? []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -153,7 +156,7 @@ export function DuplicatesPage() {
           <EmptyBox message="目前没有内容重复的音源" />
         ) : (
           <div className="dup-list">
-            {groups.map((group) => {
+            {groupsPager.pageItems.map((group) => {
               const canMerge = group.canonical.kind === 'registry' && !group.merged;
               return (
                 <article className="dup-group" key={group.sha256}>
@@ -224,6 +227,7 @@ export function DuplicatesPage() {
             })}
           </div>
         )}
+        {groups.length > 0 && <Pagination {...groupsPager.pagination} label="个重复组" />}
       </section>
 
       {similar.length > 0 ? (
@@ -286,7 +290,7 @@ export function DuplicatesPage() {
                 </tr>
               </thead>
               <tbody>
-                {aliases.map((alias) => (
+                {aliasesPager.pageItems.map((alias) => (
                   <tr key={alias.url} className={alias.state === 'ignored' ? 'row-disabled' : undefined}>
                     <td className="mono" title={alias.url}>
                       {shortUrl(alias.url)}
@@ -317,6 +321,7 @@ export function DuplicatesPage() {
             </table>
           </div>
         )}
+        {aliases.length > 0 && <Pagination {...aliasesPager.pagination} label="条别名" />}
       </section>
     </div>
   );

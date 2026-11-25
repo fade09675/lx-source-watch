@@ -855,7 +855,18 @@ export const api = {
   dispatchTasks: () => request<{ dispatched: boolean; message?: string; state: TaskStateSnapshot }>('/api/admin/tasks/dispatch', { method: 'POST' }),
   reapTasks: () => request<{ ok: boolean; reaped: number; state: TaskStateSnapshot }>('/api/admin/tasks/reap', { method: 'POST' }),
   usage: (refresh = false) => request<{ usage: UsageView }>(`/api/admin/usage${refresh ? '?refresh=1' : ''}`),
-  snapshots: (limit = 30) => request<{ runs: RunSummary[] }>(`/api/admin/snapshots?limit=${limit}`),
+  snapshots: (query: { limit?: number; offset?: number; status?: string; trigger?: string; days?: number; q?: string } = {}) => {
+    const search = new URLSearchParams();
+    if (query.limit !== undefined) search.set('limit', String(query.limit));
+    if (query.offset !== undefined) search.set('offset', String(query.offset));
+    if (query.status) search.set('status', query.status);
+    if (query.trigger) search.set('trigger', query.trigger);
+    if (query.days !== undefined) search.set('days', String(query.days));
+    if (query.q) search.set('q', query.q);
+    return request<{ runs: RunSummary[]; total: number; limit: number; offset: number }>(
+      `/api/admin/snapshots?${search.toString()}`,
+    );
+  },
   snapshot: (runId: string) => request<RunDetailResult>(`/api/admin/snapshots/${encodeURIComponent(runId)}`),
   runLog: (runId: string) => request<RunLogResult>(`/api/admin/snapshots/${encodeURIComponent(runId)}/log`),
   failures: (days = 7) => request<FailureAggregate>(`/api/admin/failures?days=${days}`),

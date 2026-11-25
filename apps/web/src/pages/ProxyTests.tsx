@@ -7,6 +7,7 @@ import {
   type ProxyTestRunView,
 } from '../api';
 import { ErrorBox, Spinner } from '../components/Feedback';
+import { Pagination, useClientPager } from '../components/Pagination';
 
 const DAYS = [7, 14, 30];
 
@@ -123,6 +124,10 @@ export function ProxyTestsPage() {
       );
     });
   }, [detail, onlyFailed, query]);
+  const resultPager = useClientPager(filtered);
+  useEffect(() => {
+    resultPager.reset();
+  }, [detail?.run.runId, onlyFailed, query, resultPager.reset]);
 
   return (
     <div className="page">
@@ -255,7 +260,7 @@ export function ProxyTestsPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {filtered.map((row) => (
+                      {resultPager.pageItems.map((row) => (
                         <tr key={row.proxyId} className={row.ok ? '' : 'row-failed'}>
                           <td>
                             <div>{row.name || row.proxyId}</div>
@@ -287,6 +292,7 @@ export function ProxyTestsPage() {
                   </table>
                 </div>
               )}
+              <Pagination {...resultPager.pagination} label="个节点" />
             </>
           )}
         </section>

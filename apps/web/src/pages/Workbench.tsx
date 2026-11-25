@@ -15,7 +15,7 @@ import {
   type UsageView,
 } from '../api';
 import { ErrorBox, Spinner } from '../components/Feedback';
-import { Pagination } from '../components/Pagination';
+import { Pagination, useClientPager } from '../components/Pagination';
 
 const TASK_TYPE_LABEL: Record<TaskType, string> = {
   probe: '音源探测',
@@ -243,6 +243,7 @@ export function WorkbenchPage() {
   const [system, setSystem] = useState<SystemView | null>(null);
   const [running, setRunning] = useState<TaskView[]>([]);
   const [queued, setQueued] = useState<TaskView[]>([]);
+  const queuedPager = useClientPager(queued);
   const [recent, setRecent] = useState<TaskListResult | null>(null);
   const [activity, setActivity] = useState<ActivityListResult | null>(null);
   const [recentPage, setRecentPage] = useState({ limit: 10, offset: 0 });
@@ -265,7 +266,7 @@ export function WorkbenchPage() {
           api.usage(),
           api.system(),
           api.tasks({ status: 'running', limit: 10 }),
-          api.tasks({ status: 'queued', limit: 20 }),
+          api.tasks({ status: 'queued', limit: 100 }),
           api.tasks({
             status: 'finished',
             type: recentType || undefined,
@@ -517,7 +518,7 @@ export function WorkbenchPage() {
               <p className="muted">队列为空。</p>
             ) : (
               <ul className="task-list">
-                {queued.map((task) => (
+                {queuedPager.pageItems.map((task) => (
                   <li key={task.id}>
                     <span className="pill run-queued">P{task.priority}</span>
                     <div className="task-main">
@@ -542,6 +543,7 @@ export function WorkbenchPage() {
                 ))}
               </ul>
             )}
+            {queued.length > 0 && <Pagination {...queuedPager.pagination} label="个任务" />}
           </div>
         </div>
 

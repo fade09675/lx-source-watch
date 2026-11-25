@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 export interface PaginationProps {
   total: number;
@@ -10,6 +10,30 @@ export interface PaginationProps {
 }
 
 const DEFAULT_SIZES = [10, 20, 50, 0];
+
+/** 客户端分页：适用于已经整批取回的列表。 */
+export function useClientPager<T>(items: T[], initialLimit = 10) {
+  const [limit, setLimit] = useState(initialLimit);
+  const [offset, setOffset] = useState(0);
+  const total = items.length;
+  const effective = limit > 0 ? limit : Math.max(1, total);
+  const lastOffset = Math.max(0, Math.ceil(total / effective) - 1) * effective;
+  const safeOffset = Math.min(offset, lastOffset);
+  const pageItems = useMemo(
+    () => items.slice(safeOffset, limit > 0 ? safeOffset + limit : total),
+    [items, safeOffset, limit, total],
+  );
+  const onChange = useCallback((next: { limit: number; offset: number }) => {
+    setLimit(next.limit);
+    setOffset(next.offset);
+  }, []);
+  const reset = useCallback(() => setOffset(0), []);
+  return {
+    pageItems,
+    pagination: { total, limit, offset: safeOffset, onChange },
+    reset,
+  };
+}
 
 function sizeLabel(size: number): string {
   return size === 0 ? '全部' : String(size);

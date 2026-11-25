@@ -12,6 +12,7 @@ import {
 } from '@lx/shared';
 import { ApiError, api, type StatusFilters } from '../api';
 import { EmptyBox, ErrorBox, Spinner } from '../components/Feedback';
+import { Pagination, useClientPager } from '../components/Pagination';
 import { PlatformChip } from '../components/PlatformChip';
 import { StatusBadge } from '../components/StatusBadge';
 
@@ -39,6 +40,19 @@ export function OverviewPage() {
     }),
     [platforms, statuses, cn, q],
   );
+
+  const sortedSources = useMemo(
+    () =>
+      [...(data?.snapshot.sources ?? [])].sort(
+        (a, b) => b.stats.ok - a.stats.ok || a.title.localeCompare(b.title, 'zh-CN'),
+      ),
+    [data],
+  );
+  const pager = useClientPager(sortedSources);
+
+  useEffect(() => {
+    pager.reset();
+  }, [params, pager.reset]);
 
   useEffect(() => {
     let cancelled = false;
@@ -235,9 +249,7 @@ export function OverviewPage() {
               </tr>
             </thead>
             <tbody>
-              {[...snapshot.sources]
-                .sort((a, b) => b.stats.ok - a.stats.ok || a.title.localeCompare(b.title, 'zh-CN'))
-                .map((source) => {
+              {pager.pageItems.map((source) => {
                   const keys = sortPlatformKeys(source.platforms.filter((item) => item.declared).map((item) => item.key));
                   const byKey = new Map(source.platforms.map((item) => [item.key, item]));
                   const endpointsOk = source.endpoints.filter((item) => item.ok).length;
@@ -311,6 +323,10 @@ export function OverviewPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {snapshot && snapshot.sources.length > 0 && (
+        <Pagination {...pager.pagination} label="个音源" />
       )}
     </div>
   );

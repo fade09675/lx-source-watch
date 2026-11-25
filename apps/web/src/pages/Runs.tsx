@@ -12,6 +12,7 @@ import {
 } from '@lx/shared';
 import { ApiError, api, type FailureAggregate, type PlatformSummary } from '../api';
 import { ErrorBox, Spinner } from '../components/Feedback';
+import { Pagination, useClientPager } from '../components/Pagination';
 
 type TabKey = 'runs' | 'platforms' | 'failures';
 
@@ -61,7 +62,7 @@ function rate(failed: number, tested: number): string {
 }
 
 export function RunsPage() {
-  const [runs, setRuns] = useState<RunSummary[] | null>(null);
+  const [runs, setRuns] = useState<{ runs: RunSummary[]; total: number } | null>(null);
   const [aggregate, setAggregate] = useState<FailureAggregate | null>(null);
   const [platforms, setPlatforms] = useState<PlatformSummary | null>(null);
   const [error, setError] = useState('');
@@ -69,18 +70,45 @@ export function RunsPage() {
   const [tab, setTab] = useState<TabKey>('runs');
   const [statusFilter, setStatusFilter] = useState('all');
   const [triggerFilter, setTriggerFilter] = useState('all');
+  const [limit, setLimit] = useState(10);
+  const [offset, setOffset] = useState(0);
+
+  useEffect(() => {
+    setOffset(0);
+  }, [days, statusFilter, triggerFilter]);
 
   useEffect(() => {
     let cancelled = false;
     setError('');
     setAggregate(null);
     setPlatforms(null);
-    Promise.all([api.snapshots(100), api.failures(days), api.platforms(days)])
-      .then(([runResult, failureResult, platformResult]) => {
+    Promise.all([api.failures(days), api.platforms(days)])
+      .then(([failureResult, platformResult]) => {
         if (cancelled) return;
-        setRuns(runResult.runs);
         setAggregate(failureResult);
         setPlatforms(platformResult);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof ApiError ? err.message : '加载运行统计失败');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [days]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRuns(null);
+    api
+      .snapshots({
+        limit,
+        offset,
+        days,
+        status: statusFilter === 'all' ? undefined : statusFilter,
+        trigger: triggerFilter === 'all' ? undefined : triggerFilter,
+      })
+      .then((result) => {
+        if (!cancelled) setRuns({ runs: result.runs, total: result.total });
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof ApiError ? err.message : '加载运行记录失败');
@@ -88,7 +116,7 @@ export function RunsPage() {
     return () => {
       cancelled = true;
     };
-  }, [days]);
+  }, [days, statusFilter, triggerFilter, limit, offset]);
 
   const maxKind = Math.max(1, ...(aggregate?.byKind.map((item) => item.count) ?? [1]));
   const failureRate =
@@ -96,28 +124,8 @@ export function RunsPage() {
       ? `${Math.round((aggregate.platformFailures / aggregate.platformTests) * 100)}%`
       : '—';
 
-  const visibleRuns = useMemo(() => {
-    if (!runs) return [];
-    const cutoff = Date.now() - days * 86_400_000;
-    return runs.filter((run) => {
-      const at = run.finishedAt ? Date.parse(run.finishedAt) : 0;
-      if (at && at < cutoff) return false;
-      if (statusFilter !== 'all') {
-        const status =
-          run.status ??
-          (run.total === 0
-            ? 'failed'
-            : run.available === run.total
-              ? 'success'
-              : run.available > 0 || run.partial > 0
-                ? 'partial'
-                : 'failed');
-        if (status !== statusFilter) return false;
-      }
-      if (triggerFilter !== 'all' && (run.trigger ?? '') !== triggerFilter) return false;
-      return true;
-    });
-  }, [runs, days, statusFilter, triggerFilter]);
+  const visibleRuns = runs?.runs ?? [];
+  const totalRuns = runs?.total ?? 0;
 
   const platformTotals = useMemo(() => {
     const rows = platforms?.rows ?? [];
@@ -128,6 +136,12 @@ export function RunsPage() {
     const cnOk = rows.reduce((sum, row) => sum + row.cnOk, 0);
     return { tested, ok, failed, cnTested, cnOk };
   }, [platforms]);
+  const platformPager = useClientPager(platforms?.rows ?? []);
+  const failSourcePager = useClientPager(aggregate?.bySource ?? []);
+  useEffect(() => {
+    platformPager.reset();
+    failSourcePager.reset();
+  }, [days, platformPager.reset, failSourcePager.reset]);
 
   return (
     <div className="page">
@@ -143,7 +157,10 @@ export function RunsPage() {
               key={value}
               type="button"
               className={value === days ? 'segmented-item active' : 'segmented-item'}
-              onClick={() => setDays(value)}
+              onClick={() => {
+                setDays(value);
+                setOffset(0);
+              }}
             >
               近 {value} 天
             </button>
@@ -162,7 +179,7 @@ export function RunsPage() {
             onClick={() => setTab(item.key)}
           >
             {item.label}
-            {item.key === 'runs' && runs ? <span className="tab-count">{visibleRuns.length}</span> : null}
+            {item.key === 'runs' && runs ? <span className="tab-count">{totalRuns}</span> : null}
             {item.key === 'platforms' && platforms ? <span className="tab-count">{platforms.runCount}</span> : null}
           </button>
         ))}
@@ -174,14 +191,18 @@ export function RunsPage() {
         <section>
           <div className="panel-head">
             <h2>运行记录</h2>
-            <span className="muted">
-              共 {runs?.length ?? 0} 条，筛选后 {visibleRuns.length} 条
-            </span>
+            <span className="muted">共 {totalRuns} 条</span>
           </div>
           <div className="filter-bar run-filter-bar">
             <label className="select-field">
               <span>状态</span>
-              <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+              <select
+                value={statusFilter}
+                onChange={(event) => {
+                  setStatusFilter(event.target.value);
+                  setOffset(0);
+                }}
+              >
                 <option value="all">全部</option>
                 <option value="success">成功</option>
                 <option value="partial">部分成功</option>
@@ -191,7 +212,13 @@ export function RunsPage() {
             </label>
             <label className="select-field">
               <span>触发</span>
-              <select value={triggerFilter} onChange={(event) => setTriggerFilter(event.target.value)}>
+              <select
+                value={triggerFilter}
+                onChange={(event) => {
+                  setTriggerFilter(event.target.value);
+                  setOffset(0);
+                }}
+              >
                 <option value="all">全部</option>
                 <option value="schedule">定时</option>
                 <option value="manual">手动</option>
@@ -258,6 +285,16 @@ export function RunsPage() {
               </table>
             </div>
           )}
+          <Pagination
+            total={totalRuns}
+            limit={limit}
+            offset={offset}
+            onChange={({ limit: nextLimit, offset: nextOffset }) => {
+              setLimit(nextLimit);
+              setOffset(nextOffset);
+            }}
+            label="轮运行"
+          />
         </section>
       )}
 
@@ -317,7 +354,7 @@ export function RunsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {platforms.rows.map((row) => {
+                    {platformPager.pageItems.map((row) => {
                       const meta = platformMeta(row.platform);
                       return (
                         <tr key={row.platform}>
@@ -345,8 +382,9 @@ export function RunsPage() {
                       );
                     })}
                   </tbody>
-                </table>
-              </div>
+                  </table>
+                </div>
+              <Pagination {...platformPager.pagination} label="个平台" />
             </>
           )}
         </section>
@@ -417,7 +455,7 @@ export function RunsPage() {
               <p className="muted">这段时间没有源失败。</p>
             ) : (
               <div className="failure-source-list">
-                {aggregate.bySource.map((item) => (
+                {failSourcePager.pageItems.map((item) => (
                   <div className="failure-source" key={item.sourceId}>
                     <div>
                       <Link to={`/s/${item.sourceId}`}>{item.title}</Link>
@@ -430,6 +468,9 @@ export function RunsPage() {
                   </div>
                 ))}
               </div>
+            )}
+            {aggregate && aggregate.bySource.length > 0 && (
+              <Pagination {...failSourcePager.pagination} label="个源" />
             )}
           </section>
         </>

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { formatDateTime, formatRelative, platformMeta, type Candidate } from '@lx/shared';
 import { api, type CandidateList } from '../api';
 import { EmptyBox, ErrorBox, Spinner } from '../components/Feedback';
+import { Pagination, useClientPager } from '../components/Pagination';
 
 const STATE_FALLBACK = { label: '待验证', tone: 'warn', hint: '还没通过初始化' } as const;
 const STATE_META: Record<string, { label: string; tone: string; hint: string }> = {
@@ -55,6 +56,10 @@ export function CandidatesPage() {
   const visibleCandidates = repoFilter
     ? (data?.candidates ?? []).filter((candidate) => candidate.repo === repoFilter)
     : (data?.candidates ?? []);
+  const candidatePager = useClientPager(visibleCandidates);
+  useEffect(() => {
+    candidatePager.reset();
+  }, [repoFilter, state, data?.candidates.length, candidatePager.reset]);
 
   const removeRow = (candidate: Candidate) => {
     setData((current) =>
@@ -230,7 +235,8 @@ export function CandidatesPage() {
       ) : null}
 
       {!loading && data && visibleCandidates.length > 0 ? (
-        <div className="table-wrap">
+        <>
+          <div className="table-wrap">
           <table className="data-table source-table">
             <thead>
               <tr>
@@ -244,7 +250,7 @@ export function CandidatesPage() {
               </tr>
             </thead>
             <tbody>
-              {visibleCandidates.map((candidate) => {
+              {candidatePager.pageItems.map((candidate) => {
                 const meta = STATE_META[candidate.state] ?? STATE_FALLBACK;
                 return (
                   <tr key={candidate.id}>
@@ -331,6 +337,8 @@ export function CandidatesPage() {
             </tbody>
           </table>
         </div>
+        <Pagination {...candidatePager.pagination} label="个候选" />
+        </>
       ) : null}
 
       <p className="muted page-foot">

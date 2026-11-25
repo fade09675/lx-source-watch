@@ -29,6 +29,7 @@ import {
   getRunEndpointStats,
   getRunPlatforms,
   getRuns,
+  getRunsPage,
   getRunSources,
   getSetting,
   getSourceDaily,
@@ -568,10 +569,20 @@ export function createApi(): Hono<Ctx> {
 
   // 快照运行记录（每轮 ingest 一条），与上面的 GitHub 工作流运行区分开。
   api.get('/admin/snapshots', async (c) => {
-    const raw = Number(c.req.query('limit') ?? 30);
-    const limit = Number.isFinite(raw) ? Math.max(1, Math.min(100, Math.trunc(raw))) : 30;
-    const runs = await getRuns(c.env.DB, limit);
-    return Response.json({ runs }, { headers: { 'cache-control': 'private, max-age=15' } });
+    const raw = Number(c.req.query('limit') ?? 10);
+    // limit=0 表示“全部”，直接交给 SQLite 的 LIMIT -1；其余夹在 1–200。
+    const limit = Number.isFinite(raw) ? Math.max(0, Math.min(200, Math.trunc(raw))) : 10;
+    const rawOffset = Number(c.req.query('offset') ?? 0);
+    const offset = Number.isFinite(rawOffset) ? Math.max(0, Math.trunc(rawOffset)) : 0;
+    const status = (c.req.query('status') ?? '').trim();
+    const trigger = (c.req.query('trigger') ?? '').trim();
+    const q = (c.req.query('q') ?? '').trim().slice(0, 80);
+    const days = clampInt(c.req.query('days'), 30, 1, 90);
+    const page = await getRunsPage(c.env.DB, { limit, offset, status, trigger, q, days });
+    return Response.json(
+      { ...page, limit, offset },
+      { headers: { 'cache-control': 'private, max-age=15' } },
+    );
   });
 
   api.get('/admin/snapshots/:runId', async (c) => {

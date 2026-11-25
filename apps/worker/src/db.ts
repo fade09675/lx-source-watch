@@ -530,6 +530,53 @@ export async function getRuns(db: D1Database, limit = 50): Promise<RunSummary[]>
   return rows.results.map(toRunSummary);
 }
 
+export interface RunPageQuery {
+  limit?: number;
+  offset?: number;
+  status?: string;
+  trigger?: string;
+  days?: number;
+  q?: string;
+}
+
+export async function getRunsPage(
+  db: D1Database,
+  query: RunPageQuery = {},
+): Promise<{ runs: RunSummary[]; total: number }> {
+  const clauses: string[] = [];
+  const binds: unknown[] = [];
+  if (query.status) {
+    clauses.push('status = ?');
+    binds.push(query.status);
+  }
+  if (query.trigger) {
+    clauses.push('trigger = ?');
+    binds.push(query.trigger);
+  }
+  if (query.days && query.days > 0) {
+    clauses.push('generated_at >= ?');
+    binds.push(new Date(Date.now() - query.days * 86_400_000).toISOString());
+  }
+  const keyword = query.q?.trim();
+  if (keyword) {
+    const like = `%${keyword}%`;
+    clauses.push('(run_id LIKE ? OR task_id LIKE ? OR message LIKE ? OR error LIKE ?)');
+    binds.push(like, like, like, like);
+  }
+  const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+  const requested = Math.trunc(query.limit ?? 10);
+  const limit = requested === 0 ? -1 : Math.max(1, Math.min(200, requested));
+  const offset = Math.max(0, Math.trunc(query.offset ?? 0));
+  const [rows, count] = await Promise.all([
+    db
+      .prepare(`SELECT ${RUN_COLUMNS} FROM runs ${where} ORDER BY generated_at DESC LIMIT ? OFFSET ?`)
+      .bind(...binds, limit, offset)
+      .all<RunRow>(),
+    db.prepare(`SELECT COUNT(*) AS n FROM runs ${where}`).bind(...binds).first<{ n: number }>(),
+  ]);
+  return { runs: rows.results.map(toRunSummary), total: count?.n ?? 0 };
+}
+
 export async function getLastRun(db: D1Database): Promise<RunSummary | null> {
   const row = await db
     .prepare(`SELECT ${RUN_COLUMNS} FROM runs ORDER BY generated_at DESC LIMIT 1`)

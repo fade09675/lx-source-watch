@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ApiError, api, type AdminSource, type SourceInputPayload, type SourceListResult } from '../api';
 import { ErrorBox, Spinner } from '../components/Feedback';
+import { Pagination, useClientPager } from '../components/Pagination';
 
 interface FormState {
   title: string;
@@ -50,6 +51,7 @@ export function ManageSourcesPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<FormState>(EMPTY_FORM);
   const [openLinks, setOpenLinks] = useState<string | null>(null);
+  const sourcePager = useClientPager(data?.sources ?? []);
 
   useEffect(() => {
     void load();
@@ -217,7 +219,7 @@ export function ManageSourcesPage() {
               </tr>
             </thead>
             <tbody>
-              {data.sources.map((source) => (
+              {sourcePager.pageItems.map((source) => (
                 <SourceRow
                   key={source.id}
                   source={source}
@@ -246,6 +248,7 @@ export function ManageSourcesPage() {
             </tbody>
           </table>
         </div>
+        {data.sources.length > 0 && <Pagination {...sourcePager.pagination} label="个音源" />}
       </section>
     </div>
   );

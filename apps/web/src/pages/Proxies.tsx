@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ApiError, api, type AdminProxy, type ProxyImportPreview, type SubscriptionItem } from '../api';
 import { ErrorBox, Spinner } from '../components/Feedback';
+import { Pagination, useClientPager } from '../components/Pagination';
 
 const PROTOCOLS = ['http', 'socks5', 'ss', 'vmess', 'vless', 'trojan', 'hysteria2', 'tuic', 'anytls'];
 
@@ -257,6 +258,8 @@ export function ProxiesPage() {
     if (filterSub === '__manual__') return items.filter((item) => !item.subscriptionId);
     return items.filter((item) => item.subscriptionId === filterSub);
   }, [items, filterSub]);
+  const subPager = useClientPager(subs ?? []);
+  const nodePager = useClientPager(visible);
 
   return (
     <div className="page">
@@ -338,7 +341,7 @@ export function ProxiesPage() {
                 </tr>
               </thead>
               <tbody>
-                {subs.map((item) => (
+                {subPager.pageItems.map((item) => (
                   <tr key={item.id}>
                     <td>
                       {editingId === item.id ? (
@@ -448,6 +451,7 @@ export function ProxiesPage() {
             </table>
           </div>
         )}
+        {subs && subs.length > 0 && <Pagination {...subPager.pagination} label="个订阅" />}
         {subs && subs.length === 0 && <p className="muted small">还没有订阅。添加后节点会自动出现在下方列表，并按订阅归档。</p>}
       </section>
 
@@ -583,7 +587,13 @@ export function ProxiesPage() {
               </button>
               <label className="small muted">
                 来源筛选
-                <select value={filterSub} onChange={(event) => setFilterSub(event.target.value)}>
+                <select
+                  value={filterSub}
+                  onChange={(event) => {
+                    setFilterSub(event.target.value);
+                    nodePager.reset();
+                  }}
+                >
                   <option value="">全部</option>
                   <option value="__manual__">手动添加</option>
                   {subs?.map((item) => (
@@ -611,7 +621,7 @@ export function ProxiesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {visible.map((item) => (
+                  {nodePager.pageItems.map((item) => (
                     <tr key={item.id}>
                       <td>
                         <div>{item.name}</div>
@@ -673,6 +683,7 @@ export function ProxiesPage() {
               </table>
             </div>
           )}
+          {visible.length > 0 && <Pagination {...nodePager.pagination} label="个节点" />}
         </section>
       )}
     </div>
