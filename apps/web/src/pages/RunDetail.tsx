@@ -52,6 +52,8 @@ export function RunDetailPage() {
   const [data, setData] = useState<RunDetailResult | null>(null);
   const [error, setError] = useState('');
   const [logQuery, setLogQuery] = useState('');
+  const [tab, setTab] = useState<'overview' | 'sources' | 'log'>('overview');
+  const [showAllFailures, setShowAllFailures] = useState(false);
   const sourcePager = useClientPager(data?.sources ?? [], 10);
   const resetSourcePage = sourcePager.reset;
 
@@ -209,6 +211,20 @@ export function RunDetailPage() {
         </div>
       )}
 
+      <div className="detail-tabs run-detail-tabs">
+        <button className={tab === 'overview' ? 'active' : ''} onClick={() => setTab('overview')}>
+          概览
+        </button>
+        <button className={tab === 'sources' ? 'active' : ''} onClick={() => setTab('sources')}>
+          逐源结果 {data?.sources.length ?? 0}
+        </button>
+        <button className={tab === 'log' ? 'active' : ''} onClick={() => setTab('log')}>
+          运行日志
+        </button>
+      </div>
+
+      {tab === 'overview' && (
+        <>
       {run.steps && run.steps.length > 0 && (
         <section>
           <div className="panel-head">
@@ -241,7 +257,7 @@ export function RunDetailPage() {
           <p className="muted">本轮没有平台失败。</p>
         ) : (
           <div className="panel failure-panel">
-            {failures.map((item) => (
+            {(showAllFailures ? failures : failures.slice(0, 8)).map((item) => (
               <div className="failure-row" key={item.key}>
                 <div className="failure-row-head">
                   <strong>{errorLabel(item.kind)}</strong>
@@ -260,10 +276,18 @@ export function RunDetailPage() {
             ))}
           </div>
         )}
+        {failures.length > 8 && (
+          <button type="button" className="link-button" onClick={() => setShowAllFailures((value) => !value)}>
+            {showAllFailures ? '只看前 8 类' : `查看全部 ${failures.length} 类失败原因`}
+          </button>
+        )}
       </section>
+        </>
+      )}
 
-      <RunLog runId={run.id} query={logQuery} onQueryChange={setLogQuery} />
+      {tab === 'log' && <RunLog runId={run.id} query={logQuery} onQueryChange={setLogQuery} />}
 
+      {tab === 'sources' && (
       <section>
         <div className="panel-head">
           <h2>逐源结果</h2>
@@ -433,6 +457,7 @@ export function RunDetailPage() {
         </div>
         <Pagination {...sourcePager.pagination} label="个音源" />
       </section>
+      )}
     </div>
   );
 }

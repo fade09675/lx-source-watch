@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
+import { STATUS_META, type SourceStatus } from '@lx/shared';
 import { ApiError, api, type AdminSource, type SourceInputPayload, type SourceListResult } from '../api';
 import { ErrorBox, Spinner } from '../components/Feedback';
+import { Icon } from '../components/Icon';
 import { Pagination, useClientPager } from '../components/Pagination';
+import { Drawer, PageHeader, SectionCard } from '../components/ui';
 import { BackupImportPanel } from './BackupImportPanel';
 
 interface FormState {
@@ -43,14 +46,32 @@ function toPayload(form: FormState): SourceInputPayload {
   };
 }
 
+function toForm(source: AdminSource): FormState {
+  return {
+    title: source.title,
+    url: source.url,
+    category: source.category,
+    homepage: source.homepage,
+    mirrors: source.mirrors.join('\n'),
+    notes: source.notes,
+  };
+}
+
+function statusMeta(source: AdminSource): { label: string; tone: string } {
+  if (!source.enabled) return { label: '已停用', tone: 'idle' };
+  const meta = STATUS_META[source.status as SourceStatus];
+  return meta ? { label: meta.label, tone: meta.tone } : { label: source.status, tone: 'idle' };
+}
+
 export function ManageSourcesPage() {
   const [data, setData] = useState<SourceListResult | null>(null);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
-  const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<FormState>(EMPTY_FORM);
+  const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<AdminSource | null>(null);
   const [openLinks, setOpenLinks] = useState<string | null>(null);
   const sourcePager = useClientPager(data?.sources ?? []);
 
@@ -85,25 +106,20 @@ export function ManageSourcesPage() {
     await run(async () => {
       await api.createSource(toPayload(form));
       setForm(EMPTY_FORM);
+      setCreating(false);
     }, '已新增音源');
   }
 
   function startEdit(source: AdminSource) {
-    setEditingId(source.id);
-    setEditForm({
-      title: source.title,
-      url: source.url,
-      category: source.category,
-      homepage: source.homepage,
-      mirrors: source.mirrors.join('\n'),
-      notes: source.notes,
-    });
+    setEditing(source);
+    setEditForm(toForm(source));
   }
 
-  async function saveEdit(id: string) {
+  async function saveEdit() {
+    if (!editing) return;
     await run(async () => {
-      await api.updateSource(id, toPayload(editForm));
-      setEditingId(null);
+      await api.updateSource(editing.id, toPayload(editForm));
+      setEditing(null);
     }, '已保存');
   }
 
@@ -132,258 +148,226 @@ export function ManageSourcesPage() {
   if (error) return <ErrorBox message={error} onRetry={() => void load()} />;
   if (!data) return <Spinner label="加载音源清单…" />;
 
+  const enabled = data.sources.filter((item) => item.enabled).length;
+
   return (
     <div className="page">
-      <div className="page-head">
-        <div>
-          <p className="eyebrow">SOURCES</p>
-          <h1>音源管理</h1>
-          <p className="muted">
-            这里维护探测用的音源清单；保存后下一轮探测生效（探测任务从公开接口读取，读不到时回退仓库内清单）。
-          </p>
-        </div>
-        <span className="pill">{data.sources.length} 个音源</span>
-      </div>
+      <PageHeader
+        eyebrow="SOURCES"
+        title="音源管理"
+        description="维护探测用的音源清单；保存后下一轮探测生效。停用不会删除历史，删除只影响网页清单。"
+        actions={
+          <button className="primary-button" onClick={() => setCreating(true)}>
+            <Icon name="plus" size={15} />
+            新增音源
+          </button>
+        }
+      />
 
       {message && <div className="notice">{message}</div>}
 
-      <section className="panel">
-        <div className="panel-head">
-          <h2>新增音源</h2>
-          <span className="muted">支持主地址 + 自定义镜像；加速镜像会按设置页的模板自动补全。</span>
+      <div className="admin-summary">
+        <span>
+          <strong>{data.sources.length}</strong> 个音源
+        </span>
+        <span>
+          <strong>{enabled}</strong> 个启用
+        </span>
+        <span>
+          <strong>{data.sources.length - enabled}</strong> 个停用
+        </span>
+      </div>
+
+      <details className="fold-panel">
+        <summary>
+          <span>
+            <Icon name="import" size={15} />
+            备用线路导入
+          </span>
+          <span className="muted small">按标题/作者自动匹配，或手动指定音源，追加到 mirrors</span>
+        </summary>
+        <div className="fold-body">
+          <BackupImportPanel sources={data.sources} onDone={load} />
         </div>
-        <div className="source-form">
-          <label>
-            名称
-            <input
-              value={form.title}
-              onChange={(e) => setForm({ ...form, title: e.target.value })}
-              placeholder="例如：某聚合音源"
-            />
-          </label>
-          <label className="wide">
-            脚本地址
-            <input
-              value={form.url}
-              onChange={(e) => setForm({ ...form, url: e.target.value })}
-              placeholder="https://raw.githubusercontent.com/owner/repo/main/source.js"
-            />
-          </label>
-          <label>
-            分类
-            <input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} />
-          </label>
-          <label>
-            主页
-            <input
-              value={form.homepage}
-              onChange={(e) => setForm({ ...form, homepage: e.target.value })}
-              placeholder="可选"
-            />
-          </label>
-          <label className="wide">
-            自定义镜像（每行一个，可选）
-            <textarea
-              rows={2}
-              value={form.mirrors}
-              onChange={(e) => setForm({ ...form, mirrors: e.target.value })}
-              placeholder="https://gh-proxy.com/https://raw.githubusercontent.com/..."
-            />
-          </label>
-          <label className="wide">
-            备注
-            <input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="可选" />
-          </label>
-          <div className="form-actions">
-            <button className="primary-button" disabled={busy || !form.title.trim() || !form.url.trim()} onClick={() => void create()}>
+      </details>
+
+      <SectionCard
+        title="音源清单"
+        description="主地址 + 自定义镜像；测试只触发该音源的单独探测"
+        actions={<span className="muted small">共 {data.sources.length} 个</span>}
+      >
+        <div className="admin-source-list">
+          {sourcePager.pageItems.map((source) => {
+            const linksOpen = openLinks === source.id;
+            return (
+              <article key={source.id} className={source.enabled ? 'admin-source-row' : 'admin-source-row is-disabled'}>
+                <div className="admin-source-main">
+                  <div className="admin-source-title">
+                    <strong>{source.title}</strong>
+                    <span className="pill">{source.version ? `v${source.version}` : '版本未知'}</span>
+                    <span className={`pill tone-${statusMeta(source).tone}`}>
+                      {statusMeta(source).label}
+                    </span>
+                    {source.trusted && <span className="pill tone-ok">受信任</span>}
+                  </div>
+                  <div className="admin-source-sub">
+                    <code className="mono">{source.id}</code>
+                    <span>{source.category}</span>
+                    {source.origin && (
+                      <span className="source-origin" title={source.origin}>
+                        来源 {source.origin}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="admin-source-metrics">
+                  <div>
+                    <span>接入点</span>
+                    <strong className={source.endpointsOk > 0 ? 'text-ok' : 'text-bad'}>
+                      {source.endpointsTotal ? `${source.endpointsOk}/${source.endpointsTotal}` : '—'}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>镜像</span>
+                    <strong>{source.mirrors.length}</strong>
+                  </div>
+                  <div>
+                    <span>最近变化</span>
+                    <strong>{short(source.lastChangeAt || source.updatedAt)}</strong>
+                  </div>
+                </div>
+
+                <div className="admin-source-actions">
+                  <button className="ghost-button" onClick={() => startEdit(source)} disabled={busy}>
+                    编辑
+                  </button>
+                  <button className="ghost-button" onClick={() => void test(source)} disabled={busy || !source.enabled}>
+                    测试
+                  </button>
+                  <button className="ghost-button" onClick={() => void toggle(source)} disabled={busy}>
+                    {source.enabled ? '停用' : '启用'}
+                  </button>
+                  <button className="ghost-button danger" onClick={() => void remove(source)} disabled={busy}>
+                    删除
+                  </button>
+                </div>
+
+                <button className="admin-source-links-toggle" onClick={() => setOpenLinks(linksOpen ? null : source.id)}>
+                  <Icon name={linksOpen ? 'chevron-down' : 'chevron-right'} size={13} />
+                  导入链接（{source.links.length}）
+                </button>
+
+                {linksOpen && (
+                  <div className="admin-source-links">
+                    {source.links.map((link) => (
+                      <div className="link-row" key={link.url}>
+                        <span className="link-label">
+                          {link.label}
+                          {link.primary ? ' · 推荐' : ''}
+                        </span>
+                        <code className="mono">{link.url}</code>
+                        <button className="ghost-button" onClick={() => void copy(link.url)}>
+                          复制
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </article>
+            );
+          })}
+          {data.sources.length === 0 && (
+            <div className="ui-empty">
+              <strong>还没有音源</strong>
+              <p>先新增一个脚本地址，或从候选源收录。</p>
+            </div>
+          )}
+        </div>
+        {data.sources.length > 0 && <Pagination {...sourcePager.pagination} label="个音源" />}
+      </SectionCard>
+
+      <Drawer
+        open={creating}
+        title="新增音源"
+        description="主地址 + 自定义镜像；加速镜像会按设置页模板自动补全。"
+        onClose={() => setCreating(false)}
+        footer={
+          <div className="drawer-actions">
+            <button className="ghost-button" onClick={() => setCreating(false)}>
+              取消
+            </button>
+            <button
+              className="primary-button"
+              disabled={busy || !form.title.trim() || !form.url.trim()}
+              onClick={() => void create()}
+            >
               新增
             </button>
           </div>
-        </div>
-      </section>
+        }
+      >
+        <SourceFields form={form} onChange={setForm} />
+      </Drawer>
 
-      <BackupImportPanel sources={data.sources} onDone={load} />
-
-      <section className="panel">
-        <div className="panel-head">
-          <h2>音源列表</h2>
-          <span className="muted">停用后不会进入探测清单；删除只影响清单。</span>
-        </div>
-        <div className="table-wrap">
-          <table className="data-table source-table">
-            <thead>
-              <tr>
-                <th>音源</th>
-                <th>状态</th>
-                <th>版本</th>
-                <th>接入点</th>
-                <th>最近变化</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sourcePager.pageItems.map((source) => (
-                <SourceRow
-                  key={source.id}
-                  source={source}
-                  busy={busy}
-                  editing={editingId === source.id}
-                  editForm={editForm}
-                  openLinks={openLinks === source.id}
-                  onEditForm={setEditForm}
-                  onStartEdit={() => startEdit(source)}
-                  onCancelEdit={() => setEditingId(null)}
-                  onSave={() => void saveEdit(source.id)}
-                  onToggle={() => void toggle(source)}
-                  onRemove={() => void remove(source)}
-                  onTest={() => void test(source)}
-                  onCopy={(text) => void copy(text)}
-                  onToggleLinks={() => setOpenLinks(openLinks === source.id ? null : source.id)}
-                />
-              ))}
-              {data.sources.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="muted">
-                    还没有音源，先在上方新增一个。
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        {data.sources.length > 0 && <Pagination {...sourcePager.pagination} label="个音源" />}
-      </section>
+      <Drawer
+        open={Boolean(editing)}
+        title={editing ? `编辑「${editing.title}」` : '编辑音源'}
+        description="修改后下一轮探测生效；清空镜像可移除自定义镜像。"
+        onClose={() => setEditing(null)}
+        footer={
+          <div className="drawer-actions">
+            <button className="ghost-button" onClick={() => setEditing(null)}>
+              取消
+            </button>
+            <button className="primary-button" disabled={busy} onClick={() => void saveEdit()}>
+              保存
+            </button>
+          </div>
+        }
+      >
+        <SourceFields form={editForm} onChange={setEditForm} />
+      </Drawer>
     </div>
   );
 }
 
-function SourceRow(props: {
-  source: AdminSource;
-  busy: boolean;
-  editing: boolean;
-  editForm: FormState;
-  openLinks: boolean;
-  onEditForm: (form: FormState) => void;
-  onStartEdit: () => void;
-  onCancelEdit: () => void;
-  onSave: () => void;
-  onToggle: () => void;
-  onRemove: () => void;
-  onTest: () => void;
-  onCopy: (text: string) => void;
-  onToggleLinks: () => void;
-}) {
-  const { source, editForm, onEditForm } = props;
-
+function SourceFields({ form, onChange }: { form: FormState; onChange: (form: FormState) => void }) {
   return (
-    <>
-      <tr className={source.enabled ? '' : 'row-disabled'}>
-        <td>
-          <strong>{source.title}</strong>
-          <div className="muted mono small">{source.id}</div>
-          <div className="muted small">{source.category}{source.trusted ? ' · 受信任' : ''}</div>
-          {source.origin && <div className="muted small" title={source.origin}>来源 {source.origin}</div>}
-        </td>
-        <td>
-          <span className={`pill tone-${source.enabled ? source.status : 'idle'}`}>
-            {source.enabled ? source.status : '已停用'}
-          </span>
-        </td>
-        <td>
-          <div>{source.version || '未知版本'}</div>
-          <div className="muted mono small">{source.sha ? source.sha.slice(0, 8) : '—'}</div>
-        </td>
-        <td>
-          {source.endpointsTotal ? (
-            <span className={source.endpointsOk > 0 ? 'text-ok' : 'text-bad'}>
-              {source.endpointsOk}/{source.endpointsTotal}
-            </span>
-          ) : (
-            '—'
-          )}
-        </td>
-        <td className="muted small">{short(source.lastChangeAt || source.updatedAt)}</td>
-        <td>
-          <div className="row-actions">
-            <button className="ghost-button" onClick={props.onStartEdit} disabled={props.busy}>
-              编辑
-            </button>
-            <button className="ghost-button" onClick={props.onTest} disabled={props.busy || !source.enabled}>
-              测试
-            </button>
-            <button className="ghost-button" onClick={props.onToggle} disabled={props.busy}>
-              {source.enabled ? '停用' : '启用'}
-            </button>
-            <button className="ghost-button danger" onClick={props.onRemove} disabled={props.busy}>
-              删除
-            </button>
-          </div>
-          <button className="link-button" onClick={props.onToggleLinks}>
-            {props.openLinks ? '收起导入链接' : `导入链接（${source.links.length}）`}
-          </button>
-        </td>
-      </tr>
-      {props.openLinks && (
-        <tr>
-          <td colSpan={6}>
-            <div className="link-list">
-              {source.links.map((link) => (
-                <div className="link-row" key={link.url}>
-                  <span className="link-label">{link.label}{link.primary ? ' · 推荐' : ''}</span>
-                  <code className="mono">{link.url}</code>
-                  <button className="ghost-button" onClick={() => props.onCopy(link.url)}>
-                    复制
-                  </button>
-                </div>
-              ))}
-            </div>
-          </td>
-        </tr>
-      )}
-      {props.editing && (
-        <tr>
-          <td colSpan={6}>
-            <div className="source-form">
-              <label>
-                名称
-                <input value={editForm.title} onChange={(e) => onEditForm({ ...editForm, title: e.target.value })} />
-              </label>
-              <label className="wide">
-                脚本地址
-                <input value={editForm.url} onChange={(e) => onEditForm({ ...editForm, url: e.target.value })} />
-              </label>
-              <label>
-                分类
-                <input value={editForm.category} onChange={(e) => onEditForm({ ...editForm, category: e.target.value })} />
-              </label>
-              <label>
-                主页
-                <input value={editForm.homepage} onChange={(e) => onEditForm({ ...editForm, homepage: e.target.value })} />
-              </label>
-              <label className="wide">
-                自定义镜像（每行一个）
-                <textarea
-                  rows={2}
-                  value={editForm.mirrors}
-                  onChange={(e) => onEditForm({ ...editForm, mirrors: e.target.value })}
-                />
-              </label>
-              <label className="wide">
-                备注
-                <input value={editForm.notes} onChange={(e) => onEditForm({ ...editForm, notes: e.target.value })} />
-              </label>
-              <div className="form-actions">
-                <button className="primary-button" onClick={props.onSave} disabled={props.busy}>
-                  保存
-                </button>
-                <button className="ghost-button" onClick={props.onCancelEdit}>
-                  取消
-                </button>
-              </div>
-            </div>
-          </td>
-        </tr>
-      )}
-    </>
+    <div className="source-form drawer-form">
+      <label>
+        名称
+        <input value={form.title} onChange={(e) => onChange({ ...form, title: e.target.value })} placeholder="例如：某聚合音源" />
+      </label>
+      <label className="wide">
+        脚本地址
+        <input
+          value={form.url}
+          onChange={(e) => onChange({ ...form, url: e.target.value })}
+          placeholder="https://raw.githubusercontent.com/owner/repo/main/source.js"
+        />
+      </label>
+      <label>
+        分类
+        <input value={form.category} onChange={(e) => onChange({ ...form, category: e.target.value })} />
+      </label>
+      <label>
+        主页
+        <input value={form.homepage} onChange={(e) => onChange({ ...form, homepage: e.target.value })} placeholder="可选" />
+      </label>
+      <label className="wide">
+        自定义镜像（每行一个，可选）
+        <textarea
+          rows={3}
+          value={form.mirrors}
+          onChange={(e) => onChange({ ...form, mirrors: e.target.value })}
+          placeholder="https://gh-proxy.com/https://raw.githubusercontent.com/..."
+        />
+      </label>
+      <label className="wide">
+        备注
+        <input value={form.notes} onChange={(e) => onChange({ ...form, notes: e.target.value })} placeholder="可选" />
+      </label>
+    </div>
   );
 }

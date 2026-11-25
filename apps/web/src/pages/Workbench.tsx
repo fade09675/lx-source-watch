@@ -15,7 +15,9 @@ import {
   type UsageView,
 } from '../api';
 import { ErrorBox, Spinner } from '../components/Feedback';
+import { Icon } from '../components/Icon';
 import { Pagination, useClientPager } from '../components/Pagination';
+import { StatusBadge } from '../components/ui';
 
 const TASK_TYPE_LABEL: Record<TaskType, string> = {
   probe: '音源探测',
@@ -42,9 +44,15 @@ const TRIGGER_LABEL: Record<string, string> = {
   local: '本地',
 };
 
+const RUNNER_LABEL: Record<string, string> = {
+  'github-actions': 'GitHub Actions',
+  local: '本地运行',
+  manual: '手动',
+};
+
 function pct(value: number, max: number): number {
   if (!Number.isFinite(value) || max <= 0) return 0;
-  return Math.max(2, Math.min(100, Math.round((value / max) * 100)));
+  return Math.max(0, Math.min(100, (value / max) * 100));
 }
 
 function taskType(task: TaskView): string {
@@ -58,7 +66,7 @@ function taskElapsed(task: TaskView): string {
   return formatDuration(end - start);
 }
 
-function statusTone(status: TaskStatus): string {
+function statusTone(status: TaskStatus): 'ok' | 'warn' | 'bad' | 'idle' | 'accent' {
   if (status === 'succeeded') return 'ok';
   if (status === 'partial' || status === 'running') return 'warn';
   if (status === 'queued') return 'idle';
@@ -106,7 +114,10 @@ function ResultStats({ result }: { result: TaskResult }) {
   const items: Array<{ label: string; value: string; tone?: string }> = [];
   if (result.kind === 'probe' || result.kind === 'source-test') {
     items.push(
-      { label: '源', value: `${countValue(result, 'available')} 可用 / ${countValue(result, 'partial')} 部分 / ${countValue(result, 'unavailable')} 失效 / ${countValue(result, 'untested')} 未测` },
+      { label: '可用', value: String(countValue(result, 'available')), tone: 'ok' },
+      { label: '部分', value: String(countValue(result, 'partial')), tone: 'warn' },
+      { label: '失效', value: String(countValue(result, 'unavailable')), tone: 'bad' },
+      { label: '未测', value: String(countValue(result, 'untested')) },
       { label: '平台', value: `${countValue(result, 'platformsOk')}/${countValue(result, 'platformsTested')}` },
       { label: '接入点', value: `${countValue(result, 'endpointsOk')}/${countValue(result, 'endpointsTotal')}` },
       { label: '国内', value: `${countValue(result, 'cnOk')}/${countValue(result, 'cnTested')}` },
@@ -164,7 +175,7 @@ function TaskFailureDetails({ result }: { result: TaskResult }) {
   const count = (key: string) => result.counts[key] ?? 0;
   const renderSources = (items: TaskResult['failedSources'], label: string, total: number) =>
     items && items.length > 0 ? (
-      <details>
+      <details className="task-detail">
         <summary>
           {label}（{items.length < total ? `列出 ${items.length} / 共 ${total}` : total}）
         </summary>
@@ -181,7 +192,7 @@ function TaskFailureDetails({ result }: { result: TaskResult }) {
     ) : null;
   const renderPlatforms = (items: TaskResult['failedPlatforms'], label: string, total: number) =>
     items && items.length > 0 ? (
-      <details>
+      <details className="task-detail">
         <summary>
           {label}（{items.length < total ? `列出 ${items.length} / 共 ${total}` : total}）
         </summary>
@@ -204,7 +215,7 @@ function TaskFailureDetails({ result }: { result: TaskResult }) {
       {renderPlatforms(failedPlatforms, '失败的平台', Math.max(0, count('platformsTested') - count('platformsOk')))}
       {renderPlatforms(okPlatforms, '通过的平台', count('platformsOk'))}
       {subscriptions.length > 0 && (
-        <details>
+        <details className="task-detail">
           <summary>按订阅统计（{subscriptions.length}）</summary>
           <table className="mini-table">
             <thead>
@@ -232,37 +243,98 @@ function TaskFailureDetails({ result }: { result: TaskResult }) {
   );
 }
 
-function TaskCard({ task }: { task: TaskView }) {
+function TaskRow({ task }: { task: TaskView }) {
   const result = task.result;
   return (
-    <li className="task-card">
-      <div className="task-card-head">
-        <span className={`pill tone-${statusTone(task.status)}`}>{TASK_STATUS_LABEL[task.status] ?? task.status}</span>
-        <strong>{taskType(task)}</strong>
-        <span className="badge">{TRIGGER_LABEL[task.source] ?? task.source}</span>
-        <span className="muted small">{formatDateTime(task.finishedAt ?? task.createdAt)}</span>
-        <span className="muted small">耗时 {taskElapsed(task)}</span>
+    <li className="task-row">
+      <div className="task-row-status">
+        <StatusBadge tone={statusTone(task.status)}>{TASK_STATUS_LABEL[task.status] ?? task.status}</StatusBadge>
       </div>
-      <div className="task-card-body">
-        <p className="task-card-summary">{result?.summary || task.message || '无结果摘要'}</p>
+      <div className="task-row-main">
+        <div className="task-row-head">
+          <strong>{taskType(task)}</strong>
+          <span className="task-trigger">{TRIGGER_LABEL[task.source] ?? task.source}</span>
+          <span className="task-row-time">{formatDateTime(task.finishedAt ?? task.createdAt)}</span>
+        </div>
+        <p className="task-row-summary">{result?.summary || task.message || '无结果摘要'}</p>
         {result && <ResultStats result={result} />}
         {task.error && <p className="text-bad small">{task.error}</p>}
-        {result && <TaskFailureDetails result={result} />}
+        {result && (
+          <details className="task-row-details">
+            <summary>查看失败明细</summary>
+            <TaskFailureDetails result={result} />
+          </details>
+        )}
         {result?.warnings && result.warnings.length > 0 && (
           <p className="muted small">提示：{result.warnings.join('；')}</p>
         )}
       </div>
-      <div className="task-card-foot">
+      <div className="task-row-side">
+        <span className="task-row-duration">耗时 {taskElapsed(task)}</span>
         {task.runId && <Link to={`/runs/${task.runId}`}>运行详情</Link>}
         {task.runId && <Link to={`/runs/${task.runId}?tab=logs`}>日志</Link>}
-        <span className="muted small mono">{task.id}</span>
       </div>
+    </li>
+  );
+}
+
+function RunningTask({ task, busy, onCancel }: { task: TaskView; busy: boolean; onCancel: () => void }) {
+  const percent = task.progress.total > 0 ? Math.round((task.progress.done / task.progress.total) * 100) : 0;
+  return (
+    <li className="compact-task">
+      <span className="compact-task-icon run">
+        <Icon name="pulse" size={16} />
+      </span>
+      <div className="compact-task-main">
+        <div className="compact-task-head">
+          <strong>{taskType(task)}</strong>
+          <span className="task-trigger">{TRIGGER_LABEL[task.source] ?? task.source}</span>
+          <span className="muted small">{task.message || '已派发，等待执行'}</span>
+        </div>
+        <div className="compact-task-meta">
+          <span>耗时 {taskElapsed(task)}</span>
+          {task.runId && <Link to={`/runs/${task.runId}`}>运行记录</Link>}
+        </div>
+        {task.progress.total > 0 && (
+          <div className="meter">
+            <span style={{ width: `${percent}%` }} />
+          </div>
+        )}
+      </div>
+      <button type="button" className="link-button danger" onClick={onCancel} disabled={busy}>
+        取消
+      </button>
+    </li>
+  );
+}
+
+function QueuedTask({ task, busy, onCancel }: { task: TaskView; busy: boolean; onCancel: () => void }) {
+  return (
+    <li className="compact-task">
+      <span className="compact-task-icon queue">
+        <Icon name="runs" size={16} />
+      </span>
+      <div className="compact-task-main">
+        <div className="compact-task-head">
+          <strong>{taskType(task)}</strong>
+          <span className="task-trigger">{TRIGGER_LABEL[task.source] ?? task.source}</span>
+          <span className="muted small">P{task.priority}</span>
+        </div>
+        <div className="compact-task-meta">
+          <span>{formatRelative(task.createdAt)}</span>
+          {task.payload.limit ? <span>最多 {task.payload.limit} 源</span> : null}
+        </div>
+      </div>
+      <button type="button" className="link-button danger" onClick={onCancel} disabled={busy}>
+        取消
+      </button>
     </li>
   );
 }
 
 export function WorkbenchPage() {
   const [status, setStatus] = useState<StatusEnvelope | null>(null);
+  const [health, setHealth] = useState<Awaited<ReturnType<typeof api.health>> | null>(null);
   const [usage, setUsage] = useState<UsageView | null>(null);
   const [system, setSystem] = useState<SystemView | null>(null);
   const [running, setRunning] = useState<TaskView[]>([]);
@@ -273,7 +345,7 @@ export function WorkbenchPage() {
   const [recentPage, setRecentPage] = useState({ limit: 10, offset: 0 });
   const [activityPage, setActivityPage] = useState({ limit: 10, offset: 0 });
   const [recentType, setRecentType] = useState<TaskType | ''>('');
-  const [tab, setTab] = useState<'recent' | 'activity'>('recent');
+  const [hubTab, setHubTab] = useState<'recent' | 'activity'>('recent');
   const [error, setError] = useState('');
   const [action, setAction] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -281,15 +353,17 @@ export function WorkbenchPage() {
 
   const loadOverview = useCallback(async () => {
     try {
-      const [statusResult, usageResult, systemResult, runningResult, queuedResult] = await Promise.all([
+      const [statusResult, healthResult, usageResult, systemResult, runningResult, queuedResult] = await Promise.all([
         api.status(),
-        api.usage(),
+        api.health(),
+        api.usage().then((result) => result.usage).catch(() => null),
         api.system(),
         api.tasks({ status: 'running', limit: 10 }),
         api.tasks({ status: 'queued', limit: 100 }),
       ]);
       setStatus(statusResult);
-      setUsage(usageResult.usage);
+      setHealth(healthResult);
+      setUsage(usageResult);
       setSystem(systemResult);
       setRunning(runningResult.tasks);
       setQueued(queuedResult.tasks);
@@ -337,8 +411,8 @@ export function WorkbenchPage() {
   }, [loadRecent]);
 
   useEffect(() => {
-    if (tab === 'activity') void loadActivity();
-  }, [tab, loadActivity]);
+    if (hubTab === 'activity') void loadActivity();
+  }, [hubTab, loadActivity]);
 
   async function runTask(type: TaskType) {
     setBusy(type);
@@ -416,7 +490,8 @@ export function WorkbenchPage() {
     }
   }
 
-  const summary = status?.snapshot.summary;
+  const snapshot = status?.snapshot;
+  const summary = snapshot?.summary;
   const counts = recent?.counts ?? {
     queued: 0,
     running: 0,
@@ -426,225 +501,290 @@ export function WorkbenchPage() {
     cancelled: 0,
   };
   const scheduler = system?.scheduler;
+  const runCounts = health?.lastRun?.counts;
+  const total = summary?.total ?? 0;
+  const coverage = [
+    { key: 'available', label: '可用', value: summary?.available ?? 0, tone: 'ok' },
+    { key: 'partial', label: '部分', value: summary?.partial ?? 0, tone: 'warn' },
+    { key: 'unavailable', label: '失效', value: summary?.unavailable ?? 0, tone: 'bad' },
+    { key: 'untested', label: '未测', value: summary?.untested ?? 0, tone: 'idle' },
+  ];
+  const metrics = [
+    {
+      key: 'sources',
+      label: '音源总数',
+      value: String(total),
+      unit: '个',
+      hint: `可用 ${summary?.available ?? 0} · 部分 ${summary?.partial ?? 0} · 失效 ${summary?.unavailable ?? 0}`,
+      tone: 'accent',
+    },
+    {
+      key: 'platforms',
+      label: '平台通过',
+      value: `${summary?.platformsOk ?? 0}/${summary?.platformsTested ?? 0}`,
+      hint: '本轮已测平台',
+      tone: 'ok',
+    },
+    {
+      key: 'endpoints',
+      label: '接入点通过',
+      value: runCounts ? `${runCounts.endpointsOk}/${runCounts.endpointsTotal}` : '—',
+      hint: '主地址与镜像',
+      tone: 'ok',
+    },
+    {
+      key: 'cn',
+      label: '国内可达',
+      value: runCounts ? `${runCounts.cnOk}/${runCounts.cnTested}` : '—',
+      hint: '经国内代理补测',
+      tone: 'warn',
+    },
+    {
+      key: 'candidates',
+      label: '候选源',
+      value: String(health?.candidates ?? 0),
+      hint: '待审核与已转正',
+      tone: 'accent',
+    },
+  ];
+  const schedules = [
+    {
+      key: 'probe',
+      label: '音源探测',
+      icon: 'sources' as const,
+      state: scheduler?.probe,
+      interval: scheduler?.probe.intervalHours ?? 4,
+    },
+    {
+      key: 'discovery',
+      label: '自动发现',
+      icon: 'candidate' as const,
+      state: scheduler?.discovery,
+      interval: scheduler?.discovery?.intervalHours ?? 12,
+    },
+    {
+      key: 'proxy-test',
+      label: '代理测活',
+      icon: 'proxy' as const,
+      state: scheduler?.proxyTest,
+      interval: scheduler?.proxyTest.intervalHours ?? 6,
+    },
+  ];
+  const quickLinks = [
+    { to: '/sources', label: '音源总览', icon: 'sources' as const },
+    { to: '/candidates', label: '候选源', icon: 'candidate' as const },
+    { to: '/runs', label: '运行记录', icon: 'runs' as const },
+    { to: '/admin/proxies', label: '国内代理', icon: 'proxy' as const },
+    { to: '/admin', label: '控制面板', icon: 'admin' as const },
+  ];
 
   return (
-    <div className="page">
-      <div className="page-head">
-        <div>
-          <span className="eyebrow">WORKBENCH</span>
-          <h1>工作台</h1>
-          <p className="muted">
-            所有会派发 Actions 的操作都先建任务；Worker 每 5 分钟检查一次，到点后按队列依次派发。
-          </p>
+    <div className="page dash-page">
+      <section className="dash-hero">
+        <div className="dash-hero-copy">
+          <span className="dash-eyebrow">OVERVIEW · 音源监测</span>
+          <h1>概览</h1>
+          <p>音源脚本、平台取链与国内可达性一屏汇总。</p>
+          <div className="dash-hero-meta">
+            <span className={`dash-live ${status?.stale ? 'stale' : 'ok'}`}>
+              <i />
+              {status?.stale ? '数据已过期' : '数据正常'}
+            </span>
+            {snapshot && <span>上次 {formatRelative(snapshot.generatedAt)}</span>}
+            {snapshot && <span>下轮 {formatDateTime(snapshot.nextCheckAt)}</span>}
+            {snapshot && <span>本轮 {formatDuration(snapshot.durationMs)}</span>}
+            <span>候选 {health?.candidates ?? 0}</span>
+          </div>
         </div>
-        <div className="page-actions">
-          <button type="button" className="ghost-button" onClick={() => void dispatchQueued()} disabled={busy !== null}>
-            {busy === 'dispatch' ? '派发中…' : '派发排队任务'}
+        <div className="dash-hero-actions">
+          <button type="button" className="dash-action primary" onClick={() => void runTask('probe')} disabled={busy !== null}>
+            <Icon name="pulse" size={16} />
+            {busy === 'probe' ? '创建中…' : '立即探测'}
           </button>
-          <button type="button" className="ghost-button" onClick={() => void load()} disabled={!loaded}>
-            刷新
+          <button type="button" className="dash-action" onClick={() => void dispatchQueued()} disabled={busy !== null}>
+            派发排队
+          </button>
+          <button type="button" className="dash-action icon" onClick={() => void load()} disabled={!loaded} aria-label="刷新">
+            <Icon name="refresh" size={17} />
           </button>
         </div>
+      </section>
+
+      <div className="dash-metrics">
+        {metrics.map((metric) => (
+          <article className={`dash-metric tone-${metric.tone}`} key={metric.key}>
+            <span className="dash-metric-label">{metric.label}</span>
+            <strong className="dash-metric-value">
+              {metric.value}
+              {metric.unit ? <small>{metric.unit}</small> : null}
+            </strong>
+            <span className="dash-metric-hint">{metric.hint}</span>
+          </article>
+        ))}
       </div>
 
       {error && <ErrorBox message={error} />}
       {!loaded && !error && <Spinner label="正在加载工作台…" />}
 
-      {loaded && usage && (
-        <div className="usage-grid">
-          {usageCards(usage).map((card) => (
-            <div className="usage-card" key={card.key}>
-              <span className="usage-label">{card.label}</span>
-              <div className="usage-value">
-                {card.value.toLocaleString('zh-CN')}
-                {card.max > 0 && <span className="usage-max"> / {card.max.toLocaleString('zh-CN')}</span>}
+      {action && (
+        <div className="dash-toast">
+          <span>{action}</span>
+          <button type="button" className="link-button" onClick={() => setAction('')}>
+            收起
+          </button>
+        </div>
+      )}
+
+      <div className="dash-content">
+        <div>
+          <section className="dash-card task-hub">
+            <header className="dash-card-head task-hub-head">
+              <div>
+                <h2>任务中心</h2>
+                <p>
+                  运行 {counts.running} · 排队 {counts.queued} · 成功 {counts.succeeded} · 部分 {counts.partial} · 失败{' '}
+                  {counts.failed} · 取消 {counts.cancelled}
+                </p>
               </div>
-              {card.max > 0 && (
-                <div className="usage-meter">
-                  <span style={{ width: `${pct(card.value, card.max)}%` }} />
+              <div className="dash-card-actions">
+                <button type="button" className="ghost-button small" onClick={() => void runTask('proxy-test')} disabled={busy !== null}>
+                  {busy === 'proxy-test' ? '创建中…' : '立即测活'}
+                </button>
+                <button type="button" className="ghost-button small" onClick={() => void runTask('discovery')} disabled={busy !== null}>
+                  {busy === 'discovery' ? '创建中…' : '立即发现'}
+                </button>
+                <button type="button" className="ghost-button small" onClick={() => void reap()} disabled={busy !== null}>
+                  清理卡死
+                </button>
+              </div>
+            </header>
+
+            <div className="task-lanes">
+              <div className="task-lane">
+                <div className="task-lane-head">
+                  <h3>
+                    <span className="lane-dot live" />
+                    正在运行
+                  </h3>
+                  <span>{running.length > 0 ? `${running.length} 个` : '空闲'}</span>
                 </div>
-              )}
-              <span className="usage-hint">{card.hint}</span>
+                {running.length === 0 ? (
+                  <p className="task-lane-empty">当前没有运行中的任务。</p>
+                ) : (
+                  <ul className="compact-task-list">
+                    {running.map((task) => (
+                      <RunningTask key={task.id} task={task} busy={busy !== null} onCancel={() => void cancel(task)} />
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div className="task-lane">
+                <div className="task-lane-head">
+                  <h3>
+                    <span className="lane-dot waiting" />
+                    排队中
+                  </h3>
+                  <span>{queued.length > 0 ? `${queued.length} 个` : '空'}</span>
+                </div>
+                {queued.length === 0 ? (
+                  <p className="task-lane-empty">队列为空。</p>
+                ) : (
+                  <ul className="compact-task-list">
+                    {queuedPager.pageItems.map((task) => (
+                      <QueuedTask key={task.id} task={task} busy={busy !== null} onCancel={() => void cancel(task)} />
+                    ))}
+                  </ul>
+                )}
+                {queued.length > 0 && <Pagination {...queuedPager.pagination} label="个任务" />}
+              </div>
             </div>
-          ))}
-        </div>
-      )}
 
-      {usage?.cloudflareError && (
-        <div className="notice">
-          Cloudflare 统计暂不可用：{usage.cloudflareError}。KV/D1 数字可能是上次采集值。
-          <button type="button" className="link-button" onClick={() => void refreshUsage()} disabled={busy === 'usage'}>
-            重试
-          </button>
-        </div>
-      )}
-
-      <section>
-        <div className="panel-head">
-          <h2>任务中心</h2>
-          <span className="muted small">
-            运行 {counts.running} · 排队 {counts.queued} · 成功 {counts.succeeded} · 部分 {counts.partial} · 失败{' '}
-            {counts.failed} · 取消 {counts.cancelled}
-          </span>
-        </div>
-
-        <div className="task-actions">
-          <button type="button" className="primary-button" onClick={() => void runTask('probe')} disabled={busy !== null}>
-            {busy === 'probe' ? '创建中…' : '立即探测'}
-          </button>
-          <button type="button" className="ghost-button" onClick={() => void runTask('proxy-test')} disabled={busy !== null}>
-            {busy === 'proxy-test' ? '创建中…' : '立即测活'}
-          </button>
-          <button type="button" className="ghost-button" onClick={() => void runTask('discovery')} disabled={busy !== null}>
-            {busy === 'discovery' ? '创建中…' : '立即发现'}
-          </button>
-          <button type="button" className="ghost-button" onClick={() => void reap()} disabled={busy !== null}>
-            清理卡死
-          </button>
-        </div>
-
-        {summary && (
-          <p className="muted small">
-            最新快照：{summary.available} 可用 / {summary.partial} 部分 / {summary.unavailable} 失效 / {summary.untested} 未测，
-            共 {summary.total} 源；平台通过 {summary.platformsOk}/{summary.platformsTested}。
-          </p>
-        )}
-
-        <div className="task-grid">
-          <div className="panel task-panel">
-            <div className="panel-head">
-              <h3>正在运行</h3>
-              <span className="muted">{running.length > 0 ? `${running.length} 个` : '空闲'}</span>
-            </div>
-            {running.length === 0 ? (
-              <p className="muted">当前没有运行中的任务。</p>
-            ) : (
-              <ul className="task-list">
-                {running.map((task) => {
-                  const percent =
-                    task.progress.total > 0 ? Math.round((task.progress.done / task.progress.total) * 100) : 0;
-                  return (
-                    <li key={task.id}>
-                      <span className="pill run-in_progress">{TASK_STATUS_LABEL[task.status] ?? task.status}</span>
-                      <div className="task-main">
-                        <strong>{taskType(task)}</strong>
-                        <span className="badge">{TRIGGER_LABEL[task.source] ?? task.source}</span>
-                        <span className="muted">
-                          {task.message || '已派发，等待 Actions 开始'} · {taskElapsed(task)}
-                        </span>
-                        {task.progress.total > 0 && (
-                          <div className="meter">
-                            <span style={{ width: `${percent}%` }} />
-                          </div>
-                        )}
-                      </div>
-                      <div className="task-side">
-                        {task.runId && <Link to={`/runs/${task.runId}`}>运行记录</Link>}
-                        <button
-                          type="button"
-                          className="link-button danger"
-                          onClick={() => void cancel(task)}
-                          disabled={busy !== null}
-                        >
-                          取消
-                        </button>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-
-          <div className="panel task-panel">
-            <div className="panel-head">
-              <h3>排队中</h3>
-              <span className="muted">{queued.length > 0 ? `${queued.length} 个` : '空'}</span>
-            </div>
-            {queued.length === 0 ? (
-              <p className="muted">队列为空。</p>
-            ) : (
-              <ul className="task-list">
-                {queuedPager.pageItems.map((task) => (
-                  <li key={task.id}>
-                    <span className="pill run-queued">P{task.priority}</span>
-                    <div className="task-main">
-                      <strong>{taskType(task)}</strong>
-                      <span className="badge">{TRIGGER_LABEL[task.source] ?? task.source}</span>
-                      <span className="muted">
-                        {formatRelative(task.createdAt)}
-                        {task.payload.limit ? ` · 最多 ${task.payload.limit} 源` : ''}
+            <div className="schedule-strip">
+              <div className="schedule-strip-title">
+                <Icon name="pulse" size={15} />
+                <span>定时计划</span>
+              </div>
+              <div className="schedule-chips">
+                {schedules.map((schedule) => (
+                  <div className={`schedule-chip ${schedule.state?.enabled === false ? 'off' : ''}`} key={schedule.key}>
+                    <Icon name={schedule.icon} size={15} />
+                    <div className="schedule-chip-copy">
+                      <strong>{schedule.label}</strong>
+                      <span>
+                        {schedule.state?.enabled === false ? '已关闭' : `每 ${schedule.interval} 小时`}
+                        {schedule.state?.nextAt ? ` · 下次 ${formatDateTime(schedule.state.nextAt)}` : ''}
+                      </span>
+                      <span className={`schedule-chip-last ${schedule.state?.lastOk === false ? 'bad' : ''}`}>
+                        {schedule.state?.lastAt
+                          ? `上次 ${schedule.state.lastOk === false ? '失败' : '成功'} · ${formatRelative(schedule.state.lastAt)}`
+                          : '上次 未运行'}
                       </span>
                     </div>
-                    <div className="task-side">
-                      <button
-                        type="button"
-                        className="link-button danger"
-                        onClick={() => void cancel(task)}
-                        disabled={busy !== null}
-                      >
-                        取消
-                      </button>
-                    </div>
-                  </li>
+                    <button
+                      type="button"
+                      className="link-button"
+                      onClick={() => void runTask(schedule.key as TaskType)}
+                      disabled={busy !== null}
+                    >
+                      立即执行
+                    </button>
+                  </div>
                 ))}
-              </ul>
-            )}
-            {queued.length > 0 && <Pagination {...queuedPager.pagination} label="个任务" />}
-          </div>
-        </div>
+              </div>
+            </div>
 
-        <div className="panel task-panel">
-          <div className="panel-head">
-            <div className="tab-row">
+            <div className="hub-tabs" role="tablist" aria-label="任务中心视图">
               <button
                 type="button"
-                className={tab === 'recent' ? 'tab active' : 'tab'}
-                onClick={() => setTab('recent')}
+                role="tab"
+                aria-selected={hubTab === 'recent'}
+                className={hubTab === 'recent' ? 'active' : ''}
+                onClick={() => setHubTab('recent')}
               >
                 最近任务
               </button>
               <button
                 type="button"
-                className={tab === 'activity' ? 'tab active' : 'tab'}
-                onClick={() => setTab('activity')}
+                role="tab"
+                aria-selected={hubTab === 'activity'}
+                className={hubTab === 'activity' ? 'active' : ''}
+                onClick={() => setHubTab('activity')}
               >
                 操作记录
               </button>
+              <span className="hub-tabs-spacer" />
+              {hubTab === 'recent' && (
+              <select
+                className="select hub-select"
+                value={recentType}
+                onChange={(event) => {
+                  setRecentType(event.target.value as TaskType | '');
+                  setRecentPage((prev) => ({ ...prev, offset: 0 }));
+                }}
+                aria-label="任务类型"
+              >
+                <option value="">全部类型</option>
+                {Object.entries(TASK_TYPE_LABEL).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              )}
+              <Link className="panel-link" to="/runs">
+                全部运行 <Icon name="chevron-right" size={14} />
+              </Link>
             </div>
-            <div className="panel-links">
-              <Link to="/runs">全部运行</Link>
-            </div>
-          </div>
 
-          {tab === 'recent' && (
-            <>
-              <div className="task-filter">
-                <label className="field compact">
-                  <span>任务类型</span>
-                  <select
-                    className="select"
-                    value={recentType}
-                    onChange={(event) => {
-                      setRecentType(event.target.value as TaskType | '');
-                      setRecentPage((prev) => ({ ...prev, offset: 0 }));
-                    }}
-                  >
-                    <option value="">全部类型</option>
-                    {Object.entries(TASK_TYPE_LABEL).map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
+            {hubTab === 'recent' ? (
+            <div className="task-recent">
               {!recent || recent.tasks.length === 0 ? (
-                <p className="muted">还没有已完成的任务。</p>
+                <p className="task-lane-empty">还没有已完成的任务。</p>
               ) : (
-                <ul className="task-card-list">
+                <ul className="task-rows">
                   {recent.tasks.map((task) => (
-                    <TaskCard key={task.id} task={task} />
+                    <TaskRow key={task.id} task={task} />
                   ))}
                 </ul>
               )}
@@ -657,16 +797,14 @@ export function WorkbenchPage() {
                   label="个任务"
                 />
               )}
-            </>
-          )}
-
-          {tab === 'activity' && (
-            <>
+            </div>
+            ) : (
+            <div className="task-activity">
               {!activity || activity.items.length === 0 ? (
-                <p className="muted">还没有操作记录。</p>
+                <p className="task-lane-empty">还没有操作记录。</p>
               ) : (
                 <div className="table-wrap">
-                  <table className="data-table">
+                  <table className="data-table compact-table activity-table">
                     <thead>
                       <tr>
                         <th>时间</th>
@@ -683,9 +821,9 @@ export function WorkbenchPage() {
                           <td>{item.action}</td>
                           <td className="mono small">{item.target || '—'}</td>
                           <td>
-                            <span className={`pill tone-${item.ok ? 'ok' : 'bad'}`}>
+                            <StatusBadge tone={item.ok ? 'ok' : 'bad'} dot={false}>
                               {item.ok ? '成功' : `失败 ${item.status}`}
-                            </span>
+                            </StatusBadge>
                           </td>
                           <td className="muted small">{item.message || '—'}</td>
                         </tr>
@@ -703,60 +841,115 @@ export function WorkbenchPage() {
                   label="条操作"
                 />
               )}
-            </>
-          )}
+            </div>
+            )}
+          </section>
         </div>
 
-        <div className="panel task-panel">
-          <div className="panel-head">
-            <h3>定时计划</h3>
-            <span className="muted small">Worker 定时</span>
-          </div>
-          <div className="schedule-list">
-            <div className="schedule-item">
-              <div>
-                <strong>音源探测</strong>
-                <span className="muted">
-                  {scheduler?.probe.enabled === false ? '已关闭' : `每 ${scheduler?.probe.intervalHours ?? 4} 小时`}
-                  {scheduler?.probe.nextAt ? ` · 下次 ${formatDateTime(scheduler.probe.nextAt)}` : ''}
-                  {summary ? ` · 上轮 ${summary.available}/${summary.total} 可用` : ''}
-                </span>
-                {scheduler?.probe.lastOk === false && scheduler.probe.lastError && (
-                  <span className="text-bad small">上次入队失败：{scheduler.probe.lastError}</span>
-                )}
+        <section className="dash-card quota-section">
+            <header className="rail-head">
+              <h3>额度与配额</h3>
+              <button type="button" className="link-button" onClick={() => void refreshUsage()} disabled={busy === 'usage'}>
+                刷新
+              </button>
+            </header>
+            {usage ? (
+              <div className="quota-grid">
+                {usageCards(usage).map((card) => (
+                  <div className="quota-card" key={card.key}>
+                    <div className="quota-card-head">
+                      <span className="quota-card-icon">
+                        <Icon name={card.key === 'actions' ? 'pulse' : 'database'} size={15} />
+                      </span>
+                      <span>{card.label}</span>
+                    </div>
+                    <strong className="quota-card-value">
+                      {card.value.toLocaleString('zh-CN')}
+                      {card.max > 0 && <small> / {card.max.toLocaleString('zh-CN')}</small>}
+                    </strong>
+                    {card.max > 0 && (
+                      <div className="quota-meter">
+                        <span style={{ width: `${pct(card.value, card.max)}%` }} />
+                      </div>
+                    )}
+                    <span className="quota-hint">{card.hint}</span>
+                  </div>
+                ))}
               </div>
-            </div>
-            <div className="schedule-item">
-              <div>
-                <strong>自动发现</strong>
-                <span className="muted">
-                  {scheduler?.discovery?.enabled === false
-                    ? '已关闭'
-                    : `每 ${scheduler?.discovery?.intervalHours ?? 12} 小时`}
-                  {scheduler?.discovery?.nextAt ? ` · 下次 ${formatDateTime(scheduler.discovery.nextAt)}` : ''}
-                </span>
-                {scheduler?.discovery?.lastOk === false && scheduler.discovery.lastError && (
-                  <span className="text-bad small">上次入队失败：{scheduler.discovery.lastError}</span>
-                )}
-              </div>
-            </div>
-            <div className="schedule-item">
-              <div>
-                <strong>代理测活</strong>
-                <span className="muted">
-                  {scheduler?.proxyTest.enabled === false ? '已关闭' : `每 ${scheduler?.proxyTest.intervalHours ?? 6} 小时`}
-                  {scheduler?.proxyTest.nextAt ? ` · 下次 ${formatDateTime(scheduler.proxyTest.nextAt)}` : ''}
-                </span>
-                {scheduler?.proxyTest.lastOk === false && scheduler.proxyTest.lastError && (
-                  <span className="text-bad small">上次入队失败：{scheduler.proxyTest.lastError}</span>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
+            ) : (
+              <p className="muted small">额度数据暂不可用。</p>
+            )}
+            {usage?.cloudflareError && (
+              <p className="rail-note">
+                Cloudflare 统计不可用：{usage.cloudflareError}
+              </p>
+            )}
+        </section>
 
-        {action && <div className="form-message">{action}</div>}
-      </section>
+        <div className="dash-duo">
+          <section className="dash-card bottom-card">
+            <header className="rail-head">
+              <h3>轮次覆盖</h3>
+              <span className="muted small">{total} 个音源</span>
+            </header>
+            <div className="coverage-bar" aria-hidden="true">
+              {coverage.map((item) =>
+                item.value > 0 ? (
+                  <span
+                    key={item.key}
+                    className={`coverage-${item.tone}`}
+                    style={{ width: `${pct(item.value, total)}%` }}
+                  />
+                ) : null,
+              )}
+            </div>
+            <div className="coverage-legend">
+              {coverage.map((item) => (
+                <span key={item.key} className={`coverage-legend-${item.tone}`}>
+                  <i />
+                  {item.label}
+                  <strong>{item.value}</strong>
+                </span>
+              ))}
+            </div>
+            <dl className="rail-facts">
+              <div>
+                <dt>平台</dt>
+                <dd>{summary ? `${summary.platformsOk}/${summary.platformsTested}` : '—'}</dd>
+              </div>
+              <div>
+                <dt>接入点</dt>
+                <dd>{runCounts ? `${runCounts.endpointsOk}/${runCounts.endpointsTotal}` : '—'}</dd>
+              </div>
+              <div>
+                <dt>国内补测</dt>
+                <dd>{runCounts ? `${runCounts.cnOk}/${runCounts.cnTested}` : '—'}</dd>
+              </div>
+              <div>
+                <dt>候选</dt>
+                <dd>{health?.candidates ?? 0}</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section className="dash-card rail-card">
+            <header className="rail-head">
+              <h3>快捷入口</h3>
+            </header>
+            <div className="quick-links">
+              {quickLinks.map((link) => (
+                <Link key={link.to} to={link.to}>
+                  <span className="quick-link-icon">
+                    <Icon name={link.icon} size={16} />
+                  </span>
+                  <span>{link.label}</span>
+                  <Icon name="chevron-right" size={14} />
+                </Link>
+              ))}
+            </div>
+          </section>
+        </div>
+      </div>
     </div>
   );
 }

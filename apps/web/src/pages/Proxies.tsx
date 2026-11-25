@@ -260,6 +260,9 @@ export function ProxiesPage() {
   }, [items, filterSub]);
   const subPager = useClientPager(subs ?? []);
   const nodePager = useClientPager(visible);
+  const nodeTotal = items?.length ?? 0;
+  const nodeEnabled = items?.filter((item) => item.enabled).length ?? 0;
+  const nodeOk = items?.filter((item) => item.lastOkAt).length ?? 0;
 
   return (
     <div className="page">
@@ -273,6 +276,26 @@ export function ProxiesPage() {
       {message && <div className="notice">{message}</div>}
       {error && <ErrorBox message={error} onRetry={() => void load()} />}
       {!items && !error && <Spinner label="正在加载代理池…" />}
+
+      {items && (
+        <div className="stats-grid compact">
+          <div className="stat-card">
+            <span className="muted">节点总数</span>
+            <strong>{nodeTotal}</strong>
+            <span className="muted small">启用 {nodeEnabled} 个</span>
+          </div>
+          <div className="stat-card">
+            <span className="muted">最近测活可用</span>
+            <strong className={nodeOk > 0 ? 'text-ok' : 'muted'}>{nodeOk}</strong>
+            <span className="muted small">有过成功记录</span>
+          </div>
+          <div className="stat-card">
+            <span className="muted">订阅</span>
+            <strong>{subs?.length ?? 0}</strong>
+            <span className="muted small">按订阅归档节点</span>
+          </div>
+        </div>
+      )}
 
       <section className="panel">
         <h2>订阅</h2>

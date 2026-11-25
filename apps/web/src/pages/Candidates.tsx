@@ -239,108 +239,91 @@ export function CandidatesPage() {
 
       {!loading && data && visibleCandidates.length > 0 ? (
         <>
-          <div className="table-wrap">
-          <table className="data-table source-table">
-            <thead>
-              <tr>
-                <th>候选</th>
-                <th>声明平台</th>
-                <th>初始化</th>
-                <th>版本 / sha</th>
-                <th>首次发现</th>
-                <th>状态</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {candidatePager.pageItems.map((candidate) => {
-                const meta = STATE_META[candidate.state] ?? STATE_FALLBACK;
-                return (
-                  <tr key={candidate.id}>
-                    <td>
-                      <div className="source-title">{candidate.title ?? candidate.id}</div>
-                      <div className="source-sub">
-                        {candidate.repo}/{candidate.path}
-                      </div>
-                    </td>
-                    <td>
-                      <div className="chip-row">
-                        {candidate.platforms.length === 0 ? (
-                          <span className="muted">未声明</span>
-                        ) : (
-                          candidate.platforms.map((key) => (
-                            <span key={key} className="mini-chip">
-                              {platformMeta(key).short}
-                            </span>
-                          ))
-                        )}
-                      </div>
-                    </td>
-                    <td>
-                      {candidate.initOk === true ? (
-                        <span className="text-ok">通过</span>
-                      ) : candidate.initOk === false ? (
-                        <span className="text-bad" title={candidate.initError ?? ''}>
-                          失败
-                        </span>
-                      ) : (
-                        <span className="muted">未测</span>
-                      )}
-                    </td>
-                    <td>
-                      <span className="mono">{candidate.version ?? '未声明版本'}</span>
-                      <div className="source-sub mono">{candidate.sha.slice(0, 8)}</div>
-                    </td>
-                    <td title={formatDateTime(candidate.firstSeen)}>{formatRelative(candidate.firstSeen)}</td>
-                    <td>
+          <div className="candidate-list">
+            {candidatePager.pageItems.map((candidate) => {
+              const meta = STATE_META[candidate.state] ?? STATE_FALLBACK;
+              return (
+                <article className="candidate-row" key={candidate.id}>
+                  <div className="candidate-main">
+                    <div className="candidate-title">
+                      <strong>{candidate.title ?? candidate.id}</strong>
                       <span className={`pill tone-${meta.tone}`} title={meta.hint}>
                         {meta.label}
                       </span>
-                    </td>
-                    <td>
-                      <div className="row-actions">
-                        {candidate.state !== 'promoted' ? (
-                          <button
-                            type="button"
-                            className="link-button"
-                            disabled={busy === candidate.id}
-                            onClick={() => act(candidate, 'promoted')}
-                          >
-                            收录
-                          </button>
-                        ) : (
-                          <Link className="link-button" to="/admin/sources">
-                            查看
-                          </Link>
-                        )}
-                        {candidate.state !== 'rejected' ? (
-                          <button
-                            type="button"
-                            className="link-button danger"
-                            disabled={busy === candidate.id}
-                            onClick={() => act(candidate, 'rejected')}
-                          >
-                            拒绝
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="link-button"
-                            disabled={busy === candidate.id}
-                            onClick={() => act(candidate, 'new')}
-                          >
-                            重置
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        <Pagination {...candidatePager.pagination} label="个候选" />
+                    </div>
+                    <div className="candidate-repo" title={`${candidate.repo}/${candidate.path}`}>
+                      {candidate.repo}/{candidate.path}
+                    </div>
+                    <div className="candidate-platforms">
+                      {candidate.platforms.length === 0 ? (
+                        <span className="muted small">未声明平台</span>
+                      ) : (
+                        candidate.platforms.map((key) => (
+                          <span key={key} className="mini-chip">
+                            {platformMeta(key).short}
+                          </span>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="candidate-facts">
+                    <div>
+                      <span>初始化</span>
+                      <strong className={candidate.initOk === true ? 'text-ok' : candidate.initOk === false ? 'text-bad' : 'muted'}>
+                        {candidate.initOk === true ? '通过' : candidate.initOk === false ? '失败' : '未测'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>版本</span>
+                      <strong title={candidate.sha}>{candidate.version ?? '未知'}</strong>
+                    </div>
+                    <div>
+                      <span>首次发现</span>
+                      <strong title={formatDateTime(candidate.firstSeen)}>{formatRelative(candidate.firstSeen)}</strong>
+                    </div>
+                  </div>
+
+                  <div className="candidate-actions">
+                    {candidate.state !== 'promoted' ? (
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        disabled={busy === candidate.id}
+                        onClick={() => act(candidate, 'promoted')}
+                      >
+                        收录
+                      </button>
+                    ) : (
+                      <Link className="ghost-button" to="/admin/sources">
+                        查看
+                      </Link>
+                    )}
+                    {candidate.state !== 'rejected' ? (
+                      <button
+                        type="button"
+                        className="ghost-button danger"
+                        disabled={busy === candidate.id}
+                        onClick={() => act(candidate, 'rejected')}
+                      >
+                        拒绝
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        disabled={busy === candidate.id}
+                        onClick={() => act(candidate, 'new')}
+                      >
+                        重置
+                      </button>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+          <Pagination {...candidatePager.pagination} label="个候选" />
         </>
       ) : null}
 

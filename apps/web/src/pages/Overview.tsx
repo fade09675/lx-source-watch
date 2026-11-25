@@ -1,20 +1,24 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   PLATFORMS,
   STATUS_META,
   formatDateTime,
   formatDuration,
   formatMs,
+  platformMeta,
   sortPlatformKeys,
+  type SourceResult,
   type SourceStatus,
   type StatusEnvelope,
 } from '@lx/shared';
 import { ApiError, api, type StatusFilters } from '../api';
 import { EmptyBox, ErrorBox, Spinner } from '../components/Feedback';
+import { Icon } from '../components/Icon';
 import { Pagination, useClientPager } from '../components/Pagination';
 import { PlatformChip } from '../components/PlatformChip';
 import { StatusBadge } from '../components/StatusBadge';
+import { hostOf, pickRecommended } from '../lib/endpoints';
 
 const STATUS_ORDER: SourceStatus[] = ['available', 'partial', 'unavailable', 'untested'];
 
@@ -25,6 +29,10 @@ export function OverviewPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState(params.get('q') ?? '');
+  const [view, setView] = useState<'grid' | 'list'>(
+    () => (window.localStorage.getItem('lx-sources-view') === 'list' ? 'list' : 'grid'),
+  );
+  const [copiedId, setCopiedId] = useState('');
 
   const platforms = useMemo(() => (params.get('platform') ?? '').split(',').filter(Boolean), [params]);
   const statuses = useMemo(() => (params.get('status') ?? '').split(',').filter(Boolean), [params]);
@@ -117,6 +125,22 @@ export function OverviewPage() {
     setParams(new URLSearchParams(), { replace: true });
   }
 
+  function changeView(next: 'grid' | 'list') {
+    setView(next);
+    window.localStorage.setItem('lx-sources-view', next);
+  }
+
+  async function copySource(source: SourceResult) {
+    const recommended = pickRecommended(source.endpoints, source.url);
+    try {
+      await navigator.clipboard.writeText(recommended.url);
+      setCopiedId(source.id);
+      window.setTimeout(() => setCopiedId(''), 1600);
+    } catch {
+      setCopiedId('');
+    }
+  }
+
   const snapshot = data?.snapshot;
   const summary = snapshot?.summary;
   const cnStats = useMemo(() => {
@@ -133,14 +157,15 @@ export function OverviewPage() {
   }, [snapshot]);
 
   return (
-    <div className="page">
+    <div className="page sources-page">
       <div className="page-head">
         <div>
           <h1>音源总览</h1>
           <p className="muted">
             {snapshot ? (
               <>
-                生成于 {formatDateTime(snapshot.generatedAt)} · 用时 {formatDuration(snapshot.durationMs)} · 下一轮 {formatDateTime(snapshot.nextCheckAt)}
+                生成于 {formatDateTime(snapshot.generatedAt)} · 用时 {formatDuration(snapshot.durationMs)} · 下一轮{' '}
+                {formatDateTime(snapshot.nextCheckAt)}
                 {data?.stale && <span className="pill pill-warn">已过期</span>}
               </>
             ) : (
@@ -149,14 +174,15 @@ export function OverviewPage() {
           </p>
         </div>
         <div className="page-actions">
-          <button type="button" className="ghost-button" onClick={() => void loadAgain()} disabled={loading}>
+          <button type="button" className="ghost-button" onClick={loadAgain} disabled={loading}>
+            <Icon name="refresh" size={14} />
             刷新
           </button>
         </div>
       </div>
 
       {summary && (
-        <div className="stats-grid">
+        <div className="stats-grid source-stats">
           <StatCard label="音源总数" value={summary.total} tone="idle" />
           <StatCard label="可用" value={summary.available} tone="ok" />
           <StatCard label="部分可用" value={summary.partial} tone="warn" />
@@ -180,7 +206,7 @@ export function OverviewPage() {
         </div>
       )}
 
-      <div className="filter-bar">
+      <div className="filter-bar source-filter-bar">
         <input
           className="search-input"
           value={query}
@@ -230,13 +256,46 @@ export function OverviewPage() {
             清空筛选
           </button>
         )}
+        <div className="view-toggle" role="group" aria-label="视图">
+          <button
+            type="button"
+            className={view === 'grid' ? 'active' : ''}
+            onClick={() => changeView('grid')}
+            title="卡片视图"
+          >
+            <Icon name="grid" size={14} />
+            卡片
+          </button>
+          <button
+            type="button"
+            className={view === 'list' ? 'active' : ''}
+            onClick={() => changeView('list')}
+            title="列表视图"
+          >
+            <Icon name="list" size={14} />
+            列表
+          </button>
+        </div>
       </div>
 
       {loading && !snapshot && <Spinner label="正在加载监测结果…" />}
-      {error && <ErrorBox message={error} onRetry={() => setParams(new URLSearchParams(params), { replace: true })} />}
+      {error && <ErrorBox message={error} onRetry={loadAgain} />}
       {snapshot && snapshot.sources.length === 0 && <EmptyBox message="没有符合筛选条件的音源。" />}
 
-      {snapshot && snapshot.sources.length > 0 && (
+      {snapshot && snapshot.sources.length > 0 && view === 'grid' && (
+        <div className="source-grid">
+          {pager.pageItems.map((source) => (
+            <SourceCard
+              key={source.id}
+              source={source}
+              copied={copiedId === source.id}
+              onCopy={() => void copySource(source)}
+            />
+          ))}
+        </div>
+      )}
+
+      {snapshot && snapshot.sources.length > 0 && view === 'list' && (
         <div className="matrix-wrap">
           <table className="matrix">
             <thead>
@@ -250,84 +309,86 @@ export function OverviewPage() {
             </thead>
             <tbody>
               {pager.pageItems.map((source) => {
-                  const keys = sortPlatformKeys(source.platforms.filter((item) => item.declared).map((item) => item.key));
-                  const byKey = new Map(source.platforms.map((item) => [item.key, item]));
-                  const endpointsOk = source.endpoints.filter((item) => item.ok).length;
-                  const lagging = source.endpoints.some((item) => item.versionState === 'lagging');
-                  const cnPlatforms = source.platforms.filter((item) => item.declared && item.cn?.tested);
-                  const cnOk = cnPlatforms.filter((item) => item.cn?.ok).length;
-                  const originLabel = source.origin || hostOf(source.homepage || source.url);
-                  return (
-                    <tr key={source.id} onClick={() => navigate(`/s/${encodeURIComponent(source.id)}`)} className="matrix-row">
-                      <td>
-                        <div className="source-title">{source.title}</div>
-                        <div className="source-sub">
-                          <span className="mono">{source.id}</span>
-                          {source.version && <span>v{source.version}</span>}
-                          {source.author && <span>{source.author}</span>}
-                          {originLabel && (
-                            <span className="source-origin" title={source.origin || source.homepage || source.url}>
-                              来源 {originLabel}
-                            </span>
-                          )}
-                          {source.endpoints.length > 0 && (
-                            <span
-                              className={endpointsOk > 0 ? 'text-ok' : 'text-bad'}
-                              title={`接入点 ${endpointsOk}/${source.endpoints.length}：主地址与镜像中 ${source.endpoints.length} 个地址，本轮 ${endpointsOk} 个下载成功`}
-                            >
-                              接入点 {endpointsOk}/{source.endpoints.length}
-                            </span>
-                          )}
-                          {source.via && (
-                            <span
-                              className={`pill tone-${source.via === 'primary' ? 'ok' : 'warn'}`}
-                              title={source.chosenUrl ? `本轮实际加载：${source.chosenUrl}` : '本轮实际加载的接入点'}
-                            >
-                              本轮 {source.via === 'primary' ? '主地址' : '镜像'}
-                            </span>
-                          )}
-                          {lagging && <span className="pill pill-warn">镜像版本落后</span>}
-                          {cnPlatforms.length > 0 && (
-                            <span
-                              className={`pill tone-${
-                                cnOk === cnPlatforms.length ? 'ok' : cnOk > 0 ? 'warn' : 'bad'
-                              }`}
-                              title="经国内代理补测可达的平台数 / 已补测平台数"
-                            >
-                              国内 {cnOk}/{cnPlatforms.length}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td>
-                        <StatusBadge status={source.status} />
-                        {!source.initOk && <div className="source-error">初始化：{source.initError ?? '失败'}</div>}
-                      </td>
-                      <td>
-                        <div className="platform-grid">
-                          {keys.map((key) => {
-                            const platform = byKey.get(key);
-                            return platform ? <PlatformChip key={key} platform={platform} /> : null;
-                          })}
-                          {keys.length === 0 && <span className="muted">未声明平台</span>}
-                        </div>
-                      </td>
-                      <td className="mono count-cell">
-                        <strong>{source.stats.ok}</strong>/{source.stats.tested}
-                        <span className="muted"> / {source.stats.total}</span>
-                      </td>
-                      <td className="mono muted">{formatMs(source.durationMs)}</td>
-                    </tr>
-                  );
-                })}
+                const keys = sortPlatformKeys(source.platforms.filter((item) => item.declared).map((item) => item.key));
+                const byKey = new Map(source.platforms.map((item) => [item.key, item]));
+                const endpointsOk = source.endpoints.filter((item) => item.ok).length;
+                const lagging = source.endpoints.some((item) => item.versionState === 'lagging');
+                const cnPlatforms = source.platforms.filter((item) => item.declared && item.cn?.tested);
+                const cnOk = cnPlatforms.filter((item) => item.cn?.ok).length;
+                const originLabel = source.origin || hostOf(source.homepage || source.url);
+                return (
+                  <tr
+                    key={source.id}
+                    onClick={() => navigate(`/s/${encodeURIComponent(source.id)}`)}
+                    className="matrix-row"
+                  >
+                    <td>
+                      <div className="source-title">{source.title}</div>
+                      <div className="source-sub">
+                        <span className="mono">{source.id}</span>
+                        {source.version && <span>v{source.version}</span>}
+                        {source.author && <span>{source.author}</span>}
+                        {originLabel && (
+                          <span className="source-origin" title={source.origin || source.homepage || source.url}>
+                            来源 {originLabel}
+                          </span>
+                        )}
+                        {source.endpoints.length > 0 && (
+                          <span
+                            className={endpointsOk > 0 ? 'text-ok' : 'text-bad'}
+                            title={`接入点 ${endpointsOk}/${source.endpoints.length}：主地址与镜像中 ${source.endpoints.length} 个地址，本轮 ${endpointsOk} 个下载成功`}
+                          >
+                            接入点 {endpointsOk}/{source.endpoints.length}
+                          </span>
+                        )}
+                        {source.via && (
+                          <span
+                            className={`pill tone-${source.via === 'primary' ? 'ok' : 'warn'}`}
+                            title={source.chosenUrl ? `本轮实际加载：${source.chosenUrl}` : '本轮实际加载的接入点'}
+                          >
+                            本轮 {source.via === 'primary' ? '主地址' : '镜像'}
+                          </span>
+                        )}
+                        {lagging && <span className="pill pill-warn">镜像版本落后</span>}
+                        {cnPlatforms.length > 0 && (
+                          <span
+                            className={`pill tone-${
+                              cnOk === cnPlatforms.length ? 'ok' : cnOk > 0 ? 'warn' : 'bad'
+                            }`}
+                            title="经国内代理补测可达的平台数 / 已补测平台数"
+                          >
+                            国内 {cnOk}/{cnPlatforms.length}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td>
+                      <StatusBadge status={source.status} />
+                      {!source.initOk && <div className="source-error">初始化：{source.initError ?? '失败'}</div>}
+                    </td>
+                    <td>
+                      <div className="platform-grid">
+                        {keys.map((key) => {
+                          const platform = byKey.get(key);
+                          return platform ? <PlatformChip key={key} platform={platform} /> : null;
+                        })}
+                        {keys.length === 0 && <span className="muted">未声明平台</span>}
+                      </div>
+                    </td>
+                    <td className="mono count-cell">
+                      <strong>{source.stats.ok}</strong>/{source.stats.tested}
+                      <span className="muted"> / {source.stats.total}</span>
+                    </td>
+                    <td className="mono muted">{formatMs(source.durationMs)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       )}
 
-      {snapshot && snapshot.sources.length > 0 && (
-        <Pagination {...pager.pagination} label="个音源" />
-      )}
+      {snapshot && snapshot.sources.length > 0 && <Pagination {...pager.pagination} label="个音源" />}
     </div>
   );
 
@@ -336,12 +397,130 @@ export function OverviewPage() {
   }
 }
 
-function hostOf(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
+function SourceCard({
+  source,
+  copied,
+  onCopy,
+}: {
+  source: SourceResult;
+  copied: boolean;
+  onCopy: () => void;
+}) {
+  const declared = sortPlatformKeys(source.platforms.filter((item) => item.declared).map((item) => item.key));
+  const byKey = new Map(source.platforms.map((item) => [item.key, item]));
+  const endpointsOk = source.endpoints.filter((item) => item.ok).length;
+  const cnPlatforms = source.platforms.filter((item) => item.declared && item.cn?.tested);
+  const cnOk = cnPlatforms.filter((item) => item.cn?.ok).length;
+  const originLabel = source.origin || hostOf(source.homepage || source.url);
+  const issue = sourceIssue(source);
+  const lagging = source.endpoints.some((item) => item.versionState === 'lagging');
+
+  return (
+    <article className="source-card">
+      <div className="source-card-head">
+        <div className="source-card-title">
+          <div className="source-card-name">
+            <Link to={`/s/${encodeURIComponent(source.id)}`}>{source.title}</Link>
+            {source.version && <span className="pill">v{source.version}</span>}
+          </div>
+          <div className="source-card-meta">
+            <span className="mono">{source.id}</span>
+            {source.author && <span>{source.author}</span>}
+            <span className="source-origin" title={source.origin || source.homepage || source.url}>
+              {originLabel}
+            </span>
+          </div>
+        </div>
+        <StatusBadge status={source.status} />
+      </div>
+
+      <div className="source-card-metrics">
+        <div>
+          <span>接入点</span>
+          <strong className={endpointsOk === source.endpoints.length ? 'text-ok' : 'text-warn'}>
+            {endpointsOk}/{source.endpoints.length}
+          </strong>
+        </div>
+        <div>
+          <span>平台</span>
+          <strong className={source.stats.ok === source.stats.tested ? 'text-ok' : 'text-warn'}>
+            {source.stats.ok}/{source.stats.tested}
+          </strong>
+        </div>
+        <div>
+          <span>国内</span>
+          <strong className={cnPlatforms.length === 0 ? 'muted' : cnOk === cnPlatforms.length ? 'text-ok' : 'text-warn'}>
+            {cnPlatforms.length > 0 ? `${cnOk}/${cnPlatforms.length}` : '未测'}
+          </strong>
+        </div>
+        <div>
+          <span>耗时</span>
+          <strong>{formatMs(source.durationMs)}</strong>
+        </div>
+      </div>
+
+      <div
+        className="source-card-platforms"
+        title={declared.length > 0 ? `全部 ${declared.length} 个平台` : undefined}
+      >
+        {declared.map((key) => {
+          const platform = byKey.get(key);
+          return platform ? <PlatformChip key={key} platform={platform} /> : null;
+        })}
+        {declared.length === 0 && <span className="muted small">未声明平台</span>}
+      </div>
+
+      <p className={`source-issue tone-${issue.tone}`}>{issue.text}</p>
+
+      <footer className="source-card-foot">
+        <span className="source-card-flags">
+          {source.via && (
+            <span
+              className={`pill tone-${source.via === 'primary' ? 'ok' : 'warn'}`}
+              title={source.chosenUrl ? `本轮实际加载：${source.chosenUrl}` : undefined}
+            >
+              本轮{source.via === 'primary' ? '主地址' : '镜像'}
+            </span>
+          )}
+          {lagging && <span className="pill tone-warn">镜像落后</span>}
+        </span>
+        <span className="source-card-actions">
+          <button type="button" className="link-button" onClick={onCopy}>
+            {copied ? '已复制推荐地址' : '复制导入地址'}
+          </button>
+          <Link to={`/s/${encodeURIComponent(source.id)}`} className="link-button">
+            详情
+            <Icon name="chevron-right" size={12} />
+          </Link>
+        </span>
+      </footer>
+    </article>
+  );
+}
+
+function sourceIssue(source: SourceResult): { tone: 'ok' | 'warn' | 'bad'; text: string } {
+  if (!source.initOk) {
+    return { tone: 'bad', text: `初始化失败：${source.initError ?? '未知原因'}` };
   }
+  const failed = source.platforms.filter((item) => item.declared && item.tested && !item.ok);
+  if (failed.length > 0) {
+    const first = failed[0];
+    if (first) {
+      const reason = first.error ?? first.errorKind ?? '未知原因';
+      return {
+        tone: failed.length === source.stats.tested ? 'bad' : 'warn',
+        text: `${failed.length} 个平台未通过 · ${platformMeta(first.key).name}：${reason}`,
+      };
+    }
+  }
+  const failedEndpoints = source.endpoints.filter((item) => !item.ok);
+  if (failedEndpoints.length > 0) {
+    return { tone: 'warn', text: `${failedEndpoints.length} 个接入点下载失败，本轮已切换到可用地址` };
+  }
+  if (source.status === 'available') {
+    return { tone: 'ok', text: '全部平台和接入点通过' };
+  }
+  return { tone: 'warn', text: '本轮没有需要补测的失败项' };
 }
 
 function StatCard({
