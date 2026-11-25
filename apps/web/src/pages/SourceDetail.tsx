@@ -75,6 +75,12 @@ export function SourceDetailPage() {
             {source.author && ` · ${source.author}`}
             {source.category && ` · ${source.category}`}
           </p>
+          {(source.origin || source.homepage || source.via) && (
+            <p className="muted small">
+              {source.origin ? `来源：${source.origin}` : source.homepage ? `来源：${hostOf(source.homepage)}` : ''}
+              {source.via ? ` · 本轮通过${source.via === 'primary' ? '主地址' : '镜像'}加载${source.chosenUrl ? `（${hostOf(source.chosenUrl)}）` : ''}` : ''}
+            </p>
+          )}
           {source.description && <p className="description">{source.description}</p>}
         </div>
         <div className="detail-actions">
@@ -170,6 +176,9 @@ export function SourceDetailPage() {
               })}
           </div>
         )}
+        <p className="muted small">
+          取链＝解析播放链接耗时；首字节＝服务器开始返回音频的时间；总耗时＝完整拉流校验；拉流地址是实际播放域名。
+        </p>
       </section>
 
       <section>

@@ -634,6 +634,7 @@ export interface AdminSource {
   url: string;
   path: string;
   homepage: string;
+  origin?: string;
   mirrors: string[];
   contentSha256?: string | null;
   enabled: boolean;
@@ -662,6 +663,7 @@ export interface SourceInputPayload {
   category?: string;
   url?: string;
   homepage?: string;
+  origin?: string;
   mirrors?: string[];
   enabled?: boolean;
   trusted?: boolean;

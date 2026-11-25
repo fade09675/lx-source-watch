@@ -14,6 +14,7 @@ export interface SourceRegistryRow {
   url: string;
   path: string;
   homepage: string;
+  origin: string;
   mirrors: string[];
   /** 主地址内容的完整 sha256；用于跨 URL 判重，旧数据可能为空。 */
   contentSha256: string | null;
@@ -32,6 +33,7 @@ export interface SourceInput {
   category?: string;
   url?: string;
   homepage?: string;
+  origin?: string;
   mirrors?: string[];
   contentSha256?: string | null;
   enabled?: boolean;
@@ -54,6 +56,7 @@ interface RawRow {
   url: string;
   path: string;
   homepage: string;
+  origin: string;
   mirrors: string;
   content_sha256: string | null;
   enabled: number;
@@ -85,6 +88,7 @@ export function fromRow(row: RawRow): SourceRegistryRow {
     url: row.url,
     path: row.path,
     homepage: row.homepage,
+    origin: row.origin ?? '',
     mirrors: parseMirrors(row.mirrors),
     contentSha256: row.content_sha256 ?? null,
     enabled: row.enabled === 1,
@@ -129,6 +133,8 @@ export function validateSourceInput(input: SourceInput, base?: SourceRegistryRow
 
   const homepage = cleanText(input.homepage ?? base?.homepage, 500);
   if (homepage && !isHttp(homepage)) errors.push('主页必须是 http(s) 链接');
+
+  const origin = cleanText(input.origin ?? base?.origin, 300);
 
   const category = cleanText(input.category ?? base?.category ?? '在线', 20) || '在线';
   const notes = cleanText(input.notes ?? base?.notes, 300);
@@ -176,6 +182,7 @@ export function validateSourceInput(input: SourceInput, base?: SourceRegistryRow
       url,
       path: '',
       homepage,
+      origin,
       mirrors,
       contentSha256: input.contentSha256 ?? base?.contentSha256 ?? null,
       enabled: input.enabled ?? base?.enabled ?? true,
@@ -188,7 +195,7 @@ export function validateSourceInput(input: SourceInput, base?: SourceRegistryRow
   };
 }
 
-const COLUMNS = `id, title, author, category, storage, url, path, homepage, mirrors, content_sha256, enabled, trusted, notes, sort_order, created_at, updated_at`;
+const COLUMNS = `id, title, author, category, storage, url, path, homepage, origin, mirrors, content_sha256, enabled, trusted, notes, sort_order, created_at, updated_at`;
 
 export async function listSourceRegistry(db: D1Database): Promise<SourceRegistryRow[]> {
   const result = await db.prepare(`SELECT ${COLUMNS} FROM source_registry ORDER BY sort_order ASC, title ASC`).all<RawRow>();
@@ -234,7 +241,7 @@ export async function createSourceRegistry(
 
   await db
     .prepare(
-      `INSERT INTO source_registry (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO source_registry (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id,
@@ -245,6 +252,7 @@ export async function createSourceRegistry(
       source.url,
       source.path,
       source.homepage,
+      source.origin,
       JSON.stringify(source.mirrors),
       source.contentSha256 ?? null,
       source.enabled ? 1 : 0,
@@ -277,7 +285,7 @@ export async function updateSourceRegistry(
   await db
     .prepare(
       `UPDATE source_registry
-         SET title = ?, author = ?, category = ?, storage = ?, url = ?, path = ?, homepage = ?, mirrors = ?,
+         SET title = ?, author = ?, category = ?, storage = ?, url = ?, path = ?, homepage = ?, origin = ?, mirrors = ?,
              content_sha256 = COALESCE(?, content_sha256),
              enabled = ?, trusted = ?, notes = ?, updated_at = ?
        WHERE id = ?`,
@@ -290,6 +298,7 @@ export async function updateSourceRegistry(
       value.url,
       value.path,
       value.homepage,
+      value.origin,
       JSON.stringify(value.mirrors),
       value.contentSha256 ?? null,
       value.enabled ? 1 : 0,
@@ -358,6 +367,7 @@ export function toPublicRegistry(rows: SourceRegistryRow[]): {
         storage: row.storage,
         ...(row.storage === 'repo' ? { path: row.path } : { url: row.url }),
         ...(row.homepage ? { homepage: row.homepage } : {}),
+        ...(row.origin ? { origin: row.origin } : {}),
         category: row.category,
         trusted: row.trusted,
         ...(row.mirrors.length ? { mirrors: row.mirrors } : {}),

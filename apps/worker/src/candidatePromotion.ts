@@ -95,6 +95,7 @@ async function promoteOne(
       category: '自动发现',
       url: candidate.url,
       homepage: '',
+      origin: `${candidate.repo}/${candidate.path}`,
       mirrors: await suggestedMirrors(env.DB, candidate.url),
       contentSha256: sha256 ?? null,
       enabled: true,

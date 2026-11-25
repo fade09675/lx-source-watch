@@ -101,6 +101,8 @@ export const SourceResultSchema = z.object({
   version: z.string().max(40).optional(),
   author: z.string().max(80).optional(),
   description: z.string().max(500).optional(),
+  /** 来源仓库/路径，例如 pdone/lx-music-source#sources/main.js。 */
+  origin: z.string().max(300).optional(),
   expire: z.string().max(40).optional(),
   /** 脚本内容的 sha256 前 16 位，用于发现“同源换皮”。 */
   scriptSha: z.string().max(64).optional(),
@@ -111,6 +113,10 @@ export const SourceResultSchema = z.object({
     .optional(),
   /** 所有接入点（主地址 + 镜像/加速候选）的下载检查结果。 */
   endpoints: z.array(EndpointResultSchema).max(16).default([]),
+  /** 本轮实际加载脚本的接入点类型。 */
+  via: z.enum(['primary', 'mirror']).optional(),
+  /** 本轮实际加载脚本的完整地址。 */
+  chosenUrl: httpUrl.optional(),
   status: SourceStatusSchema,
   /** 脚本能否完成 inited。 */
   initOk: z.boolean(),
@@ -273,6 +279,8 @@ export const RegistrySourceSchema = z
     mirrors: z.array(httpUrl).max(10).default([]),
     path: z.string().max(300).optional(),
     homepage: httpUrl.optional(),
+    /** 来源仓库/路径，用于总览与详情展示；旧数据可为空。 */
+    origin: z.string().max(300).optional(),
     category: z.string().max(40).default('在线'),
     enabled: z.boolean().default(true),
     /** 是否允许在“国内补测 --resolve”模式下执行（默认只测已解析 URL）。 */

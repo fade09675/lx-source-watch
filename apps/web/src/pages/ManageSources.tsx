@@ -276,6 +276,7 @@ function SourceRow(props: {
           <strong>{source.title}</strong>
           <div className="muted mono small">{source.id}</div>
           <div className="muted small">{source.category}{source.trusted ? ' · 受信任' : ''}</div>
+          {source.origin && <div className="muted small" title={source.origin}>来源 {source.origin}</div>}
         </td>
         <td>
           <span className={`pill tone-${source.enabled ? source.status : 'idle'}`}>

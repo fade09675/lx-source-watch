@@ -57,7 +57,7 @@
 ### 5.2 音源总览 `/sources`
 
 - 统计卡：源总数、可用/部分/失效/未测、平台通过/已测、国内可达平台数、最近更新时间。
-- 源行：名称、分类、版本、作者、状态、通过数/已测数、国内可达数、接入点数、最近检测时间、镜像落后标记。
+- 源行：名称、来源仓库/主页、分类、版本、作者、状态、通过数/已测数、国内可达数、接入点数（本轮成功数/总数）、本轮走主地址还是镜像、最近检测时间、镜像落后标记。
 - 筛选：平台、状态、分类、关键词、只看国内失败；平台矩阵每格显示状态与延迟，悬浮显示失败原因。
 - 操作：详情、复制导入链接（默认推荐地址，可下拉选择主地址或任一镜像）。
 - 国内可达卡：未测时提示“海外全通过的平台不再补测，未测不等于不可用”。
@@ -107,7 +107,7 @@
 | `summary` | object | total/available/partial/unavailable/untested/platformsOk/platformsTested |
 | `sources[]` | array | 每个源的结果 |
 
-`SourceResult`：`id/title/url/mirror/homepage/category/storage/version/author/description/expire/scriptSha/sha256/endpoints/status/initOk/initError/stats/platforms/checkedAt/durationMs`。
+`SourceResult`：`id/title/url/mirror/homepage/category/storage/version/author/description/origin/expire/scriptSha/sha256/endpoints/via(primary|mirror)/chosenUrl/status/initOk/initError/stats/platforms/checkedAt/durationMs`。
 
 `EndpointResult`：`url/role(primary|candidate)/ok/status/sha/sha256/bytes/version/versionState(synced|lagging|unknown)/ms/error/cn/checkedAt`。
 
@@ -127,7 +127,7 @@
 - `tasks/task_locks/task_state`：单并发任务队列、锁、调度的最近时间；`tasks.result` 存类型化结果摘要（源/平台/接入点、失败源、失败平台、订阅统计、警告）。
 - `admin_activity`：后台写操作记录（时间、方法、路径、操作名、目标、状态、说明）。
 - `proxy_test_runs/proxy_test_results`：测活轮次与逐节点结果。
-- `source_registry/source_aliases`：音源注册表与重复源别名。
+- `source_registry/source_aliases`：音源注册表（含 `author`、`origin` 来源仓库/路径）与重复源别名。
 
 ### 6.3 状态规则
 
@@ -219,7 +219,7 @@
 - Cloudflare：Worker + KV + D1 + 自定义域；详见 `docs/DEPLOY.md`。
 - GitHub Actions secrets：`CF_API_TOKEN`、`INGEST_SECRET`、`INGEST_URL`、`RUNNER_TOKEN`。
 - Worker secrets：`INGEST_SECRET`、`RUNNER_TOKEN`、`PROXY_ENC_KEY`、`CF_ANALYTICS_TOKEN`、`GH_DISPATCH_TOKEN`、`ADMIN_PASSWORD_HASH`、`SESSION_SECRET`。
-- 迁移：`0001`–`0019`，新增迁移必须同时更新部署手册。
+- 迁移：`0001`–`0020`，新增迁移必须同时更新部署手册。
 
 ## 13. 阶段验收
 

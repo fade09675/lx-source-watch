@@ -244,6 +244,7 @@ export function OverviewPage() {
                   const lagging = source.endpoints.some((item) => item.versionState === 'lagging');
                   const cnPlatforms = source.platforms.filter((item) => item.declared && item.cn?.tested);
                   const cnOk = cnPlatforms.filter((item) => item.cn?.ok).length;
+                  const originLabel = source.origin || hostOf(source.homepage || source.url);
                   return (
                     <tr key={source.id} onClick={() => navigate(`/s/${encodeURIComponent(source.id)}`)} className="matrix-row">
                       <td>
@@ -252,9 +253,25 @@ export function OverviewPage() {
                           <span className="mono">{source.id}</span>
                           {source.version && <span>v{source.version}</span>}
                           {source.author && <span>{source.author}</span>}
+                          {originLabel && (
+                            <span className="source-origin" title={source.origin || source.homepage || source.url}>
+                              来源 {originLabel}
+                            </span>
+                          )}
                           {source.endpoints.length > 0 && (
-                            <span className={endpointsOk > 0 ? 'text-ok' : 'text-bad'}>
+                            <span
+                              className={endpointsOk > 0 ? 'text-ok' : 'text-bad'}
+                              title={`接入点 ${endpointsOk}/${source.endpoints.length}：主地址与镜像中 ${source.endpoints.length} 个地址，本轮 ${endpointsOk} 个下载成功`}
+                            >
                               接入点 {endpointsOk}/{source.endpoints.length}
+                            </span>
+                          )}
+                          {source.via && (
+                            <span
+                              className={`pill tone-${source.via === 'primary' ? 'ok' : 'warn'}`}
+                              title={source.chosenUrl ? `本轮实际加载：${source.chosenUrl}` : '本轮实际加载的接入点'}
+                            >
+                              本轮 {source.via === 'primary' ? '主地址' : '镜像'}
                             </span>
                           )}
                           {lagging && <span className="pill pill-warn">镜像版本落后</span>}
@@ -300,6 +317,14 @@ export function OverviewPage() {
 
   function loadAgain() {
     setParams(new URLSearchParams(params), { replace: true });
+  }
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
   }
 }
 

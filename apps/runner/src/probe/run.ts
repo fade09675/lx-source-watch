@@ -112,6 +112,7 @@ export async function runProbe(opts: ProbeOptions): Promise<ProbeOutput> {
     const t0 = Date.now();
     let script: LoadedScript | undefined;
     let endpoints: EndpointResult[] = [];
+    let chosenInfo: { via: 'primary' | 'mirror'; url: string } | undefined;
     try {
       const checks = await checkEndpoints(src, {
         proxy: opts.proxy,
@@ -123,6 +124,10 @@ export async function runProbe(opts: ProbeOptions): Promise<ProbeOutput> {
       const chosen = chooseEndpoint(checks);
       if (!chosen?.check.code) throw new Error(describeEndpointFailure(checks));
       if (chosen.warning) log.warn(`[${seq}/${sources.length}] ${src.id}：${chosen.warning}`);
+      chosenInfo = {
+        via: chosen.check.role === 'primary' ? 'primary' : 'mirror',
+        url: chosen.check.url,
+      };
 
       script = {
         code: chosen.check.code,
@@ -151,6 +156,11 @@ export async function runProbe(opts: ProbeOptions): Promise<ProbeOutput> {
         },
       });
       outcome.result.endpoints = endpoints;
+      if (src.origin) outcome.result.origin = src.origin.slice(0, 300);
+      if (chosenInfo) {
+        outcome.result.via = chosenInfo.via;
+        outcome.result.chosenUrl = chosenInfo.url;
+      }
       outcome.result.version = meta.version?.slice(0, 40);
       outcome.result.author = meta.author?.slice(0, 80);
       outcome.result.description = meta.description?.slice(0, 500);
@@ -165,6 +175,11 @@ export async function runProbe(opts: ProbeOptions): Promise<ProbeOutput> {
       log.warn(`× [${seq}/${sources.length}] ${src.id} 失败：${message}`);
       const failed = failedSourceResult(src, script, message, t0, meta);
       failed.endpoints = endpoints;
+      if (src.origin) failed.origin = src.origin.slice(0, 300);
+      if (chosenInfo) {
+        failed.via = chosenInfo.via;
+        failed.chosenUrl = chosenInfo.url;
+      }
       failed.version = meta?.version?.slice(0, 40);
       failed.author = meta?.author?.slice(0, 80);
       failed.description = meta?.description?.slice(0, 500);

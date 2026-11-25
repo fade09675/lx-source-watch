@@ -17,6 +17,7 @@ function row(patch: Partial<SourceRegistryRow> = {}): SourceRegistryRow {
     url: 'https://raw.githubusercontent.com/owner/repo/main/demo.js',
     path: '',
     homepage: '',
+    origin: '',
     mirrors: [],
     contentSha256: null,
     enabled: true,
@@ -81,6 +82,16 @@ describe('validateSourceInput', () => {
     expect(result.ok).toBe(true);
     expect(result.value?.id).toMatch(/^src-[0-9a-f]{8}$/);
   });
+
+  it('keeps the discovery origin when provided', () => {
+    const result = validateSourceInput({
+      title: '聚合音源',
+      url: 'https://example.com/a.js',
+      origin: 'owner/repo/sources/a.js',
+    });
+    expect(result.ok).toBe(true);
+    expect(result.value?.origin).toBe('owner/repo/sources/a.js');
+  });
 });
 
 describe('toPublicRegistry', () => {
@@ -88,7 +99,7 @@ describe('toPublicRegistry', () => {
     const config = toPublicRegistry([
       row(),
       row({ id: 'off', title: '停用', enabled: false }),
-      row({ id: 'mirror', title: '带镜像', mirrors: ['https://m.example.com/a.js'], notes: '备注' }),
+      row({ id: 'mirror', title: '带镜像', mirrors: ['https://m.example.com/a.js'], notes: '备注', origin: 'owner/repo/a.js' }),
     ]);
     expect(config.version).toBe(1);
     expect(config.sources).toHaveLength(2);
@@ -97,6 +108,7 @@ describe('toPublicRegistry', () => {
       mirrors: ['https://m.example.com/a.js'],
       notes: '备注',
       author: '测试作者',
+      origin: 'owner/repo/a.js',
     });
     expect(config.sources[0]).not.toHaveProperty('enabled');
   });
