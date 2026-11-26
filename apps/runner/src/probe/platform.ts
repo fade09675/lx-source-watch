@@ -6,9 +6,11 @@ import {
   type Quality,
 } from '@lx/shared';
 import type { LoadedSource, LxSourceDeclaration } from '../lx/sandbox.js';
+import { log } from '../logger.js';
 import type { ProxyConfig } from '../net/http.js';
 import { ProbeError, classifyResolveError } from './errors.js';
 import { qualityChain } from './quality.js';
+import { RETRY_DELAY_MS, RetryBudget, isTransientError, sleep } from './retry.js';
 import { verifyAudioUrl } from './stream.js';
 
 export interface UrlRecord {
@@ -39,6 +41,28 @@ export interface PlatformOutcome {
 }
 
 /**
+ * 取链瞬时失败时重试一次；脚本接口抖动、TLS 复位等常见于首次请求。
+ * 每次平台检测共享一个 RetryBudget，避免取链和拉流各重试导致耗时翻倍。
+ */
+async function resolveWithRetry(
+  source: LoadedSource,
+  payload: Parameters<LoadedSource['call']>[0],
+  timeoutMs: number,
+  budget: RetryBudget,
+  label: string,
+): Promise<string> {
+  try {
+    return await source.call(payload, timeoutMs);
+  } catch (e) {
+    const first = classifyResolveError(e);
+    if (!isTransientError(first) || !budget.take()) throw first;
+    log.warn(`${label} 取链瞬时失败，${RETRY_DELAY_MS}ms 后重试一次：${first.message}`);
+    await sleep(RETRY_DELAY_MS);
+    return source.call(payload, timeoutMs);
+  }
+}
+
+/**
  * 单平台检测：测试曲 → 取链 → Range 拉流校验。
  * 一个测试曲失败会换下一首；128k 失败可按配置降级/升级音质。
  */
@@ -52,6 +76,7 @@ export async function testPlatform(
   const name = decl?.name?.trim() || meta.name;
   const started = Date.now();
   const urls: UrlRecord[] = [];
+  const retryBudget = new RetryBudget();
 
   const cases = testCasesFor(key);
   if (cases.length === 0) {
@@ -82,13 +107,16 @@ export async function testPlatform(
       const t0 = Date.now();
       let url: string;
       try {
-        url = await source.call(
+        url = await resolveWithRetry(
+          source,
           {
             source: key,
             action: 'musicUrl',
             info: { type: quality, musicInfo: testCase.musicInfo },
           },
           opts.requestTimeoutMs,
+          retryBudget,
+          `${name} ${quality}`,
         );
       } catch (e) {
         lastError = classifyResolveError(e);
@@ -137,11 +165,22 @@ export async function testPlatform(
         };
       }
 
-      const verified = await verifyAudioUrl(url, {
+      let verified = await verifyAudioUrl(url, {
         timeoutMs: opts.streamTimeoutMs,
         proxy: opts.proxy,
         allowPrivate: opts.allowPrivate,
       });
+      if (!verified.ok && isTransientError(verified.error) && retryBudget.take()) {
+        log.warn(
+          `${name} ${quality} 拉流瞬时失败，${RETRY_DELAY_MS}ms 后重试一次：${verified.error?.message ?? '未知错误'}`,
+        );
+        await sleep(RETRY_DELAY_MS);
+        verified = await verifyAudioUrl(url, {
+          timeoutMs: opts.streamTimeoutMs,
+          proxy: opts.proxy,
+          allowPrivate: opts.allowPrivate,
+        });
+      }
       if (verified.ok) {
         record.ok = true;
         return {
