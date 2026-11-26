@@ -354,7 +354,9 @@ export async function writeSnapshot(db: D1Database, input: {
              title = excluded.title, version = excluded.version, author = excluded.author, description = excluded.description,
              platforms = excluded.platforms, bytes = excluded.bytes, init_ok = excluded.init_ok,
              sha256 = COALESCE(excluded.sha256, candidates.sha256),
-             init_error = excluded.init_error, state = excluded.state, last_seen = excluded.last_seen`,
+             init_error = excluded.init_error,
+             state = CASE WHEN candidates.state IN ('promoted', 'rejected', 'duplicate', 'ignored') THEN candidates.state ELSE excluded.state END,
+             last_seen = excluded.last_seen`,
         )
         .bind(
           candidate.id,
