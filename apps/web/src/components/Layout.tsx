@@ -19,23 +19,25 @@ const GROUPS: Array<{ title: string; items: NavItem[] }> = [
     items: [
       { to: '/', label: '工作台', icon: 'dashboard', end: true },
       { to: '/sources', label: '音源总览', icon: 'sources' },
-      { to: '/candidates', label: '候选源', icon: 'candidate' },
-      { to: '/admin/duplicates', label: '重复与别名', icon: 'duplicate' },
       { to: '/admin/sources', label: '音源管理', icon: 'database' },
+      { to: '/candidates', label: '候选音源', icon: 'candidate' },
+      { to: '/admin/duplicates', label: '重复与别名', icon: 'duplicate' },
     ],
   },
   {
-    title: '运行',
+    title: '补测',
     items: [
-      { to: '/runs', label: '运行与日志', icon: 'runs' },
       { to: '/admin/proxies', label: '国内代理', icon: 'proxy' },
-      { to: '/admin/proxy-tests', label: '测活日志', icon: 'pulse' },
+      { to: '/admin/proxy-tests', label: '代理测活记录', icon: 'pulse' },
     ],
+  },
+  {
+    title: '日志',
+    items: [{ to: '/runs', label: '运行与日志', icon: 'runs' }],
   },
   {
     title: '系统',
     items: [
-      { to: '/admin', label: '控制面板', icon: 'admin', end: true },
       { to: '/admin/settings', label: '设置', icon: 'settings' },
       { to: '/about', label: '说明', icon: 'info' },
     ],
@@ -53,14 +55,13 @@ const TABS: NavItem[] = [
 const ROUTE_LABELS: Array<{ path: string; group: string; label: string }> = [
   { path: '/', group: '监测', label: '工作台' },
   { path: '/sources', group: '监测', label: '音源总览' },
-  { path: '/candidates', group: '监测', label: '候选源' },
+  { path: '/candidates', group: '监测', label: '候选音源' },
   { path: '/admin/duplicates', group: '监测', label: '重复与别名' },
   { path: '/admin/sources', group: '监测', label: '音源管理' },
-  { path: '/runs', group: '运行', label: '运行与日志' },
-  { path: '/admin/proxies', group: '运行', label: '国内代理' },
-  { path: '/admin/proxy-tests', group: '运行', label: '测活日志' },
+  { path: '/runs', group: '日志', label: '运行与日志' },
+  { path: '/admin/proxies', group: '补测', label: '国内代理' },
+  { path: '/admin/proxy-tests', group: '补测', label: '代理测活记录' },
   { path: '/admin/settings', group: '系统', label: '设置' },
-  { path: '/admin', group: '系统', label: '控制面板' },
   { path: '/about', group: '系统', label: '说明' },
 ];
 

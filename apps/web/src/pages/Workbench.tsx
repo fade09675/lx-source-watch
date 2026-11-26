@@ -550,7 +550,7 @@ export function WorkbenchPage() {
     },
     {
       key: 'candidates',
-      label: '候选源',
+      label: '候选音源',
       value: String(health?.candidates ?? 0),
       hint: '待审核与已转正',
       tone: 'accent',
@@ -588,10 +588,10 @@ export function WorkbenchPage() {
   ];
   const quickLinks = [
     { to: '/sources', label: '音源总览', icon: 'sources' as const },
-    { to: '/candidates', label: '候选源', icon: 'candidate' as const },
-    { to: '/runs', label: '运行记录', icon: 'runs' as const },
+    { to: '/candidates', label: '候选音源', icon: 'candidate' as const },
+    { to: '/runs', label: '运行与日志', icon: 'runs' as const },
     { to: '/admin/proxies', label: '国内代理', icon: 'proxy' as const },
-    { to: '/admin', label: '控制面板', icon: 'admin' as const },
+    { to: '/admin/settings', label: '设置', icon: 'settings' as const },
   ];
 
   return (
@@ -839,7 +839,9 @@ export function WorkbenchPage() {
                         <tr key={item.id}>
                           <td className="muted">{formatDateTime(item.at)}</td>
                           <td>{item.action}</td>
-                          <td className="mono small">{item.target || '—'}</td>
+                          <td className="mono small">
+                            {item.target ? (item.target.startsWith('task_') ? `任务 ${item.target}` : item.target) : '—'}
+                          </td>
                           <td>
                             <StatusBadge tone={item.ok ? 'ok' : 'bad'} dot={false}>
                               {item.ok ? '成功' : `失败 ${item.status}`}

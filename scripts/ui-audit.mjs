@@ -85,7 +85,6 @@ async function auditContext(context, viewport, suffix) {
     ['重复与别名', '/admin/duplicates', '重复与别名'],
     ['音源管理', '/admin/sources', '音源管理'],
     ['运行与日志', '/runs', '运行与日志'],
-    ['控制面板', '/admin', '管理'],
     ['国内代理', '/admin/proxies', '国内代理池'],
     ['测活日志', '/admin/proxy-tests', '代理测活日志'],
     ['设置', '/admin/settings', '设置'],
@@ -152,6 +151,12 @@ async function auditContext(context, viewport, suffix) {
     }
   }
   await runs.close();
+
+  const admin = await context.newPage();
+  await admin.goto(`${BASE}/admin`, { waitUntil: 'commit', timeout: 60_000 });
+  await admin.waitForTimeout(400);
+  check(`${suffix} 旧控制面板跳转设置`, new URL(admin.url()).pathname === '/admin/settings', admin.url());
+  await admin.close();
 
   const notFound = await context.newPage();
   await notFound.goto(`${BASE}/__e2e_missing__`, { waitUntil: 'commit', timeout: 60_000 });

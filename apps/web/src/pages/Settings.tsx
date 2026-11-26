@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api, type AppSettingsView, type SchedulerStatus, type SystemView } from '../api';
 import { ErrorBox, Spinner } from '../components/Feedback';
+import { MirrorSettings } from '../components/MirrorSettings';
+import { PurgeSettings } from '../components/PurgeSettings';
 
 type Draft = AppSettingsView;
 
@@ -178,21 +180,6 @@ export function SettingsPage() {
     }
   };
 
-  const reset = async () => {
-    if (!window.confirm('恢复默认设置？当前改动会丢失。')) return;
-    setSaving(true);
-    try {
-      const result = await api.resetSettings();
-      setDraft(result.settings);
-      setScheduler(result.scheduler);
-      setNotice('已恢复默认设置');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '恢复失败');
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const runDiscovery = async () => {
     try {
       await api.runDiscovery();
@@ -208,16 +195,6 @@ export function SettingsPage() {
       setNotice(`自动收录完成：收录 ${result.promoted.length} 个，跳过 ${result.skipped} 个${result.errors.length ? `，${result.errors.length} 个失败` : ''}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : '收录失败');
-    }
-  };
-
-  const clearRejected = async () => {
-    if (!window.confirm('删除全部“已拒绝”的候选？')) return;
-    try {
-      const result = await api.deleteRejectedCandidates();
-      setNotice(`已删除 ${result.deleted} 个已拒绝候选`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '清理失败');
     }
   };
 
@@ -472,6 +449,9 @@ export function SettingsPage() {
           </div>
         </section>
 
+        <PurgeSettings />
+        <MirrorSettings />
+
         <section className="panel">
           <div className="panel-head">
             <h2>额度护栏</h2>
@@ -521,23 +501,6 @@ export function SettingsPage() {
               <p className="muted">服务器时间：{formatWhen(system.serverTime)}</p>
             </div>
           ) : null}
-        </section>
-
-        <section className="panel panel-danger">
-          <div className="panel-head">
-            <h2>危险操作</h2>
-          </div>
-          <div className="settings-body">
-            <p className="muted">恢复默认设置会覆盖当前所有调度参数；清空已拒绝候选不可恢复。</p>
-          </div>
-          <div className="form-actions">
-            <button type="button" className="ghost-button danger" onClick={reset}>
-              恢复默认设置
-            </button>
-            <button type="button" className="ghost-button danger" onClick={clearRejected}>
-              清空已拒绝候选
-            </button>
-          </div>
         </section>
       </div>
     </div>

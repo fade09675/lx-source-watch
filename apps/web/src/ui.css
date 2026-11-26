@@ -2273,14 +2273,19 @@ body {
 
 .hub-select {
   flex: 0 0 auto;
-  width: 98px;
+  width: 118px;
   height: 27px;
+  padding-right: 22px;
   margin-right: 8px;
   font-size: 10.5px;
 }
 
 .hub-tabs .panel-link {
   margin-left: 2px;
+}
+
+.settings-grid .panel-wide {
+  grid-column: 1 / -1;
 }
 
 .task-row {

@@ -109,7 +109,7 @@ export function targetOf(path: string): string {
 /** 记录一条后台操作；日志失败不能影响主请求。 */
 export async function recordAdminActivity(
   env: Env,
-  input: { method: string; path: string; status: number; message?: string; target?: string; at?: string },
+  input: { method: string; path: string; status: number; message?: string; target?: string; action?: string; at?: string },
 ): Promise<void> {
   const at = input.at ?? new Date().toISOString();
   const message = (input.message ?? '').slice(0, 500);
@@ -123,7 +123,7 @@ export async function recordAdminActivity(
         at,
         input.method.toUpperCase().slice(0, 10),
         input.path.slice(0, 400),
-        actionLabel(input.method, input.path),
+        (input.action ?? actionLabel(input.method, input.path)).slice(0, 200),
         (input.target ?? targetOf(input.path)).slice(0, 200),
         input.status >= 200 && input.status < 400 ? 1 : 0,
         input.status,

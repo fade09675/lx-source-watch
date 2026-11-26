@@ -4,7 +4,6 @@ import { AuthProvider, useAuth } from './auth';
 import { Layout } from './components/Layout';
 import { ThemeProvider } from './theme';
 import { AboutPage } from './pages/About';
-import { AdminPage } from './pages/Admin';
 import { CandidatesPage } from './pages/Candidates';
 import { DuplicatesPage } from './pages/Duplicates';
 import { LoginPage } from './pages/Login';
@@ -70,7 +69,7 @@ export function App() {
               <Route path="/admin/duplicates" element={<DuplicatesPage />} />
               <Route path="/runs" element={<RunsPage />} />
               <Route path="/runs/:runId" element={<RunDetailPage />} />
-              <Route path="/admin" element={<AdminPage />} />
+              <Route path="/admin" element={<Navigate to="/admin/settings" replace />} />
               <Route path="/admin/sources" element={<ManageSourcesPage />} />
               <Route path="/admin/settings" element={<SettingsPage />} />
               <Route path="/admin/proxies" element={<ProxiesPage />} />

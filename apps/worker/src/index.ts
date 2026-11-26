@@ -8,6 +8,7 @@ import { createRunnerProxyTestReportRoutes } from './proxyTestReport';
 import { createRunnerSubscriptionRoutes } from './proxySubRoutes';
 import { createRunnerConfigRoutes } from './runnerConfig';
 import { runScheduler } from './scheduler';
+import { TASK_TYPE_LABEL, triggerOf } from './tasks';
 import { reapStaleTasks, refreshTaskState } from './tasks';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -93,6 +94,7 @@ app.use('/api/*', async (c, next) => {
 
   let message = '';
   let recordTarget = '';
+  let recordAction = '';
   if (c.res.status >= 400) {
     try {
       const body = (await c.res.clone().json()) as { message?: unknown; error?: unknown };
@@ -103,13 +105,31 @@ app.use('/api/*', async (c, next) => {
     }
   } else if (path === '/api/admin/tasks' && method === 'POST') {
     try {
-      const body = (await c.res.clone().json()) as { task?: { id?: unknown } };
-      if (typeof body.task?.id === 'string') recordTarget = body.task.id;
+      const body = (await c.res.clone().json()) as {
+        task?: { id?: unknown; type?: unknown; source?: unknown };
+      };
+      const task = body.task;
+      if (typeof task?.id === 'string') recordTarget = task.id;
+      const type = typeof task?.type === 'string' ? task.type : '';
+      if (type in TASK_TYPE_LABEL) {
+        const kind = TASK_TYPE_LABEL[type as keyof typeof TASK_TYPE_LABEL];
+        const source = typeof task?.source === 'string' ? task.source : 'manual';
+        const trigger = triggerOf(source as Parameters<typeof triggerOf>[0]);
+        const triggerLabel = trigger === 'schedule' ? '定时' : trigger === 'retry' ? '重试' : trigger === 'local' ? '本地' : '手动';
+        recordAction = `创建任务（${kind} · ${triggerLabel}）`;
+      }
     } catch {
       // 响应不是 JSON 时忽略。
     }
   }
-  const task = recordAdminActivity(c.env, { method, path, status: c.res.status, message, target: recordTarget });
+  const task = recordAdminActivity(c.env, {
+    method,
+    path,
+    status: c.res.status,
+    message,
+    target: recordTarget,
+    action: recordAction || undefined,
+  });
   try {
     c.executionCtx.waitUntil(task);
   } catch {

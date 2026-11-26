@@ -8,18 +8,29 @@ import {
   formatRelative,
   platformMeta,
   type ErrorKind,
+  type EventItem,
   type RunSummary,
 } from '@lx/shared';
 import { ApiError, api, type FailureAggregate, type PlatformSummary } from '../api';
 import { ErrorBox, Spinner } from '../components/Feedback';
 import { Pagination, useClientPager } from '../components/Pagination';
 
-type TabKey = 'runs' | 'platforms' | 'failures';
+type TabKey = 'runs' | 'platforms' | 'failures' | 'events';
+
+const EVENT_LABEL: Record<EventItem['type'], string> = {
+  recovered: '恢复',
+  degraded: '降级',
+  failed: '持续失效',
+  new: '新源',
+  updated: '版本更新',
+  merged: '重复合并',
+};
 
 const TABS: Array<{ key: TabKey; label: string }> = [
   { key: 'runs', label: '运行记录' },
   { key: 'platforms', label: '平台汇总' },
   { key: 'failures', label: '失败聚合' },
+  { key: 'events', label: '最近事件' },
 ];
 
 function runTone(run: RunSummary): { label: string; tone: string } {
@@ -65,6 +76,7 @@ export function RunsPage() {
   const [runs, setRuns] = useState<{ runs: RunSummary[]; total: number } | null>(null);
   const [aggregate, setAggregate] = useState<FailureAggregate | null>(null);
   const [platforms, setPlatforms] = useState<PlatformSummary | null>(null);
+  const [events, setEvents] = useState<EventItem[] | null>(null);
   const [error, setError] = useState('');
   const [days, setDays] = useState(7);
   const [tab, setTab] = useState<TabKey>('runs');
@@ -120,6 +132,22 @@ export function RunsPage() {
     };
   }, [days, statusFilter, triggerFilter, limit, offset]);
 
+  useEffect(() => {
+    if (tab !== 'events' || events) return;
+    let cancelled = false;
+    api
+      .events(200)
+      .then((result) => {
+        if (!cancelled) setEvents(result);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof ApiError ? err.message : '加载事件失败');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, events]);
+
   const failureKinds = useMemo(() => {
     const query = failureQuery.trim().toLowerCase();
     return (aggregate?.byKind ?? []).filter((item) => {
@@ -159,6 +187,7 @@ export function RunsPage() {
   const platformPager = useClientPager(platforms?.rows ?? []);
   const failKindPager = useClientPager(failureKinds);
   const failSourcePager = useClientPager(failureSources);
+  const eventPager = useClientPager(events ?? []);
   useEffect(() => {
     platformPager.reset();
     failKindPager.reset();
@@ -203,6 +232,7 @@ export function RunsPage() {
             {item.label}
             {item.key === 'runs' && runs ? <span className="tab-count">{totalRuns}</span> : null}
             {item.key === 'platforms' && platforms ? <span className="tab-count">{platforms.runCount}</span> : null}
+            {item.key === 'events' && events ? <span className="tab-count">{events.length}</span> : null}
           </button>
         ))}
       </div>
@@ -533,6 +563,34 @@ export function RunsPage() {
             )}
           </section>
         </>
+      )}
+
+      {tab === 'events' && (
+        <section>
+          <div className="panel-head">
+            <h2>最近事件</h2>
+            <span className="muted">源恢复、降级、失效、新源与版本变化</span>
+          </div>
+          {!events ? (
+            <Spinner />
+          ) : events.length === 0 ? (
+            <p className="muted">还没有事件记录。</p>
+          ) : (
+            <>
+              <ul className="event-list">
+                {eventPager.pageItems.map((event) => (
+                  <li key={event.id}>
+                    <span className={`pill event-${event.type}`}>{EVENT_LABEL[event.type]}</span>
+                    <span className="mono muted">{formatDateTime(event.at)}</span>
+                    <span className="event-title">{event.title}</span>
+                    <span className="muted">{event.message}</span>
+                  </li>
+                ))}
+              </ul>
+              <Pagination {...eventPager.pagination} label="条事件" />
+            </>
+          )}
+        </section>
       )}
     </div>
   );
