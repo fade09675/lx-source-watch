@@ -960,7 +960,7 @@ export function createApi(): Hono<Ctx> {
     return Response.json(result, { headers: { 'cache-control': CACHE_PRIVATE } });
   });
 
-  const TASK_TYPES: TaskType[] = ['probe', 'discovery', 'source-test', 'proxy-test', 'proxy-fetch-sub'];
+  const TASK_TYPES: TaskType[] = ['probe', 'discovery', 'source-test', 'proxy-test', 'proxy-fetch-sub', 'retention'];
   const TASK_STATUSES: TaskStatus[] = ['queued', 'running', 'succeeded', 'partial', 'failed', 'cancelled'];
   const TASK_SOURCES: TaskSource[] = ['manual', 'schedule', 'api', 'retry', 'local'];
   const FINISHED_STATUSES: TaskStatus[] = ['succeeded', 'partial', 'failed', 'cancelled'];
@@ -1038,6 +1038,12 @@ export function createApi(): Hono<Ctx> {
       );
     }
     const type = body.type as TaskType;
+    if (type === 'retention') {
+      return Response.json(
+        { error: 'bad_type', message: '数据清理任务只由调度器自动创建' },
+        { status: 400, headers: { 'cache-control': CACHE_PRIVATE } },
+      );
+    }
     const payload = body.payload ?? {};
     if (type === 'source-test' && !payload.only) {
       return Response.json(

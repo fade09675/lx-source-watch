@@ -10,7 +10,7 @@ import {
 } from './dispatch';
 import { checkQuota } from './usage';
 
-export type TaskType = 'probe' | 'discovery' | 'source-test' | 'proxy-test' | 'proxy-fetch-sub';
+export type TaskType = 'probe' | 'discovery' | 'source-test' | 'proxy-test' | 'proxy-fetch-sub' | 'retention';
 export type TaskStatus = 'queued' | 'running' | 'succeeded' | 'partial' | 'failed' | 'cancelled';
 export type TaskSource = 'manual' | 'schedule' | 'api' | 'retry' | 'local';
 
@@ -56,6 +56,7 @@ export const TASK_TYPE_LABEL: Record<TaskType, string> = {
   'source-test': '单源测试',
   'proxy-test': '代理测活',
   'proxy-fetch-sub': '拉取订阅',
+  retention: '数据清理',
 };
 
 export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
@@ -81,6 +82,9 @@ export interface TaskPayload {
   proxyId?: string;
   sourceId?: string;
   subscriptionId?: string;
+  detailDays?: number;
+  dailyDays?: number;
+  eventDays?: number;
 }
 
 export interface TaskView {
@@ -309,7 +313,7 @@ export function serializeTaskResult(result: TaskResult): string {
   return JSON.stringify({ kind: result.kind, summary: result.summary.slice(0, 500), counts: result.counts });
 }
 
-async function updateTask(
+export async function updateTask(
   db: D1Database,
   id: string,
   patch: {
@@ -541,6 +545,16 @@ export async function dispatchNext(
     ).first<TaskRow>();
     if (!row) return { dispatched: false, message: '没有排队中的任务' };
     const task = toView(row);
+
+    if (task.type === 'retention') {
+      await updateTask(env.DB, task.id, {
+        status: 'failed',
+        error: '数据清理任务未由调度器启动',
+        message: '数据清理未执行',
+        finishedAt: now,
+      });
+      return { dispatched: false, task: (await getTask(env.DB, task.id)) ?? undefined, message: '数据清理未由调度器启动' };
+    }
 
     const quota = await checkQuota(env);
     if (!quota.ok) {

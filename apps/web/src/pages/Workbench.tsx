@@ -25,6 +25,7 @@ const TASK_TYPE_LABEL: Record<TaskType, string> = {
   'source-test': '单源测试',
   'proxy-test': '代理测活',
   'proxy-fetch-sub': '拉取订阅',
+  retention: '数据清理',
 };
 
 const TASK_STATUS_LABEL: Record<string, string> = {
@@ -135,6 +136,14 @@ function ResultStats({ result }: { result: TaskResult }) {
     items.push(
       { label: '新增候选', value: String(countValue(result, 'candidatesAdded')) },
       { label: '自动转正', value: String(countValue(result, 'candidatesPromoted')), tone: 'ok' },
+    );
+  } else if (result.kind === 'retention') {
+    items.push(
+      { label: '运行', value: String(countValue(result, 'runs')) },
+      { label: '接入点', value: String(countValue(result, 'sourceEndpoints')) },
+      { label: '日汇总', value: `${countValue(result, 'sourceDaily')}/${countValue(result, 'platformDaily')}` },
+      { label: '事件', value: String(countValue(result, 'events')) },
+      { label: '操作记录', value: String(countValue(result, 'activity')) },
     );
   } else if (result.kind === 'proxy-fetch-sub') {
     items.push(
@@ -569,6 +578,13 @@ export function WorkbenchPage() {
       state: scheduler?.proxyTest,
       interval: scheduler?.proxyTest.intervalHours ?? 6,
     },
+    {
+      key: 'retention',
+      label: '数据清理',
+      icon: 'database' as const,
+      state: scheduler?.retention,
+      interval: scheduler?.retention?.intervalHours ?? 24,
+    },
   ];
   const quickLinks = [
     { to: '/sources', label: '音源总览', icon: 'sources' as const },
@@ -721,14 +737,18 @@ export function WorkbenchPage() {
                           : '上次定时 未运行'}
                       </span>
                     </div>
-                    <button
-                      type="button"
-                      className="link-button"
-                      onClick={() => void runTask(schedule.key as TaskType)}
-                      disabled={busy !== null}
-                    >
-                      立即执行
-                    </button>
+                    {schedule.key === 'retention' ? (
+                      <span className="muted small">自动</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="link-button"
+                        onClick={() => void runTask(schedule.key as TaskType)}
+                        disabled={busy !== null}
+                      >
+                        立即执行
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>

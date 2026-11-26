@@ -6,6 +6,7 @@ import {
   isDue,
   PROBE_INTERVAL_HOURS,
   PROXY_TEST_INTERVAL_HOURS,
+  RETENTION_STATE_KEY,
   runScheduler,
   SCHEDULER_STATE_KEY,
 } from '../src/scheduler';
@@ -148,6 +149,7 @@ describe('getSchedulerStatus', () => {
       }),
       'run:probe:last': new Date(NOW - 1 * HOUR).toISOString(),
       'run:proxy-test:last': new Date(NOW - 2 * HOUR).toISOString(),
+      [RETENTION_STATE_KEY]: JSON.stringify({ at: new Date(NOW - 3 * HOUR).toISOString(), ok: true }),
     });
     const status = await getSchedulerStatus(fakeEnv(kv), NOW);
     expect(status.probe.intervalHours).toBe(PROBE_INTERVAL_HOURS);
@@ -155,10 +157,20 @@ describe('getSchedulerStatus', () => {
     expect(status.probe.manualAt).toBe(new Date(NOW - 1 * HOUR).toISOString());
     expect(status.probe.nextAt).toBe(new Date(NOW - 1 * HOUR + PROBE_INTERVAL_HOURS * HOUR).toISOString());
     expect(status.proxyTest.nextAt).toBe(new Date(NOW - 2 * HOUR + PROXY_TEST_INTERVAL_HOURS * HOUR).toISOString());
+    expect(status.retention.lastOk).toBe(true);
+    expect(status.retention.nextAt).toBe(new Date(NOW - 3 * HOUR + 24 * HOUR).toISOString());
   });
 
   it('没有任何记录时下次时间等于当前时间', async () => {
     const status = await getSchedulerStatus(fakeEnv(fakeKv()), NOW);
     expect(status.probe.nextAt).toBe(new Date(NOW).toISOString());
+    expect(status.retention.nextAt).toBe(new Date(NOW).toISOString());
+  });
+
+  it('兼容旧版数据清理 ISO 状态', async () => {
+    const at = new Date(NOW - 2 * HOUR).toISOString();
+    const status = await getSchedulerStatus(fakeEnv(fakeKv({ [RETENTION_STATE_KEY]: at })), NOW);
+    expect(status.retention.lastAt).toBe(at);
+    expect(status.retention.nextAt).toBe(new Date(NOW - 2 * HOUR + 24 * HOUR).toISOString());
   });
 });

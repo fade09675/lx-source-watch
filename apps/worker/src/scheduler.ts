@@ -2,8 +2,11 @@ import type { Env } from './env';
 import {
   createTask,
   dispatchNext as dispatchNextDefault,
+  newRunId,
+  updateTask,
   type DispatchNextResult,
   type TaskPayload,
+  type TaskResult,
   type TaskType,
 } from './tasks';
 import { loadSettings, normalizeSettings, type AppSettings } from './settings';
@@ -18,6 +21,24 @@ export const SCHEDULER_STATE_KEY = 'scheduler:state';
 export const RETENTION_STATE_KEY = 'retention:last';
 
 const RETENTION_INTERVAL_MS = 86_400_000;
+
+interface RetentionState {
+  at: string;
+  ok?: boolean;
+  error?: string;
+}
+
+/** 兼容旧版本直接写 ISO 字符串的状态。 */
+function parseRetentionState(raw: string | null): RetentionState | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as RetentionState;
+    if (value && typeof value.at === 'string') return value;
+  } catch {
+    // 旧值是 ISO 字符串。
+  }
+  return Number.isFinite(Date.parse(raw)) ? { at: raw } : null;
+}
 
 const MANUAL_KEYS = {
   probe: 'run:probe:last',
@@ -56,6 +77,7 @@ export interface SchedulerStatus {
   probe: JobStatus;
   proxyTest: JobStatus;
   discovery: JobStatus;
+  retention: JobStatus;
   now: string;
 }
 
@@ -155,26 +177,145 @@ async function readSettings(env: Env, deps: SchedulerDeps): Promise<AppSettings>
   return loadSettings(env.DB);
 }
 
-/** 每天最多执行一次保留清理；失败只记录，不影响任务调度。 */
+/** 每天最多执行一次保留清理，并作为「数据清理」任务写入任务中心、运行记录与运行日志。 */
 async function runRetentionIfDue(env: Env, settings: AppSettings, now: number): Promise<void> {
   if (!env.DB) return;
   try {
-    const last = await env.SNAPSHOT.get(RETENTION_STATE_KEY);
-    if (last && now - Date.parse(last) < RETENTION_INTERVAL_MS) return;
+    const last = parseRetentionState(await env.SNAPSHOT.get(RETENTION_STATE_KEY));
+    if (last && now - Date.parse(last.at) < RETENTION_INTERVAL_MS) return;
   } catch {
     // KV 读失败时继续尝试清理，避免因为状态读取失败一直不清理。
   }
+
   const at = new Date(now).toISOString();
+  let retentionOk = false;
+  let retentionError: string | undefined;
+  let taskId: string;
+  try {
+    const task = await createTask(env.DB, {
+      type: 'retention',
+      source: 'schedule',
+      priority: 9,
+      payload: {
+        detailDays: settings.retentionDetailDays,
+        dailyDays: settings.retentionDailyDays,
+        eventDays: settings.retentionEventDays,
+      },
+    });
+    taskId = task.id;
+  } catch (error) {
+    console.warn('数据清理任务创建失败', errorMessage(error));
+    return;
+  }
+
+  const runId = newRunId();
+  const logKey = `run:${runId}:log`;
+  const startedAt = at;
+  const startedMs = Date.now();
+  const lines = [
+    `[${at}] 数据清理开始`,
+    `保留策略：运行明细 ${settings.retentionDetailDays} 天，日汇总 ${settings.retentionDailyDays} 天，事件 ${settings.retentionEventDays} 天`,
+  ];
+
+  try {
+    await env.DB.prepare(
+      `INSERT INTO runs (run_id, task_id, trigger, status, message, log_key, generated_at, started_at, created_at,
+                         total, available, partial, unavailable, untested, platforms_ok, platforms_tested,
+                         runner, check_scope, duration_ms)
+       VALUES (?, ?, 'schedule', 'running', '数据清理执行中', ?, ?, ?, ?, 0, 0, 0, 0, 0, 0, 0, 'worker', 'retention', 0)`,
+    )
+      .bind(runId, taskId, logKey, startedAt, startedAt, startedAt)
+      .run();
+    await env.DB.prepare('UPDATE tasks SET run_id = ? WHERE id = ?').bind(runId, taskId).run();
+    await updateTask(env.DB, taskId, {
+      status: 'running',
+      startedAt,
+      message: '数据清理执行中',
+      progressDone: 0,
+      progressTotal: 1,
+    });
+  } catch (error) {
+    console.warn('数据清理运行记录创建失败', errorMessage(error));
+    return;
+  }
+
   try {
     const result = await runScheduledRetention(env, settings, new Date(now));
-    console.log(
-      `保留清理完成：运行 ${result.detail.runs} 轮，接入点 ${result.detail.sourceEndpoints} 条，日汇总 ${result.sourceDaily}/${result.platformDaily} 条，事件 ${result.events} 条，操作记录 ${result.activity} 条`,
+    const counts = {
+      runs: result.detail.runs,
+      sourceRuns: result.detail.sourceRuns,
+      platformResults: result.detail.platformResults,
+      sourceEndpoints: result.detail.sourceEndpoints,
+      tasks: result.detail.tasks,
+      proxyTestRuns: result.detail.proxyTestRuns,
+      proxyTestResults: result.detail.proxyTestResults,
+      sourceDaily: result.sourceDaily,
+      platformDaily: result.platformDaily,
+      events: result.events,
+      activity: result.activity,
+    };
+    const summary =
+      `清理完成：运行 ${counts.runs} 轮、接入点 ${counts.sourceEndpoints} 条、` +
+      `日汇总 ${counts.sourceDaily}/${counts.platformDaily} 条、事件 ${counts.events} 条、操作记录 ${counts.activity} 条`;
+    lines.push(
+      `运行明细：删除运行 ${counts.runs} 轮、逐源 ${counts.sourceRuns} 条、平台 ${counts.platformResults} 条、接入点 ${counts.sourceEndpoints} 条、任务 ${counts.tasks} 条`,
+      `代理测活：删除轮次 ${counts.proxyTestRuns} 条、明细 ${counts.proxyTestResults} 条`,
+      `日汇总：source_daily ${counts.sourceDaily} 条、platform_daily ${counts.platformDaily} 条（截止 ${result.dailyCutoff}）`,
+      `事件：events ${counts.events} 条、操作记录 ${counts.activity} 条（截止 ${result.eventCutoff}）`,
     );
+    const finishedAt = new Date().toISOString();
+    const durationMs = Date.now() - startedMs;
+    lines.push(`[${finishedAt}] 数据清理完成，用时 ${durationMs}ms`);
+
+    await env.DB.prepare(
+      `UPDATE runs SET status = 'success', message = ?, generated_at = ?, duration_ms = ?, log_key = ? WHERE run_id = ?`,
+    )
+      .bind(summary, finishedAt, durationMs, logKey, runId)
+      .run();
+    await updateTask(env.DB, taskId, {
+      status: 'succeeded',
+      message: summary,
+      finishedAt,
+      progressDone: 1,
+      progressTotal: 1,
+      result: { kind: 'retention', summary, counts } satisfies TaskResult,
+    });
+    console.log(summary);
+    retentionOk = true;
   } catch (error) {
-    console.warn('保留清理失败', errorMessage(error));
+    const message = errorMessage(error);
+    retentionError = message;
+    const finishedAt = new Date().toISOString();
+    lines.push(`[${finishedAt}] 数据清理失败：${message}`);
+    try {
+      await env.DB.prepare(
+        `UPDATE runs SET status = 'failed', message = ?, error = ?, generated_at = ?, duration_ms = ?, log_key = ? WHERE run_id = ?`,
+      )
+        .bind(`数据清理失败：${message}`, message, finishedAt, Date.now() - startedMs, logKey, runId)
+        .run();
+      await updateTask(env.DB, taskId, {
+        status: 'failed',
+        message: '数据清理失败',
+        error: message,
+        finishedAt,
+        progressDone: 1,
+        progressTotal: 1,
+      });
+    } catch (recordError) {
+      console.warn('数据清理失败记录写入失败', errorMessage(recordError));
+    }
+    console.warn('数据清理失败', message);
   }
+
   try {
-    await env.SNAPSHOT.put(RETENTION_STATE_KEY, at);
+    await env.SNAPSHOT.put(logKey, lines.join('\n'), { expirationTtl: 14 * 86_400 });
+  } catch {
+    // 日志写失败不影响任务结果。
+  }
+
+  try {
+    const state: RetentionState = { at, ok: retentionOk, error: retentionError };
+    await env.SNAPSHOT.put(RETENTION_STATE_KEY, JSON.stringify(state));
   } catch {
     // 状态写入失败最多导致下一轮 cron 重试一次。
   }
@@ -293,6 +434,11 @@ export async function getSchedulerStatus(
     env.SNAPSHOT.get(MANUAL_KEYS.proxyTest),
     env.SNAPSHOT.get(MANUAL_KEYS.discovery),
   ]);
+  const retention = parseRetentionState(await env.SNAPSHOT.get(RETENTION_STATE_KEY));
+  const retentionLastAt = retention?.at;
+  const retentionNextAt = retentionLastAt
+    ? new Date(Date.parse(retentionLastAt) + RETENTION_INTERVAL_MS).toISOString()
+    : new Date(now).toISOString();
   return {
     probe: jobStatus(settings.probeIntervalHours, settings.probeEnabled, state.probe, manualProbe, now),
     proxyTest: jobStatus(
@@ -309,6 +455,14 @@ export async function getSchedulerStatus(
       manualDiscovery,
       now,
     ),
+    retention: {
+      intervalHours: 24,
+      enabled: true,
+      lastAt: retentionLastAt,
+      lastOk: retention?.ok,
+      lastError: retention?.error,
+      nextAt: retentionNextAt,
+    },
     now: new Date(now).toISOString(),
   };
 }

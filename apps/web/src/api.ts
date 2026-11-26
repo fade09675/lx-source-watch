@@ -303,6 +303,7 @@ export interface SchedulerStatus {
   probe: SchedulerJobStatus;
   proxyTest: SchedulerJobStatus;
   discovery?: SchedulerJobStatus;
+  retention?: SchedulerJobStatus;
   now: string;
 }
 
@@ -317,7 +318,7 @@ export interface WorkflowRunsResult {
 
 /* ------------------------------- tasks ---------------------------------- */
 
-export type TaskType = 'probe' | 'discovery' | 'source-test' | 'proxy-test' | 'proxy-fetch-sub';
+export type TaskType = 'probe' | 'discovery' | 'source-test' | 'proxy-test' | 'proxy-fetch-sub' | 'retention';
 export type TaskStatus = 'queued' | 'running' | 'succeeded' | 'partial' | 'failed' | 'cancelled';
 export type TaskSource = 'manual' | 'schedule' | 'api' | 'retry' | 'local';
 
