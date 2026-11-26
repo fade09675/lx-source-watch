@@ -60,7 +60,9 @@ export async function enqueueCnProbe(
 
   if (!input.force) {
     const latest = await env.DB.prepare(
-      `SELECT created_at FROM tasks WHERE type = 'cn-probe' ORDER BY created_at DESC LIMIT 1`,
+      `SELECT created_at FROM tasks
+        WHERE type = 'cn-probe' AND status IN ('succeeded', 'partial')
+        ORDER BY created_at DESC LIMIT 1`,
     ).first<{ created_at: string }>();
     if (latest && Date.now() - Date.parse(latest.created_at) < 24 * 60 * 60 * 1000) {
       return { created: false, reason: 'cooldown' };

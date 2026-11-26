@@ -7,6 +7,7 @@ import {
   type Snapshot,
 } from '@lx/shared';
 import type { Env } from './env';
+import { runInBatches } from './batch';
 import { readCnInput } from './cnProbe';
 import { dispatchNext, refreshTaskState, updateTask, type TaskResultCnFailure } from './tasks';
 import { SNAPSHOT_KEY } from './env';
@@ -121,41 +122,40 @@ export function createCnProbeRoutes(): Hono<{ Bindings: Env }> {
     const tested = parsed.cn.summary.tested;
     const ok = parsed.cn.summary.ok;
 
-    for (const row of parsed.cn.rows) {
-      await c.env.DB.prepare(
+    const platformStatements = parsed.cn.rows.map((row) =>
+      c.env.DB.prepare(
         `UPDATE platform_results
             SET cn_tested = 1, cn_ok = ?, cn_ms = ?, cn_ttfb_ms = ?, cn_error = ?
           WHERE run_id = ? AND source_id = ? AND platform = ?`,
-      )
-        .bind(
-          row.ok ? 1 : 0,
-          row.totalMs ?? null,
-          row.ttfbMs ?? null,
-          row.error?.slice(0, 500) ?? null,
-          parsed.probeRunId,
-          row.sourceId,
-          row.platform,
-        )
-        .run();
-    }
-    for (const row of parsed.cn.endpoints ?? []) {
-      await c.env.DB.prepare(
+      ).bind(
+        row.ok ? 1 : 0,
+        row.totalMs ?? null,
+        row.ttfbMs ?? null,
+        row.error?.slice(0, 500) ?? null,
+        parsed.probeRunId,
+        row.sourceId,
+        row.platform,
+      ),
+    );
+    await runInBatches(c.env.DB, platformStatements);
+
+    const endpointStatements = (parsed.cn.endpoints ?? []).map((row) =>
+      c.env.DB.prepare(
         `UPDATE source_endpoints
             SET cn_ok = ?, cn_ms = ?, cn_ttfb_ms = ?, cn_error = ?, cn_proxy = ?, cn_checked_at = ?
           WHERE run_id = ? AND url = ?`,
-      )
-        .bind(
-          row.ok ? 1 : 0,
-          row.totalMs ?? null,
-          row.ttfbMs ?? null,
-          row.error?.slice(0, 500) ?? null,
-          parsed.cn.proxy ?? null,
-          now,
-          parsed.probeRunId,
-          row.url,
-        )
-        .run();
-    }
+      ).bind(
+        row.ok ? 1 : 0,
+        row.totalMs ?? null,
+        row.ttfbMs ?? null,
+        row.error?.slice(0, 500) ?? null,
+        parsed.cn.proxy ?? null,
+        now,
+        parsed.probeRunId,
+        row.url,
+      ),
+    );
+    await runInBatches(c.env.DB, endpointStatements);
 
     let sourceTitles = new Map<string, string>();
     const raw = await c.env.SNAPSHOT.get(SNAPSHOT_KEY);

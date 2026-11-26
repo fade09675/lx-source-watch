@@ -46,7 +46,7 @@ async function postResult(endpoint: string, token: string, body: Record<string, 
     method: 'POST',
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     body: JSON.stringify(body),
-    timeoutMs: 30_000,
+    timeoutMs: 90_000,
     maxBytes: 64 * 1024,
     allowPrivate: true,
   });
