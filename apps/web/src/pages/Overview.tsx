@@ -2,12 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   PLATFORMS,
+  QUALITY_META,
   STATUS_META,
+  assessSourceQuality,
   formatDateTime,
   formatDuration,
   formatMs,
   platformMeta,
   sortPlatformKeys,
+  type SourceQuality,
   type SourceResult,
   type SourceStatus,
   type StatusEnvelope,
@@ -39,6 +42,12 @@ export function OverviewPage() {
   const statuses = useMemo(() => (params.get('status') ?? '').split(',').filter(Boolean), [params]);
   const cn = params.get('cn') ?? '';
   const q = params.get('q') ?? '';
+  const qualityMode: 'all' | 'recommended' | 'available' =
+    params.get('quality') === 'recommended'
+      ? 'recommended'
+      : params.get('quality') === 'available'
+        ? 'available'
+        : 'all';
 
   const filters: StatusFilters = useMemo(
     () => ({
@@ -50,13 +59,27 @@ export function OverviewPage() {
     [platforms, statuses, cn, q],
   );
 
-  const sortedSources = useMemo(
+  const qualityById = useMemo(
     () =>
-      [...(data?.snapshot.sources ?? [])].sort(
-        (a, b) => b.stats.ok - a.stats.ok || a.title.localeCompare(b.title, 'zh-CN'),
+      new Map(
+        (data?.snapshot.sources ?? []).map((source) => [source.id, assessSourceQuality(source)] as const),
       ),
     [data],
   );
+
+  const sortedSources = useMemo(() => {
+    const sources = (data?.snapshot.sources ?? []).filter((source) => {
+      const quality = qualityById.get(source.id);
+      if (qualityMode === 'recommended') return Boolean(quality?.recommended);
+      if (qualityMode === 'available') return source.status === 'available';
+      return true;
+    });
+    return sources.sort((a, b) => {
+      const scoreA = qualityById.get(a.id)?.score ?? 0;
+      const scoreB = qualityById.get(b.id)?.score ?? 0;
+      return scoreB - scoreA || b.stats.ok - a.stats.ok || a.title.localeCompare(b.title, 'zh-CN');
+    });
+  }, [data, qualityById, qualityMode]);
   const pager = useClientPager(sortedSources);
 
   useEffect(() => {
@@ -118,6 +141,13 @@ export function OverviewPage() {
     const next = new URLSearchParams(params);
     if (cn === 'failed') next.delete('cn');
     else next.set('cn', 'failed');
+    setParams(next, { replace: true });
+  }
+
+  function changeQualityMode(mode: 'all' | 'recommended' | 'available') {
+    const next = new URLSearchParams(params);
+    if (mode === 'all') next.delete('quality');
+    else next.set('quality', mode);
     setParams(next, { replace: true });
   }
 
@@ -215,6 +245,32 @@ export function OverviewPage() {
           placeholder="搜索名称 / 作者 / 描述"
         />
         <div className="filter-group">
+          <span className="filter-label">范围</span>
+          <button
+            type="button"
+            className={`filter-chip${qualityMode === 'recommended' ? ' active' : ''}`}
+            onClick={() => changeQualityMode('recommended')}
+            title="平台与接入点通过率达标、结果新鲜且无国内全失败"
+          >
+            推荐
+          </button>
+          <button
+            type="button"
+            className={`filter-chip${qualityMode === 'available' ? ' active' : ''}`}
+            onClick={() => changeQualityMode('available')}
+            title="只看本轮全部声明平台都通过的音源"
+          >
+            可用
+          </button>
+          <button
+            type="button"
+            className={`filter-chip${qualityMode === 'all' ? ' active' : ''}`}
+            onClick={() => changeQualityMode('all')}
+          >
+            全部
+          </button>
+        </div>
+        <div className="filter-group">
           <span className="filter-label">状态</span>
           {STATUS_ORDER.map((key) => (
             <button
@@ -252,7 +308,7 @@ export function OverviewPage() {
             只看国内失败
           </button>
         </div>
-        {(platforms.length > 0 || statuses.length > 0 || cn || q) && (
+        {(platforms.length > 0 || statuses.length > 0 || cn || q || qualityMode !== 'all') && (
           <button type="button" className="link-button" onClick={clearFilters}>
             清空筛选
           </button>
@@ -281,14 +337,25 @@ export function OverviewPage() {
 
       {loading && !snapshot && <Spinner label="正在加载监测结果…" />}
       {error && <ErrorBox message={error} onRetry={loadAgain} />}
-      {snapshot && snapshot.sources.length === 0 && <EmptyBox message="没有符合筛选条件的音源。" />}
+      {snapshot && sortedSources.length === 0 && (
+        <EmptyBox
+          message={
+            qualityMode === 'recommended'
+              ? '当前没有推荐音源，可切换到「可用」或「全部」查看。'
+              : qualityMode === 'available'
+                ? '当前没有全部平台都通过的音源，可切换到「推荐」或「全部」。'
+                : '没有符合筛选条件的音源。'
+          }
+        />
+      )}
 
-      {snapshot && snapshot.sources.length > 0 && view === 'grid' && (
+      {snapshot && sortedSources.length > 0 && view === 'grid' && (
         <div className="source-grid">
           {pager.pageItems.map((source) => (
             <SourceCard
               key={source.id}
               source={source}
+              quality={qualityById.get(source.id)}
               copied={copiedId === source.id}
               onCopy={() => void copySource(source)}
             />
@@ -296,13 +363,14 @@ export function OverviewPage() {
         </div>
       )}
 
-      {snapshot && snapshot.sources.length > 0 && view === 'list' && (
+      {snapshot && sortedSources.length > 0 && view === 'list' && (
         <div className="matrix-wrap">
           <table className="matrix">
             <thead>
               <tr>
                 <th className="col-source">音源</th>
                 <th className="col-status">状态</th>
+                <th className="col-quality">质量</th>
                 <th className="col-platforms">平台（通过 / 已测）</th>
                 <th className="col-count">通过</th>
                 <th className="col-duration">耗时</th>
@@ -368,6 +436,22 @@ export function OverviewPage() {
                       {!source.initOk && <div className="source-error">初始化：{source.initError ?? '失败'}</div>}
                     </td>
                     <td>
+                      {(() => {
+                        const quality = qualityById.get(source.id);
+                        if (!quality) return <span className="muted">—</span>;
+                        const meta = QUALITY_META[quality.tier];
+                        return (
+                          <span
+                            className={`quality-score tone-${meta.tone}`}
+                            title={quality.reasons.join('；')}
+                          >
+                            {quality.score}
+                            <span className="quality-score-label">{meta.label}</span>
+                          </span>
+                        );
+                      })()}
+                    </td>
+                    <td>
                       <div className="platform-grid">
                         {keys.map((key) => {
                           const platform = byKey.get(key);
@@ -389,7 +473,7 @@ export function OverviewPage() {
         </div>
       )}
 
-      {snapshot && snapshot.sources.length > 0 && <Pagination {...pager.pagination} label="个音源" />}
+      {snapshot && sortedSources.length > 0 && <Pagination {...pager.pagination} label="个音源" />}
     </div>
   );
 
@@ -400,10 +484,12 @@ export function OverviewPage() {
 
 function SourceCard({
   source,
+  quality,
   copied,
   onCopy,
 }: {
   source: SourceResult;
+  quality?: SourceQuality;
   copied: boolean;
   onCopy: () => void;
 }) {
@@ -425,6 +511,11 @@ function SourceCard({
         <div className="source-card-title">
           <div className="source-card-name">
             <Link to={`/s/${encodeURIComponent(source.id)}`}>{source.title}</Link>
+            {quality?.recommended && (
+              <span className="pill tone-ok" title={quality.reasons.join('；')}>
+                推荐
+              </span>
+            )}
             {source.version && <span className="pill">v{source.version}</span>}
           </div>
           <div className="source-card-meta">

@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
+  QUALITY_META,
   STATUS_META,
+  assessSourceQuality,
   formatDateTime,
   formatDuration,
   formatMs,
@@ -133,6 +135,8 @@ export function SourceDetailPage() {
   const endpointsOk = endpoints.filter((item) => item.ok).length;
   const failedPlatforms = source.platforms.filter((item) => item.declared && item.tested && !item.ok);
   const cnState = cnPlatforms.length > 0 ? `${cnOk}/${cnPlatforms.length}` : failedPlatforms.length > 0 ? '未补测' : '无需补测';
+  const quality = assessSourceQuality(source);
+  const qualityMeta = QUALITY_META[quality.tier];
   const origin = source.origin ?? (source.homepage ? hostOf(source.homepage) : '');
 
   return (
@@ -147,6 +151,12 @@ export function SourceDetailPage() {
           <div className="source-hero-title">
             <h1>{source.title}</h1>
             <StatusBadge status={source.status} />
+            <span
+              className={`pill tone-${qualityMeta.tone}`}
+              title={quality.reasons.join('；')}
+            >
+              质量 {quality.score}
+            </span>
             {source.version && <span className="pill">v{source.version}</span>}
           </div>
           <div className="source-hero-meta">
@@ -175,6 +185,13 @@ export function SourceDetailPage() {
             </div>
           )}
           {source.description && <p className="source-hero-desc">{source.description}</p>}
+          <div className="source-hero-quality">
+            <span className={`quality-tier tone-${qualityMeta.tone}`}>
+              {qualityMeta.label}
+              {quality.recommended ? ' · 推荐' : ''}
+            </span>
+            <span className="muted">{quality.reasons.join(' · ')}</span>
+          </div>
         </div>
         <div className="source-hero-actions">
           <label className="field compact detail-copy-select">
