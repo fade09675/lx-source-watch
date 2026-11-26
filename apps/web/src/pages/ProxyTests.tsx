@@ -246,7 +246,7 @@ export function ProxyTestsPage() {
                 <p className="empty-box">没有符合条件的节点。</p>
               ) : (
                 <div className="table-wrap">
-                  <table className="data-table proxy-log-table">
+                  <table className="data-table proxy-log-table responsive-table">
                     <thead>
                       <tr>
                         <th>节点</th>
@@ -261,11 +261,11 @@ export function ProxyTestsPage() {
                     <tbody>
                       {resultPager.pageItems.map((row) => (
                         <tr key={row.proxyId} className={row.ok ? '' : 'row-failed'}>
-                          <td>
+                          <td data-label="节点">
                             <div>{row.name || row.proxyId}</div>
                             <div className="muted mono">{row.proxyId.slice(0, 12)}</div>
                           </td>
-                          <td>
+                          <td data-label="协议 / 地址">
                             <div>{row.protocol || '-'}</div>
                             <div className="muted mono">
                               {row.host}
@@ -273,18 +273,20 @@ export function ProxyTestsPage() {
                               {row.kernelOnly ? ' · 内核' : ''}
                             </div>
                           </td>
-                          <td>
+                          <td data-label="结果">
                             <span className={`status-badge tone-${row.ok ? 'ok' : 'bad'}`}>
                               {row.ok ? '可用' : '失败'}
                             </span>
                           </td>
-                          <td>{row.ok ? formatMs(row.latencyMs) : '-'}</td>
-                          <td>
+                          <td data-label="延迟">{row.ok ? formatMs(row.latencyMs) : '-'}</td>
+                          <td data-label="地区">
                             {row.country || '-'}
                             {row.asn ? <span className="muted"> {row.asn}</span> : null}
                           </td>
-                          <td className="muted">{formatDateTime(row.testedAt)}</td>
-                          <td className="error-cell">{row.error ?? ''}</td>
+                          <td data-label="测试时间" className="muted">{formatDateTime(row.testedAt)}</td>
+                          <td data-label="失败原因" className="error-cell">
+                            {row.error ? <span className="error-text" title={row.error}>{row.error}</span> : '—'}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

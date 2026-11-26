@@ -2288,6 +2288,15 @@ body {
   grid-column: 1 / -1;
 }
 
+.error-cell .error-text {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .task-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -4012,6 +4021,14 @@ details.panel[open] > summary.panel-head::after {
     justify-content: flex-end;
     white-space: normal;
     overflow-wrap: anywhere;
+  }
+
+  .responsive-table .error-cell {
+    max-width: none;
+  }
+
+  .responsive-table .error-cell .error-text {
+    -webkit-line-clamp: 4;
   }
 
   .responsive-table .cell-stack {
