@@ -223,10 +223,68 @@ export const RunMetaSchema = z.object({
 });
 export type RunMeta = z.infer<typeof RunMetaSchema>;
 
+export const IngestUrlSchema = z.object({
+  sourceId: z.string().min(1).max(64),
+  platform: z.string().min(1).max(32),
+  quality: z.string().max(32).optional(),
+  url: httpUrl,
+  resolveMs: z.number().int().nonnegative().optional(),
+  ok: z.boolean().nullable().optional(),
+});
+export type IngestUrl = z.infer<typeof IngestUrlSchema>;
+
+export const CnProbeRowSchema = z.object({
+  sourceId: z.string().min(1).max(80),
+  platform: z.string().min(1).max(32),
+  quality: z.string().max(32).optional(),
+  url: z.string().url(),
+  proxy: z.string().max(160).optional(),
+  ok: z.boolean(),
+  status: z.number().int().optional(),
+  ttfbMs: z.number().int().nonnegative().optional(),
+  totalMs: z.number().int().nonnegative().optional(),
+  error: z.string().max(600).optional(),
+});
+
+export type CnProbeRow = z.infer<typeof CnProbeRowSchema>;
+export const CnProbeEndpointSchema = z.object({
+  sourceId: z.string().min(1).max(80),
+  url: z.string().url(),
+  role: z.enum(['primary', 'candidate']).optional(),
+  ok: z.boolean(),
+  status: z.number().int().optional(),
+  ttfbMs: z.number().int().nonnegative().optional(),
+  totalMs: z.number().int().nonnegative().optional(),
+  bytes: z.number().int().nonnegative().optional(),
+  error: z.string().max(600).optional(),
+});
+export type CnProbeEndpoint = z.infer<typeof CnProbeEndpointSchema>;
+
+export const CnProbeResultSchema = z.object({
+  runId: z.string().min(1).max(64),
+  taskId: z.string().min(1).max(64),
+  probeRunId: z.string().min(1).max(64),
+  /** 本轮输入选取的候选地址数。 */
+  selected: z.number().int().nonnegative().optional(),
+  /** 任务级失败原因；存在时不做 CN 合并，直接把运行/任务标失败。 */
+  error: z.string().max(2000).optional(),
+  cn: z.object({
+    generatedAt: z.string().optional(),
+    proxy: z.string().max(160).optional(),
+    summary: z.object({ tested: z.number().int().nonnegative(), ok: z.number().int().nonnegative() }),
+    rows: z.array(CnProbeRowSchema).max(500),
+    endpoints: z.array(CnProbeEndpointSchema).max(500).optional(),
+  }),
+  log: z.string().max(200_000).optional(),
+});
+export type CnProbeResult = z.infer<typeof CnProbeResultSchema>;
+
 export const IngestPayloadSchema = z.object({
   snapshot: SnapshotSchema,
   /** 自动发现的新候选，只做静态元数据 + init 结果，不影响公开状态。 */
   candidates: z.array(CandidateSchema).max(200).optional(),
+  /** 本轮解析出的播放地址，供后续独立国内补测任务复用。 */
+  urls: z.array(IngestUrlSchema).max(1000).optional(),
   /** 任务、触发方式、步骤与日志；旧版 runner 可省略。 */
   meta: RunMetaSchema.optional(),
 });
@@ -419,6 +477,7 @@ export interface RunSummary {
   taskId?: string | null;
   startedAt?: string | null;
   logKey?: string | null;
+  checkScope?: string | null;
   /** 整轮运行的关键计数，1A 起写入；旧运行可能为空。 */
   counts?: RunCounts;
   /** 分步耗时（取清单、下载接入点、平台测试、国内补测、上报等）。 */

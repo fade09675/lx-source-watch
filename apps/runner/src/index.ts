@@ -9,6 +9,7 @@ import {
 import { cnExecute, cnVerify } from './cn.js';
 import { runProxyTest } from './cn/proxyTest.js';
 import { runProxyFetch } from './cn/proxyFetch.js';
+import { runCnProbeTask } from './cn/probeTask.js';
 import { cnRun } from './cn/run.js';
 import { enrichCandidates } from './candidates.js';
 import { discoverCandidates } from './discover.js';
@@ -102,6 +103,7 @@ lx-source-watch runner
   pnpm discover [选项]     从 GitHub 发现候选脚本
   pnpm candidates [选项]   对候选脚本做初始化体检
   pnpm cn [选项]           国内代理补测（verify=只测已解析 URL / --execute 重跑脚本）
+  pnpm cn-probe [选项]     执行独立国内补测任务（从 Worker 取输入并回传结果）
   pnpm proxy-test [选项]   代理池测活：出口、地区、成功率写回
   pnpm proxy-fetch [选项]  Actions 侧拉取代理订阅并回传 Worker 解析
   pnpm publish [选项]      把快照 HMAC 签名后上报 Worker
@@ -155,6 +157,18 @@ cn:
   --registry <path>
   --only a,b --platform kg --limit <n> --concurrency <n> --timeout <ms>
 
+cn-probe:
+  --endpoint <url>          默认读 INGEST_URL
+  --token <token>           默认读 RUNNER_TOKEN
+  --probe-run-id <id>       触发本轮补测的探测运行 id（必填）
+  --task-id <id>            关联任务 id
+  --run-id <id>             关联运行 id
+  --limit <n>               最多补测 n 条
+  --proxy-id <id>           指定代理节点
+  --max-proxies <n>         最多预检几个节点，默认取设置（8）
+  --concurrency <n>         补测并发，默认取设置（5）
+  --allow-private           允许访问 127.0.0.1（仅本地联调）
+
 proxy-test:
   --endpoint <url>          默认读 INGEST_URL
   --token <token>           默认读 RUNNER_TOKEN
@@ -178,6 +192,7 @@ publish:
   --snapshot <path>         默认 out/status.json
   --cn <path>               国内补测结果，默认 out/cn.json（存在才合并）
   --candidates <path>       默认 out/candidates.json（存在才带）
+  --urls <path>             默认 out/urls.json（存在才带，供独立国内补测）
   --endpoint <url>          默认读 INGEST_URL
   --secret <secret>         默认读 INGEST_SECRET
   --task-id <id>            关联的任务 id
@@ -292,6 +307,30 @@ async function cmdCn(args: Args): Promise<void> {
   });
 }
 
+async function cmdCnProbe(args: Args): Promise<void> {
+  const endpoint = str(args, 'endpoint') ?? process.env.INGEST_URL ?? '';
+  const token = str(args, 'token') ?? process.env.RUNNER_TOKEN ?? '';
+  const probeRunId = str(args, 'probe-run-id') ?? process.env.LX_PROBE_RUN_ID ?? '';
+  const taskId = str(args, 'task-id') ?? process.env.LX_TASK_ID ?? '';
+  const runId = str(args, 'run-id') ?? process.env.LX_RUN_ID ?? '';
+  if (!endpoint) throw new Error('缺少 --endpoint 或 INGEST_URL');
+  if (!token) throw new Error('缺少 --token 或 RUNNER_TOKEN');
+  if (!probeRunId) throw new Error('缺少 --probe-run-id 或 LX_PROBE_RUN_ID');
+  if (!taskId || !runId) throw new Error('缺少 --task-id/--run-id 或 LX_TASK_ID/LX_RUN_ID');
+  await runCnProbeTask({
+    endpoint,
+    token,
+    probeRunId,
+    taskId,
+    runId,
+    limit: num(args, 'limit'),
+    preferredId: str(args, 'proxy-id'),
+    maxProxies: num(args, 'max-proxies', 8),
+    concurrency: num(args, 'concurrency', 5),
+    allowPrivate: bool(args, 'allow-private') || process.env.INGEST_ALLOW_PRIVATE === '1',
+  });
+}
+
 async function cmdProxyTest(args: Args): Promise<void> {
   const endpoint = str(args, 'endpoint') ?? process.env.INGEST_URL ?? '';
   const token = str(args, 'token') ?? process.env.RUNNER_TOKEN ?? '';
@@ -343,6 +382,7 @@ async function cmdPublish(args: Args): Promise<void> {
     snapshotPath: str(args, 'snapshot', 'out/status.json') as string,
     cnPath: str(args, 'cn', 'out/cn.json'),
     candidatesPath: str(args, 'candidates', 'out/candidates.json'),
+    urlsPath: str(args, 'urls', 'out/urls.json'),
     endpoint,
     secret,
     dryRun,
@@ -413,6 +453,9 @@ async function main(): Promise<void> {
       break;
     case 'cn':
       await cmdCn(args);
+      break;
+    case 'cn-probe':
+      await cmdCnProbe(args);
       break;
     case 'proxy-test':
       await cmdProxyTest(args);

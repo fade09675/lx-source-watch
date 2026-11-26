@@ -9,6 +9,7 @@ import { verifySignature } from './hmac';
 import { mergeSnapshot } from './merge';
 import { loadSettings } from './settings';
 import { completeTaskForRun, dispatchNext, refreshTaskState } from './tasks';
+import { enqueueCnProbe } from './cnProbe';
 import { recordKvPut } from './usage';
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -138,6 +139,15 @@ export async function handleIngest(c: Ctx): Promise<Response> {
   await recordKvPut(env);
   await env.SNAPSHOT.put(SNAPSHOT_KEY, JSON.stringify(merged));
   await completeTaskForRun(env, snapshot.runId);
+  try {
+    await enqueueCnProbe(env, {
+      probeRunId: snapshot.runId,
+      snapshot: merged,
+      urls: parsed.data.urls ?? [],
+    });
+  } catch (error) {
+    console.warn('创建国内补测任务失败：', error);
+  }
   try {
     await dispatchNext(env);
   } catch {

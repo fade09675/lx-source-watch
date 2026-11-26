@@ -468,6 +468,7 @@ interface RunRow {
   taskId?: string | null;
   startedAt?: string | null;
   logKey?: string | null;
+  checkScope?: string | null;
   steps?: string | null;
   warnings?: string | null;
   endpointsOk?: number;
@@ -508,6 +509,7 @@ function toRunSummary(row: RunRow): RunSummary {
     taskId: row.taskId ?? null,
     startedAt: row.startedAt ?? null,
     logKey: row.logKey ?? null,
+    checkScope: row.checkScope ?? null,
     steps: parseRunJsonArray(row.steps),
     counts: {
       endpointsOk: row.endpointsOk ?? 0,
@@ -522,7 +524,7 @@ function toRunSummary(row: RunRow): RunSummary {
   };
 }
 
-const RUN_COLUMNS = `run_id AS id, generated_at AS finishedAt, duration_ms AS durationMs, total, available, partial, unavailable, untested, platforms_ok AS platformsOk, platforms_tested AS platformsTested, status, trigger, message, error, task_id AS taskId, started_at AS startedAt, log_key AS logKey, steps, warnings, endpoints_ok AS endpointsOk, endpoints_total AS endpointsTotal, cn_tested AS cnTested, cn_ok AS cnOk, candidates_added AS candidatesAdded, candidates_promoted AS candidatesPromoted, proxies_used AS proxiesUsed`;
+const RUN_COLUMNS = `run_id AS id, generated_at AS finishedAt, duration_ms AS durationMs, total, available, partial, unavailable, untested, platforms_ok AS platformsOk, platforms_tested AS platformsTested, status, trigger, message, error, task_id AS taskId, started_at AS startedAt, log_key AS logKey, check_scope AS checkScope, steps, warnings, endpoints_ok AS endpointsOk, endpoints_total AS endpointsTotal, cn_tested AS cnTested, cn_ok AS cnOk, candidates_added AS candidatesAdded, candidates_promoted AS candidatesPromoted, proxies_used AS proxiesUsed`;
 
 export async function getRuns(db: D1Database, limit = 50): Promise<RunSummary[]> {
   const rows = await db

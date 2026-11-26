@@ -120,6 +120,22 @@ export async function dispatchProxyFetchSub(
   });
 }
 
+export interface CnProbeDispatchInput {
+  probeRunId: string;
+  taskId?: string;
+  runId?: string;
+  limit?: string;
+}
+
+export async function dispatchCnProbe(env: Env, input: CnProbeDispatchInput): Promise<DispatchResult> {
+  return dispatchWorkflow(env, 'cn-probe.yml', {
+    probe_run_id: clean(input.probeRunId, 64),
+    task_id: clean(input.taskId, 64),
+    run_id: clean(input.runId, 64),
+    limit: clean(input.limit, 6),
+  });
+}
+
 async function dispatchWorkflow(
   env: Env,
   workflow: string,

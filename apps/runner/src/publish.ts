@@ -16,6 +16,8 @@ import { httpRequest } from './net/http.js';
 export interface PublishOptions {
   snapshotPath: string;
   candidatesPath?: string;
+  /** 本轮解析出的播放地址，供独立国内补测任务复用。 */
+  urlsPath?: string;
   /** 国内补测结果；存在时合并进每个平台的 cn 字段。 */
   cnPath?: string;
   endpoint: string;
@@ -99,8 +101,19 @@ export function signPayload(body: string, secret: string): string {
   return createHmac('sha256', secret).update(body).digest('hex');
 }
 
-async function readCandidates(path: string | undefined, max: number): Promise<Candidate[] | undefined> {
+async function readUrls(path: string | undefined) {
   if (!path) return undefined;
+  try {
+    const raw = JSON.parse(await readFile(path, 'utf8')) as { urls?: unknown[] };
+    return Array.isArray(raw.urls) ? raw.urls.slice(0, 1000) : undefined;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    log.warn(`读取地址文件失败，忽略：${(e as Error).message}`);
+    return undefined;
+  }
+}
+
+async function readCandidates(path: string | undefined, max: number): Promise<Candidate[] | undefined> {  if (!path) return undefined;
   try {
     const raw = JSON.parse(await readFile(path, 'utf8'));
     if (Array.isArray(raw)) {
@@ -153,6 +166,7 @@ export async function publishIngest(opts: PublishOptions): Promise<{ status: num
     }
   }
   const candidates = await readCandidates(opts.candidatesPath, opts.maxCandidates ?? 100);
+  const urls = await readUrls(opts.urlsPath);
   const runLog = await readLog(opts.logPath);
 
   const meta = {
@@ -160,7 +174,7 @@ export async function publishIngest(opts: PublishOptions): Promise<{ status: num
     trigger: opts.trigger ?? (process.env.GITHUB_ACTIONS === 'true' ? 'schedule' : 'local'),
     ...(runLog ? { log: runLog } : {}),
   };
-  const payload: IngestPayload = IngestPayloadSchema.parse({ snapshot, candidates, meta });
+  const payload: IngestPayload = IngestPayloadSchema.parse({ snapshot, candidates, urls, meta });
   const body = JSON.stringify(payload);
   const signature = opts.secret ? signPayload(body, opts.secret) : 'dry-run';
 

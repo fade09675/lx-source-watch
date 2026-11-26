@@ -1,0 +1,94 @@
+name: 国内补测
+
+on:
+  workflow_dispatch:
+    inputs:
+      probe_run_id:
+        description: "触发本轮补测的探测运行 id"
+        required: true
+        type: string
+      task_id:
+        description: "任务 id（由 Worker 传入）"
+        required: true
+        type: string
+      run_id:
+        description: "运行 id（由 Worker 传入）"
+        required: true
+        type: string
+      limit:
+        description: "最多补测几条（留空=全部）"
+        required: false
+        type: string
+      proxy_id:
+        description: "强制使用指定代理节点 id（留空=自动挑）"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lx-cn-probe
+  cancel-in-progress: false
+
+jobs:
+  cn-probe:
+    name: 国内补测（不执行音源脚本）
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      INGEST_URL: ${{ secrets.INGEST_URL }}
+      RUNNER_TOKEN: ${{ secrets.RUNNER_TOKEN }}
+      LX_PROBE_RUN_ID: ${{ inputs.probe_run_id }}
+      LX_TASK_ID: ${{ inputs.task_id }}
+      LX_RUN_ID: ${{ inputs.run_id }}
+      INPUT_LIMIT: ${{ inputs.limit }}
+      PROXY_ID: ${{ inputs.proxy_id }}
+    steps:
+      - name: 检出
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.28.5
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 缓存 mihomo 内核
+        uses: actions/cache@v4
+        with:
+          path: .tmp/mihomo
+          key: mihomo-v1.19.9
+
+      - name: 国内补测
+        if: env.RUNNER_TOKEN != ''
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          args=(--endpoint "$INGEST_URL" --token "$RUNNER_TOKEN" --probe-run-id "$LX_PROBE_RUN_ID" --task-id "$LX_TASK_ID" --run-id "$LX_RUN_ID")
+          if [ -n "$INPUT_LIMIT" ]; then args+=(--limit "$INPUT_LIMIT"); fi
+          if [ -n "$PROXY_ID" ]; then args+=(--proxy-id "$PROXY_ID"); fi
+          pnpm cn-probe -- "${args[@]}" 2>&1 | tee out/cn.log
+
+      - name: 未配置代理池
+        if: env.RUNNER_TOKEN == ''
+        run: echo "未配置 RUNNER_TOKEN，跳过国内补测。"
+
+      - name: 上传补测日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cn-probe-log
+          path: out/cn.log
+          retention-days: 7
+          if-no-files-found: ignore

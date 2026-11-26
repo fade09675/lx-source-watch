@@ -24,20 +24,21 @@ on:
         required: false
         type: boolean
         default: false
-      proxy_id:
-        description: "国内补测强制使用指定代理节点 id（留空=自动挑）"
-        required: false
-        type: string
       concurrency:
         description: "同时测几个来源"
         required: false
         type: string
         default: "4"
+      # 兼容旧任务派发：国内补测已拆成独立 cn-probe 工作流，以下两个输入不再生效。
       cn:
-        description: "本轮是否做国内补测"
+        description: "（已废弃）本轮是否做国内补测"
         required: false
         type: boolean
-        default: true
+        default: false
+      proxy_id:
+        description: "（已废弃）国内补测代理节点 id"
+        required: false
+        type: string
       discover:
         description: "本轮是否顺带自动发现候选"
         required: false
@@ -151,77 +152,10 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-  # 第二个平面：只测已解析 URL，不执行任何音源脚本；持有代理池 token。
-  cn:
-    name: 国内补测（不执行脚本）
-    needs: probe
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.cn }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    continue-on-error: true
-    env:
-      INGEST_URL: ${{ secrets.INGEST_URL }}
-      RUNNER_TOKEN: ${{ secrets.RUNNER_TOKEN }}
-      PROXY_ID: ${{ inputs.proxy_id }}
-    steps:
-      - name: 检出
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: 安装 pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 11.28.5
-
-      - name: 安装 Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: 安装依赖
-        run: pnpm install --frozen-lockfile
-
-      - name: 下载探测结果
-        uses: actions/download-artifact@v4
-        with:
-          name: probe-result
-          path: out
-
-      - name: 缓存 mihomo 内核
-        uses: actions/cache@v4
-        with:
-          path: .tmp/mihomo
-          key: mihomo-v1.19.9
-
-      - name: 国内补测
-        if: env.RUNNER_TOKEN != ''
-        run: |
-          set -euo pipefail
-          mkdir -p out
-          args=(--urls-in out/urls.json --out out/cn.json --endpoint "$INGEST_URL" --token "$RUNNER_TOKEN" --max-proxies 8 --concurrency 5)
-          if [ -n "$PROXY_ID" ]; then args+=(--proxy-id "$PROXY_ID"); fi
-          pnpm cn -- "${args[@]}" 2>&1 | tee out/cn.log
-
-      - name: 未配置代理池
-        if: env.RUNNER_TOKEN == ''
-        run: echo "未配置 RUNNER_TOKEN，跳过国内补测。"
-
-      - name: 上传国内补测结果
-        uses: actions/upload-artifact@v4
-        with:
-          name: cn-result
-          path: |
-            out/cn.json
-            out/cn.log
-          retention-days: 7
-          if-no-files-found: ignore
-
   # 第三个平面：只读 JSON 并签名上报，绝不执行音源代码。
   publish:
     name: 上报（持密钥，不执行脚本）
-    needs: [probe, cn]
+    needs: [probe]
     if: ${{ !cancelled() && needs.probe.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -255,28 +189,12 @@ jobs:
           name: probe-result
           path: out
 
-      - name: 下载国内补测结果
-        uses: actions/download-artifact@v4
-        with:
-          name: cn-result
-          path: out
-        continue-on-error: true
-
       - name: 下载候选结果
         uses: actions/download-artifact@v4
         with:
           name: candidates-result
           path: out
         continue-on-error: true
-
-      - name: 合并运行日志
-        run: |
-          set -euo pipefail
-          touch out/run.log
-          if [ -f out/cn.log ]; then
-            printf '\n===== 国内补测 =====\n' >> out/run.log
-            cat out/cn.log >> out/run.log
-          fi
 
       - name: 上报
         if: env.INGEST_URL != ''
@@ -286,8 +204,8 @@ jobs:
         run: >-
           pnpm ingest --
           --snapshot out/status.json
-          --cn out/cn.json
           --candidates out/candidates.json
+          --urls out/urls.json
           --log out/run.log
           --task-id "$TASK_ID"
           --trigger "${TRIGGER:-manual}"

@@ -14,6 +14,7 @@
     "discover": "tsx apps/runner/src/index.ts discover",
     "candidates": "tsx apps/runner/src/index.ts candidates",
     "cn": "tsx apps/runner/src/index.ts cn",
+    "cn-probe": "tsx apps/runner/src/index.ts cn-probe",
     "proxy-test": "tsx apps/runner/src/index.ts proxy-test",
     "proxy-fetch": "tsx apps/runner/src/index.ts proxy-fetch",
     "ingest": "tsx apps/runner/src/index.ts publish",

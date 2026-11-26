@@ -318,7 +318,7 @@ export interface WorkflowRunsResult {
 
 /* ------------------------------- tasks ---------------------------------- */
 
-export type TaskType = 'probe' | 'discovery' | 'source-test' | 'proxy-test' | 'proxy-fetch-sub' | 'retention';
+export type TaskType = 'probe' | 'discovery' | 'source-test' | 'proxy-test' | 'proxy-fetch-sub' | 'retention' | 'cn-probe';
 export type TaskStatus = 'queued' | 'running' | 'succeeded' | 'partial' | 'failed' | 'cancelled';
 export type TaskSource = 'manual' | 'schedule' | 'api' | 'retry' | 'local';
 
@@ -344,6 +344,15 @@ export interface TaskResultSubscription {
   fail: number;
 }
 
+export interface TaskResultCnFailure {
+  sourceId: string;
+  sourceTitle?: string;
+  kind: 'platform' | 'endpoint';
+  platform?: string;
+  url?: string;
+  error?: string;
+}
+
 export interface TaskResult {
   kind: TaskType;
   summary: string;
@@ -354,6 +363,7 @@ export interface TaskResult {
   failedPlatforms?: TaskResultPlatform[];
   okPlatforms?: TaskResultPlatform[];
   subscriptions?: TaskResultSubscription[];
+  cnFailures?: TaskResultCnFailure[];
   warnings?: string[];
 }
 

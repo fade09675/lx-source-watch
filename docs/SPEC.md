@@ -182,6 +182,8 @@
 | POST | `/api/ingest` | 仅 publish job，HMAC + runId 幂等 |
 | POST | `/api/admin/proxies/preview` | 导入预览，只统计不写库 |
 | GET | `/api/runner/config` | Actions 读取运行参数（Bearer RUNNER_TOKEN） |
+| GET | `/api/runner/cn-input/:probeRunId` | 独立 CN 任务读取探测输入（Bearer） |
+| POST | `/api/runner/cn-result` | 独立 CN 任务回传结果并合并快照（Bearer） |
 | GET | `/api/runner/proxies` | Actions 拉取代理池（Bearer） |
 | POST | `/api/runner/proxy-subscription-result` | Actions 回传订阅拉取结果（Bearer） |
 | POST | `/api/admin/runs/purge` | 运行记录清理预览/执行 |
@@ -206,8 +208,10 @@
 
 ## 8. 国内补测
 
-- 平台补测：只测主检测已解析出的 URL，默认只测海外失败/未测项；通过代理发 Range 请求，独立写 `platform.cn`。
-- 接入点补测：对每个源的主地址与镜像做 Range 请求，写 `endpoint.cn`；与脚本下载是否成功无关。
+国内补测是**独立任务**，不是探测工作流的子步骤：探测上报成功后，Worker 检查设置、失败地址与 24 小时冷却，有需要就创建 `cn-probe` 任务、占位运行并把输入写入 KV；再由独立的 `cn-probe.yml` 拉取输入、跑代理补测、回传结果。任务中心会在「定时计划」显示“国内补测 · 探测后自动”，在「最近任务」显示候选/实测/可达/失败/源/接入点，运行详情有独立日志；空跑也会建任务和运行，记录“没有需要补测的地址”并冷却 6 小时。
+
+- 选线：只选主检测 `ok !== true` 的地址，按 URL 去重，单源默认不超过批次的 25%，批次上限 200；24 小时内已补测地址不重复选，除非 `force`。
+- 平台补测：通过代理发 Range 请求，独立写 `platform.cn`；接入点补测：对主地址与镜像逐个请求，写 `endpoint.cn`；两者都不改变音源 `available` 总状态。
 - 代理池：支持 HTTP/SOCKS、mihomo 内核（ss/vmess/vless/trojan/hysteria2/tuic）；内核节点可用普通节点做 `dialer-proxy` 跳板，失败自动换下一个节点；hy2/tuic 等 UDP 节点标记跳过。
 - 订阅：Worker 直连拉取失败 401/403 时返回 `fetch_forbidden` + `needsRunner`，前端引导用 Actions 拉取；订阅支持自定义 headers（禁止 Host/Content-Length/Connection/Transfer-Encoding）。
 - 凭据只存 Worker secret 与加密后的 D1；`proxy` 字段只记 host:port。
@@ -216,7 +220,8 @@
 
 - Worker cron `*/5 * * * *` 每 5 分钟检查一次；到点创建任务并派发对应 GitHub workflow。
 - 单并发：同一时间只跑一个任务，其余排队；45 分钟看门狗把超时任务置失败。
-- 任务类型：`probe`、`source-test`、`discovery`、`proxy-test`、`proxy-fetch-sub`；任务结果写 `tasks.result`，含摘要、计数、失败源/失败平台、按订阅统计、警告。
+- 任务类型：`probe`、`source-test`、`discovery`、`proxy-test`、`proxy-fetch-sub`、`cn-probe`、`retention`；任务结果写 `tasks.result`，含摘要、计数、失败源/失败平台、按订阅统计、CN 失败行、警告。
+- 调度器只固定调度探测/发现/测活；国内补测不按固定间隔跑，而是探测上报成功后由钩子创建 `cn-probe` 任务（24 小时冷却；有失败地址才建；空跑也保留任务与运行）。
 - 手动触发时间参与下次到期计算；派发失败写入 runs/tasks 并在工作台显示。
 - 额度达到护栏阈值时暂停派发，恢复后继续。
 - 调度器每次运行顺带检查保留策略：距上次清理满 24 小时才创建一个 `retention` 任务，写入运行记录与 `run:<id>:log` 日志；明细按 `retentionDetailDays` 删除旧运行及其接入点/平台/任务，日汇总按 `retentionDailyDays`、事件与操作记录按 `retentionEventDays` 删除；清理失败只告警，不影响任务派发，任务中心仍能看到失败状态与错误。
@@ -260,6 +265,8 @@
 | 阶段 6C | 已完成 | 全量本地校验、文档链接/命令核对、线上健康核对 |
 | 自定义仓库/备用线路 | 已上线（2026-11-25） | 网页添加发现仓库、Actions 合并；第三方脚本按标题/作者或手动指定导入为镜像 |
 | 界面审计与收尾 | 已完成（2026-11-26） | 移动端表格转卡片、正式 404、失败原因筛选、日志工具栏吸顶、自动保留清理、Playwright 持久化回归 |
+| A 导航与设置归并 | 已完成（2026-11-26） | 四组导航、删控制面板、事件并入运行与日志、镜像/清理移入设置、操作记录可读 |
+| B 国内补测独立任务 | 本地完成（2026-11-26） | 探测完成钩子创建 cn-probe 任务、24h 冷却、KV 输入、独立 workflow/运行/日志、结果合并与失败明细 |
 
 ## 14. 已知边界
 

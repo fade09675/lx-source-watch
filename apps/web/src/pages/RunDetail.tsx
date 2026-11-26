@@ -113,6 +113,10 @@ export function RunDetailPage() {
   }
 
   const { run, sources, platforms, endpoints, endpointRows } = data;
+  const isCnRun = run.checkScope === 'cn';
+  const cnTested = run.counts?.cnTested ?? run.platformsTested;
+  const cnOk = run.counts?.cnOk ?? run.platformsOk;
+  const cnFailed = Math.max(0, cnTested - cnOk);
   const endpointMap = new Map(endpoints.map((item) => [item.sourceId, item]));
   const endpointGroups = new Map<string, RunEndpointRow[]>();
   for (const row of endpointRows) {
@@ -163,16 +167,44 @@ export function RunDetailPage() {
           <span className="eyebrow">RUN DETAIL</span>
           <h1>运行 {run.id}</h1>
           <p className="muted">
-            {formatDateTime(run.finishedAt)} · 耗时 {formatDuration(run.durationMs)} · 平台通过{' '}
-            {run.platformsOk}/{run.platformsTested}
+            {formatDateTime(run.finishedAt)} · 耗时 {formatDuration(run.durationMs)} ·{' '}
+            {isCnRun
+              ? `国内补测 ${cnTested} 条 · 可达 ${cnOk} 条`
+              : `平台通过 ${run.platformsOk}/${run.platformsTested}`}
           </p>
         </div>
-        <span className={`pill tone-${run.available > 0 ? 'ok' : 'bad'}`}>
-          {run.available} / {run.total} 源可用
+        <span className={`pill tone-${isCnRun ? 'ok' : run.available > 0 ? 'ok' : 'bad'}`}>
+          {isCnRun ? '国内补测' : `${run.available} / ${run.total} 源可用`}
         </span>
       </div>
 
-      <div className="stats-grid compact">
+      {isCnRun ? (
+        <div className="stats-grid compact">
+          <div className="stat-card">
+            <span className="muted">测试平台</span>
+            <strong>{cnTested}</strong>
+            <span className="muted small">本轮经代理实测</span>
+          </div>
+          <div className="stat-card">
+            <span className="muted">可达</span>
+            <strong className="text-ok">{cnOk}</strong>
+            <span className="muted small">取链与拉流成功</span>
+          </div>
+          <div className="stat-card">
+            <span className="muted">失败</span>
+            <strong className="text-bad">{cnFailed}</strong>
+            <span className="muted small">取链或拉流失败</span>
+          </div>
+          <div className="stat-card">
+            <span className="muted">接入点</span>
+            <strong>
+              {run.counts?.endpointsOk ?? 0}/{run.counts?.endpointsTotal ?? 0}
+            </strong>
+            <span className="muted small">国内可达</span>
+          </div>
+        </div>
+      ) : (
+        <div className="stats-grid compact">
         <div className="stat-card">
           <span className="muted">音源</span>
           <strong>{run.total}</strong>
@@ -196,8 +228,9 @@ export function RunDetailPage() {
           <span className="muted small">通过 0 个 / 没有测试曲</span>
         </div>
       </div>
+      )}
 
-      {counts && (
+      {!isCnRun && counts && (
         <div className="stats-grid compact">
           <div className="stat-card">
             <span className="muted">接入点</span>
@@ -232,9 +265,11 @@ export function RunDetailPage() {
         <button className={tab === 'overview' ? 'active' : ''} onClick={() => setTab('overview')}>
           概览
         </button>
-        <button className={tab === 'sources' ? 'active' : ''} onClick={() => setTab('sources')}>
-          逐源结果 {data?.sources.length ?? 0}
-        </button>
+        {!isCnRun && (
+          <button className={tab === 'sources' ? 'active' : ''} onClick={() => setTab('sources')}>
+            逐源结果 {data?.sources.length ?? 0}
+          </button>
+        )}
         <button className={tab === 'log' ? 'active' : ''} onClick={() => setTab('log')}>
           运行日志
         </button>
@@ -265,6 +300,18 @@ export function RunDetailPage() {
         </section>
       )}
 
+      {isCnRun && (
+        <section>
+          <div className="panel">
+            <p className="muted">
+              本轮是独立的国内补测任务，不参与音源可用性判定；结果已合并到对应探测快照的平台与接入点。
+              共测试 {cnTested} 条地址，可达 {cnOk} 条，失败 {cnFailed} 条。
+            </p>
+          </div>
+        </section>
+      )}
+
+      {!isCnRun && (
       <section>
         <div className="panel-head">
           <h2>失败原因</h2>
@@ -299,6 +346,7 @@ export function RunDetailPage() {
           </button>
         )}
       </section>
+      )}
         </>
       )}
 

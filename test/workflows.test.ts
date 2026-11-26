@@ -73,6 +73,35 @@ describe('proxy-fetch-sub.yml', () => {
   });
 });
 
+describe('cn-probe.yml', () => {
+  const path = `${root}/.github/workflows/cn-probe.yml`;
+
+  async function load(): Promise<Workflow> {
+    return parse(await readFile(path, 'utf8')) as Workflow;
+  }
+
+  it('由 Worker 派发独立国内补测任务', async () => {
+    const doc = await load();
+    expect(doc.on?.schedule).toBeUndefined();
+    const dispatch = doc.on?.workflow_dispatch as { inputs?: Record<string, unknown> } | undefined;
+    expect(dispatch?.inputs?.probe_run_id).toBeDefined();
+    expect(dispatch?.inputs?.task_id).toBeDefined();
+    expect(dispatch?.inputs?.run_id).toBeDefined();
+    const job = doc.jobs['cn-probe'];
+    expect(job).toBeDefined();
+    expect(job['timeout-minutes']).toBeLessThanOrEqual(20);
+    expect(JSON.stringify(job)).not.toContain('pnpm probe');
+    expect(JSON.stringify(job)).not.toContain('secrets.INGEST_SECRET');
+    expect(JSON.stringify(job)).toContain('secrets.RUNNER_TOKEN');
+    const cache = job.steps.find((s) => s.uses?.startsWith('actions/cache'));
+    expect(cache?.with?.key).toBe('mihomo-v1.19.9');
+    const run = namedStep(job, '国内补测').run ?? '';
+    expect(run).toContain('pnpm cn-probe');
+    expect(run).toContain('--probe-run-id');
+    expect(checkoutStep(job).with?.['persist-credentials']).toBe(false);
+  });
+});
+
 describe('probe.yml', () => {
   it('由 Worker 定时触发，支持手动触发', async () => {
     const doc = await loadWorkflow();
@@ -126,32 +155,10 @@ describe('probe.yml', () => {
     expect(String(upload?.with?.path)).toContain('out/run.log');
 
     const publish = doc.jobs.publish;
-    expect(publish.needs).toEqual(['probe', 'cn']);
+    expect(publish.needs).toEqual(['probe']);
     const downloads = publish.steps.filter((s) => s.uses?.startsWith('actions/download-artifact'));
-    expect(downloads.map((step) => step.with?.name)).toEqual(['probe-result', 'cn-result', 'candidates-result']);
+    expect(downloads.map((step) => step.with?.name)).toEqual(['probe-result', 'candidates-result']);
     expect(namedStep(publish, '上报').run).toContain('--log out/run.log');
-  });
-
-  it('国内补测 job 不接触上报密钥，并缓存 mihomo 内核', async () => {
-    const doc = await loadWorkflow();
-    const cn = doc.jobs.cn;
-    expect(cn).toBeDefined();
-    expect(cn.needs).toBe('probe');
-    expect(JSON.stringify(cn)).not.toContain('secrets.INGEST_SECRET');
-    expect(JSON.stringify(cn)).toContain('secrets.RUNNER_TOKEN');
-    expect(JSON.stringify(cn)).not.toContain('pnpm probe');
-
-    const cache = cn.steps.find((s) => s.uses?.startsWith('actions/cache'));
-    expect(cache?.with?.key).toBe('mihomo-v1.19.9');
-
-    const cnUpload = cn.steps.find((s) => s.uses?.startsWith('actions/upload-artifact'));
-    expect(String(cnUpload?.with?.path)).toContain('out/cn.log');
-
-    const download = cn.steps.find((s) => s.uses?.startsWith('actions/download-artifact'));
-    expect(download?.with?.name).toBe('probe-result');
-
-    const upload = cn.steps.find((s) => s.uses?.startsWith('actions/upload-artifact'));
-    expect(upload?.with?.name).toBe('cn-result');
   });
 
   it('上报 job 只做 JSON 上报，不执行探测', async () => {
@@ -161,7 +168,8 @@ describe('probe.yml', () => {
     const ingest = namedStep(publish, '上报');
     expect(ingest.run).toContain('pnpm ingest');
     expect(ingest.run).toContain('--endpoint');
-    expect(ingest.run).toContain('--cn');
+    expect(ingest.run).toContain('--urls out/urls.json');
+    expect(ingest.run).not.toContain('--cn');
     expect(ingest.if).toContain('INGEST_URL');
     expect(publish.env?.INGEST_SECRET).toContain('secrets.INGEST_SECRET');
     expect(publish.environment).toBe('production');
@@ -179,8 +187,6 @@ describe('probe.yml', () => {
     expect(String(discover.if)).toContain('inputs.discover');
     // workflow_dispatch 的 boolean 输入在 inputs 上下文里是布尔值，不能拿字符串比较。
     expect(String(discover.if)).not.toContain("== 'true'");
-    expect(String(doc.jobs.cn.if)).toContain('inputs.cn');
-    expect(String(doc.jobs.cn.if)).not.toContain("!= 'false'");
   });
 
   it('工作流里调用的 pnpm 子命令都存在于 package.json', async () => {

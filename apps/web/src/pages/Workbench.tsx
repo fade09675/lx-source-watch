@@ -26,6 +26,7 @@ const TASK_TYPE_LABEL: Record<TaskType, string> = {
   'proxy-test': '代理测活',
   'proxy-fetch-sub': '拉取订阅',
   retention: '数据清理',
+  'cn-probe': '国内补测',
 };
 
 const TASK_STATUS_LABEL: Record<string, string> = {
@@ -42,6 +43,7 @@ const TRIGGER_LABEL: Record<string, string> = {
   manual: '手动',
   api: '接口',
   retry: '重试',
+  system: '系统',
   local: '本地',
 };
 
@@ -137,6 +139,15 @@ function ResultStats({ result }: { result: TaskResult }) {
       { label: '新增候选', value: String(countValue(result, 'candidatesAdded')) },
       { label: '自动转正', value: String(countValue(result, 'candidatesPromoted')), tone: 'ok' },
     );
+  } else if (result.kind === 'cn-probe') {
+    items.push(
+      { label: '候选', value: String(countValue(result, 'selected')) },
+      { label: '实测', value: String(countValue(result, 'tested')) },
+      { label: '可达', value: String(countValue(result, 'ok')), tone: 'ok' },
+      { label: '失败', value: String(countValue(result, 'failed')), tone: 'bad' },
+      { label: '源', value: String(countValue(result, 'sources')) },
+      { label: '接入点', value: String(countValue(result, 'endpoints')) },
+    );
   } else if (result.kind === 'retention') {
     items.push(
       { label: '运行', value: String(countValue(result, 'runs')) },
@@ -171,20 +182,22 @@ function TaskFailureDetails({ result }: { result: TaskResult }) {
   const failedPlatforms = result.failedPlatforms ?? [];
   const okPlatforms = result.okPlatforms ?? [];
   const subscriptions = result.subscriptions ?? [];
+  const cnFailures = result.cnFailures ?? [];
   if (
     failedSources.length === 0 &&
     partialSources.length === 0 &&
     okSources.length === 0 &&
     failedPlatforms.length === 0 &&
     okPlatforms.length === 0 &&
-    subscriptions.length === 0
+    subscriptions.length === 0 &&
+    cnFailures.length === 0
   ) {
     return null;
   }
   const count = (key: string) => result.counts[key] ?? 0;
   const renderSources = (items: TaskResult['failedSources'], label: string, total: number) =>
     items && items.length > 0 ? (
-      <details className="task-detail">
+      <details className="task-detail" open>
         <summary>
           {label}（{items.length < total ? `列出 ${items.length} / 共 ${total}` : total}）
         </summary>
@@ -201,7 +214,7 @@ function TaskFailureDetails({ result }: { result: TaskResult }) {
     ) : null;
   const renderPlatforms = (items: TaskResult['failedPlatforms'], label: string, total: number) =>
     items && items.length > 0 ? (
-      <details className="task-detail">
+      <details className="task-detail" open>
         <summary>
           {label}（{items.length < total ? `列出 ${items.length} / 共 ${total}` : total}）
         </summary>
@@ -224,7 +237,7 @@ function TaskFailureDetails({ result }: { result: TaskResult }) {
       {renderPlatforms(failedPlatforms, '失败的平台', Math.max(0, count('platformsTested') - count('platformsOk')))}
       {renderPlatforms(okPlatforms, '通过的平台', count('platformsOk'))}
       {subscriptions.length > 0 && (
-        <details className="task-detail">
+        <details className="task-detail" open>
           <summary>按订阅统计（{subscriptions.length}）</summary>
           <table className="mini-table">
             <thead>
@@ -248,7 +261,33 @@ function TaskFailureDetails({ result }: { result: TaskResult }) {
           </table>
         </details>
       )}
+      {cnFailures.length > 0 && (
+        <details className="task-detail" open>
+          <summary>国内补测失败（{cnFailures.length}）</summary>
+          <ul>
+            {cnFailures.map((item, index) => (
+              <li key={`${item.sourceId}-${item.kind}-${index}`}>
+                {item.sourceTitle ?? item.sourceId}
+                <span className="muted small"> · {item.kind === 'platform' ? item.platform : item.url}</span>
+                {item.error && <span className="text-bad small"> · {item.error}</span>}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
     </div>
+  );
+}
+
+function taskHasDetail(result: TaskResult): boolean {
+  return Boolean(
+    (result.failedSources?.length ?? 0) +
+      (result.partialSources?.length ?? 0) +
+      (result.okSources?.length ?? 0) +
+      (result.failedPlatforms?.length ?? 0) +
+      (result.okPlatforms?.length ?? 0) +
+      (result.subscriptions?.length ?? 0) +
+      (result.cnFailures?.length ?? 0) > 0,
   );
 }
 
@@ -268,7 +307,7 @@ function TaskRow({ task }: { task: TaskView }) {
         <p className="task-row-summary">{result?.summary || task.message || '无结果摘要'}</p>
         {result && <ResultStats result={result} />}
         {task.error && <p className="text-bad small">{task.error}</p>}
-        {result && (
+        {result && taskHasDetail(result) && (
           <details className="task-row-details">
             <summary>查看失败明细</summary>
             <TaskFailureDetails result={result} />
@@ -579,6 +618,14 @@ export function WorkbenchPage() {
       interval: scheduler?.proxyTest.intervalHours ?? 6,
     },
     {
+      key: 'cn-probe',
+      label: '国内补测',
+      icon: 'pulse' as const,
+      state: undefined,
+      interval: 0,
+      auto: '探测后自动',
+    },
+    {
       key: 'retention',
       label: '数据清理',
       icon: 'database' as const,
@@ -728,16 +775,24 @@ export function WorkbenchPage() {
                     <div className="schedule-chip-copy">
                       <strong>{schedule.label}</strong>
                       <span>
-                        {schedule.state?.enabled === false ? '已关闭' : `每 ${schedule.interval} 小时`}
+                        {'auto' in schedule
+                          ? schedule.auto
+                          : schedule.state?.enabled === false
+                            ? '已关闭'
+                            : `每 ${schedule.interval} 小时`}
                         {schedule.state?.nextAt ? ` · 下次 ${formatDateTime(schedule.state.nextAt)}` : ''}
                       </span>
                       <span className={`schedule-chip-last ${schedule.state?.lastOk === false ? 'bad' : ''}`}>
-                        {schedule.state?.lastAt
-                          ? `上次定时 ${schedule.state.lastOk === false ? '失败' : '成功'} · ${formatRelative(schedule.state.lastAt)}`
-                          : '上次定时 未运行'}
+                        {'auto' in schedule
+                          ? '由每次探测完成触发'
+                          : schedule.state?.lastAt
+                            ? `上次定时 ${schedule.state.lastOk === false ? '失败' : '成功'} · ${formatRelative(schedule.state.lastAt)}`
+                            : '上次定时 未运行'}
                       </span>
                     </div>
-                    {schedule.key === 'retention' ? (
+                    {schedule.key === 'cn-probe' ? (
+                      <span className="muted small">自动</span>
+                    ) : schedule.key === 'retention' ? (
                       <span className="muted small">自动</span>
                     ) : (
                       <button
