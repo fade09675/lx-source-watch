@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "maxFetchPerRun": 20,
-  "maxFetchPerRepo": 5,
+  "maxFetchPerRun": 30,
+  "maxFetchPerRepo": 8,
   "repos": [
     {
       "repo": "pdone/lx-music-source",

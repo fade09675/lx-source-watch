@@ -107,7 +107,7 @@ jobs:
         run: |
           set -euo pipefail
           pnpm discover -- --config sources/discovery.json --out out/candidates.json --token "$GITHUB_TOKEN"
-          pnpm candidates -- --in out/candidates.json --out out/candidates.json --limit 12
+          pnpm candidates -- --in out/candidates.json --out out/candidates.json --limit 30
 
       - name: 探测
         env:
