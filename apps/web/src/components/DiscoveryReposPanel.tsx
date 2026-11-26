@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, type DiscoveryRepoView } from '../api';
+import { RepoUrlError, parseRepoUrl, type RepoUrlImport } from '../lib/repoUrl';
 import { ErrorBox, Spinner } from './Feedback';
 
 function splitPrefixes(text: string): string[] {
@@ -19,6 +20,9 @@ export function DiscoveryReposPanel() {
   const [branch, setBranch] = useState('main');
   const [prefixes, setPrefixes] = useState('');
   const [notes, setNotes] = useState('');
+  const [url, setUrl] = useState('');
+  const [parsedUrl, setParsedUrl] = useState<RepoUrlImport | null>(null);
+  const [parseError, setParseError] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -36,6 +40,22 @@ export function DiscoveryReposPanel() {
     void load();
   }, []);
 
+  const applyUrl = () => {
+    setParseError(null);
+    try {
+      const parsed = parseRepoUrl(url, branch.trim() || 'main');
+      setParsedUrl(parsed);
+      setRepo(parsed.repo);
+      setBranch(parsed.branch);
+      setPrefixes(parsed.pathPrefixes.join(', '));
+      setNotice(null);
+      setError(null);
+    } catch (err) {
+      setParsedUrl(null);
+      setParseError(err instanceof RepoUrlError ? err.message : '无法解析这个仓库链接');
+    }
+  };
+
   const add = async () => {
     setBusy('add');
     setError(null);
@@ -51,6 +71,9 @@ export function DiscoveryReposPanel() {
       setRepo('');
       setPrefixes('');
       setNotes('');
+      setUrl('');
+      setParsedUrl(null);
+      setParseError(null);
       setNotice(`已添加 ${result.repo.repo}@${result.repo.branch}，下一轮发现会合并扫描`);
     } catch (err) {
       setError(err instanceof Error ? err.message : '添加失败');
@@ -96,18 +119,74 @@ export function DiscoveryReposPanel() {
       <div className="panel-body">
         {notice ? <p className="notice">{notice}</p> : null}
         {error ? <ErrorBox message={error} /> : null}
+        <div className="repo-url-import">
+          <label className="field">
+            <span>粘贴 GitHub 仓库链接</span>
+            <input
+              value={url}
+              onChange={(event) => {
+                setUrl(event.target.value);
+                setParsedUrl(null);
+                setParseError(null);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  applyUrl();
+                }
+              }}
+              placeholder="https://github.com/owner/repo 或 /tree/main/sources"
+            />
+          </label>
+          <button type="button" className="ghost-button" disabled={!url.trim()} onClick={applyUrl}>
+            解析链接
+          </button>
+        </div>
+        {parseError ? <p className="field-error">{parseError}</p> : null}
+        {parsedUrl ? (
+          <div className="repo-url-preview">
+            <span className="muted">解析结果</span>
+            <strong>{parsedUrl.repo}</strong>
+            <span className="chip">分支 {parsedUrl.branch}</span>
+            <span className="chip">
+              {parsedUrl.pathPrefixes.length ? `路径 ${parsedUrl.pathPrefixes.join('、')}` : '全仓库'}
+            </span>
+            <span className="muted">已填入下方表单，请核对后点「添加仓库」</span>
+          </div>
+        ) : null}
         <div className="run-form">
           <label className="field">
             <span>仓库（owner/repo）</span>
-            <input value={repo} onChange={(event) => setRepo(event.target.value)} placeholder="owner/lx-music-source" />
+            <input
+              value={repo}
+              onChange={(event) => {
+                setRepo(event.target.value);
+                setParsedUrl(null);
+              }}
+              placeholder="owner/lx-music-source"
+            />
           </label>
           <label className="field compact">
             <span>分支</span>
-            <input value={branch} onChange={(event) => setBranch(event.target.value)} placeholder="main" />
+            <input
+              value={branch}
+              onChange={(event) => {
+                setBranch(event.target.value);
+                setParsedUrl(null);
+              }}
+              placeholder="main"
+            />
           </label>
           <label className="field">
             <span>路径前缀（可选，逗号或换行分隔）</span>
-            <input value={prefixes} onChange={(event) => setPrefixes(event.target.value)} placeholder="sources/, kulao/" />
+            <input
+              value={prefixes}
+              onChange={(event) => {
+                setPrefixes(event.target.value);
+                setParsedUrl(null);
+              }}
+              placeholder="sources/, kulao/"
+            />
           </label>
           <label className="field">
             <span>备注（可选）</span>
