@@ -2202,11 +2202,35 @@ body {
 }
 
 .dash-content {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr) minmax(0, 0.85fr);
+  grid-template-areas:
+    'quota coverage quick'
+    'task task task';
+  align-items: stretch;
   min-width: 0;
-  flex-direction: column;
   gap: 14px;
   margin-top: 14px;
+}
+
+.dash-content > div:first-child {
+  grid-area: task;
+}
+
+.quota-section {
+  grid-area: quota;
+}
+
+.dash-duo {
+  display: contents;
+}
+
+.dash-duo > .bottom-card {
+  grid-area: coverage;
+}
+
+.dash-duo > .rail-card {
+  grid-area: quick;
 }
 
 .hub-tabs {
@@ -2310,7 +2334,7 @@ body {
 
 .quota-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   padding: 0 18px 16px;
 }
@@ -2366,12 +2390,6 @@ body {
   margin-top: 1px;
 }
 
-.dash-duo {
-  display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
-  gap: 14px;
-}
-
 .bottom-card {
   min-width: 0;
   padding-bottom: 14px;
@@ -2390,16 +2408,29 @@ body {
 }
 
 @media (max-width: 1080px) {
-  .quota-grid {
+  .dash-content {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas:
+      'quota quota'
+      'coverage quick'
+      'task task';
   }
 
-  .dash-duo {
-    grid-template-columns: minmax(0, 1fr);
+  .quota-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 760px) {
+  .dash-content {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'quota'
+      'coverage'
+      'quick'
+      'task';
+  }
+
   .dash-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
