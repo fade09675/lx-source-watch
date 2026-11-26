@@ -1051,6 +1051,16 @@ export function createApi(): Hono<Ctx> {
       );
     }
     const payload = body.payload ?? {};
+    if (type === 'cn-probe' && payload.limit !== undefined) {
+      const limit = Number(payload.limit);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+        return Response.json(
+          { error: 'bad_payload', message: '国内补测 limit 必须是 1–200 的整数' },
+          { status: 400, headers: { 'cache-control': CACHE_PRIVATE } },
+        );
+      }
+      payload.limit = String(limit);
+    }
     if (type === 'source-test' && !payload.only) {
       return Response.json(
         { error: 'bad_payload', message: '单源测试需要 payload.only' },

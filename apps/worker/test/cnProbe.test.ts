@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { selectCnUrls } from '../src/cnProbe.js';
+import { cnCooldownHours, selectCnUrls } from '../src/cnProbe.js';
 
 describe('selectCnUrls', () => {
   it('只保留海外未通过的地址，并按 URL 去重', () => {
@@ -26,5 +26,13 @@ describe('selectCnUrls', () => {
     expect(selected).toHaveLength(4);
     expect(selected.filter((url) => url.sourceId === 'a')).toHaveLength(2);
     expect(selected.filter((url) => url.sourceId === 'b')).toHaveLength(2);
+  });
+});
+
+describe('cnCooldownHours', () => {
+  it('正常补测冷却 24 小时，空跑冷却 6 小时', () => {
+    expect(cnCooldownHours('国内补测：测试 2 条，可达 1 条（1 个源）')).toBe(24);
+    expect(cnCooldownHours('国内补测：没有需要补测的地址')).toBe(6);
+    expect(cnCooldownHours(null)).toBe(24);
   });
 });

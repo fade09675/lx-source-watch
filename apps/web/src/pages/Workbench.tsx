@@ -485,6 +485,31 @@ export function WorkbenchPage() {
     }
   }
 
+  async function runCnProbeNow() {
+    const probeRunId = snapshot?.runId;
+    if (!probeRunId) {
+      setAction('还没有可用的探测运行，先跑一轮探测。');
+      return;
+    }
+    setBusy('cn-probe');
+    setAction('');
+    try {
+      const result: CreateTaskResult = await api.createTask({
+        type: 'cn-probe',
+        payload: { probeRunId, limit: 200 },
+      });
+      const message = result.dispatch.dispatched
+        ? '已派发国内补测任务，约 2–3 分钟后刷新可看到结果。'
+        : `国内补测任务已入队：${result.dispatch.message ?? '等待派发'}`;
+      setAction(message);
+      window.setTimeout(() => void load(), 3000);
+    } catch (err) {
+      setAction(err instanceof ApiError ? err.message : '创建国内补测任务失败');
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function cancel(task: TaskView) {
     setBusy(task.id);
     try {
@@ -791,7 +816,15 @@ export function WorkbenchPage() {
                       </span>
                     </div>
                     {schedule.key === 'cn-probe' ? (
-                      <span className="muted small">自动</span>
+                      <button
+                        type="button"
+                        className="link-button"
+                        onClick={() => void runCnProbeNow()}
+                        disabled={busy !== null || !snapshot?.runId}
+                        title={snapshot?.runId ? `基于 ${snapshot.runId} 立即补测` : '还没有可用的探测运行'}
+                      >
+                        {busy === 'cn-probe' ? '创建中…' : '立即补测'}
+                      </button>
                     ) : schedule.key === 'retention' ? (
                       <span className="muted small">自动</span>
                     ) : (

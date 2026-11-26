@@ -381,6 +381,7 @@ export interface TaskView {
     cn?: boolean;
     only?: string;
     subscriptionId?: string;
+    probeRunId?: string;
   };
   progress: { done: number; total: number; unit: string };
   message: string;
