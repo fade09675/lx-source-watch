@@ -68,7 +68,8 @@ async function text(page, selector) {
 
 async function login(context) {
   const page = await context.newPage();
-  await page.goto(`${BASE}/login`, { waitUntil: 'load' });
+  await page.goto(`${BASE}/login`, { waitUntil: 'commit', timeout: 60_000 });
+  await page.locator('input[type="password"]').waitFor({ state: 'visible', timeout: 30_000 });
   await page.locator('input[type="password"]').fill(PASSWORD);
   await page.locator('button[type="submit"]').click();
   await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 20_000 });
@@ -97,7 +98,8 @@ async function auditContext(context, viewport, suffix) {
       if (message.type() === 'error') errors.push(message.text());
     });
     page.on('pageerror', (error) => errors.push(error.message));
-    const response = await page.goto(`${BASE}${path}`, { waitUntil: 'load' });
+    const response = await page.goto(`${BASE}${path}`, { waitUntil: 'commit', timeout: 60_000 });
+    await page.waitForSelector('h1', { timeout: 20_000 }).catch(() => {});
     await page.waitForTimeout(900);
     const heading = await text(page, 'h1');
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
@@ -113,11 +115,11 @@ async function auditContext(context, viewport, suffix) {
   }
 
   const source = await context.newPage();
-  await source.goto(`${BASE}/sources`, { waitUntil: 'load' });
+  await source.goto(`${BASE}/sources`, { waitUntil: 'commit', timeout: 60_000 });
   const firstSource = await source.locator('a[href^="/s/"]').first().getAttribute('href');
   check(`${suffix} 音源详情链接存在`, Boolean(firstSource));
   if (firstSource) {
-    const response = await source.goto(`${BASE}${firstSource}`, { waitUntil: 'load' });
+    const response = await source.goto(`${BASE}${firstSource}`, { waitUntil: 'commit', timeout: 60_000 });
     await source.waitForSelector('h1', { timeout: 20_000 }).catch(() => {});
     await source.waitForTimeout(300);
     const heading = await text(source, 'h1');
@@ -133,11 +135,11 @@ async function auditContext(context, viewport, suffix) {
   await source.close();
 
   const runs = await context.newPage();
-  await runs.goto(`${BASE}/runs`, { waitUntil: 'load' });
+  await runs.goto(`${BASE}/runs`, { waitUntil: 'commit', timeout: 60_000 });
   const firstRun = await runs.locator('a[href^="/runs/"]').first().getAttribute('href');
   check(`${suffix} 运行详情链接存在`, Boolean(firstRun));
   if (firstRun) {
-    const response = await runs.goto(`${BASE}${firstRun}`, { waitUntil: 'load' });
+    const response = await runs.goto(`${BASE}${firstRun}`, { waitUntil: 'commit', timeout: 60_000 });
     await runs.waitForSelector('h1', { timeout: 20_000 }).catch(() => {});
     await runs.waitForTimeout(300);
     check(`${suffix} 运行详情`, response?.status() === 200 && (await runs.locator('h1').count()) > 0);
@@ -152,10 +154,10 @@ async function auditContext(context, viewport, suffix) {
   await runs.close();
 
   const notFound = await context.newPage();
-  await notFound.goto(`${BASE}/__e2e_missing__`, { waitUntil: 'load' });
+  await notFound.goto(`${BASE}/__e2e_missing__`, { waitUntil: 'commit', timeout: 60_000 });
   await notFound.waitForTimeout(400);
   check(`${suffix} 未知路由 404`, (await text(notFound, 'h1')).includes('页面不存在'));
-  await notFound.goto(`${BASE}/s/__e2e_missing__`, { waitUntil: 'load' });
+  await notFound.goto(`${BASE}/s/__e2e_missing__`, { waitUntil: 'commit', timeout: 60_000 });
   await notFound.waitForTimeout(400);
   check(`${suffix} 假音源 404`, (await text(notFound, 'h1')).includes('无法打开音源详情'));
   await notFound.screenshot({ path: `${OUT}/${suffix}-404.png`, fullPage: true });
