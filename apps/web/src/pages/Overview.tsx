@@ -19,6 +19,7 @@ import { Pagination, useClientPager } from '../components/Pagination';
 import { PlatformChip } from '../components/PlatformChip';
 import { StatusBadge } from '../components/StatusBadge';
 import { hostOf, pickRecommended } from '../lib/endpoints';
+import { humanizeError } from '../lib/errors';
 
 const STATUS_ORDER: SourceStatus[] = ['available', 'partial', 'unavailable', 'untested'];
 
@@ -414,6 +415,9 @@ function SourceCard({
   const originLabel = source.origin || hostOf(source.homepage || source.url);
   const issue = sourceIssue(source);
   const lagging = source.endpoints.some((item) => item.versionState === 'lagging');
+  const chosen = source.chosenUrl
+    ? source.endpoints.find((item) => item.url === source.chosenUrl)
+    : undefined;
 
   return (
     <article className="source-card">
@@ -470,17 +474,22 @@ function SourceCard({
         {declared.length === 0 && <span className="muted small">未声明平台</span>}
       </div>
 
-      <p className={`source-issue tone-${issue.tone}`}>{issue.text}</p>
+      <p className={`source-issue tone-${issue.tone}`} title={issue.raw}>
+        {issue.text}
+      </p>
 
       <footer className="source-card-foot">
         <span className="source-card-flags">
-          {source.via && (
+          {source.via ? (
             <span
-              className={`pill tone-${source.via === 'primary' ? 'ok' : 'warn'}`}
+              className={`pill tone-${chosen?.ok === false ? 'bad' : source.via === 'primary' ? 'ok' : 'warn'}`}
               title={source.chosenUrl ? `本轮实际加载：${source.chosenUrl}` : undefined}
             >
-              本轮{source.via === 'primary' ? '主地址' : '镜像'}
+              本轮使用{source.via === 'primary' ? '主地址' : '镜像'} ·{' '}
+              {chosen?.ok === false ? '失败' : formatMs(chosen?.ms)}
             </span>
+          ) : (
+            <span className="pill tone-idle">本轮入口未记录</span>
           )}
           {lagging && <span className="pill tone-warn">镜像落后</span>}
         </span>
@@ -498,18 +507,20 @@ function SourceCard({
   );
 }
 
-function sourceIssue(source: SourceResult): { tone: 'ok' | 'warn' | 'bad'; text: string } {
+function sourceIssue(source: SourceResult): { tone: 'ok' | 'warn' | 'bad'; text: string; raw?: string } {
   if (!source.initOk) {
-    return { tone: 'bad', text: `初始化失败：${source.initError ?? '未知原因'}` };
+    const raw = source.initError ?? '未知原因';
+    return { tone: 'bad', text: `初始化失败：${humanizeError(raw)}`, raw };
   }
   const failed = source.platforms.filter((item) => item.declared && item.tested && !item.ok);
   if (failed.length > 0) {
     const first = failed[0];
     if (first) {
-      const reason = first.error ?? first.errorKind ?? '未知原因';
+      const raw = first.error ?? first.errorKind ?? '未知原因';
       return {
         tone: failed.length === source.stats.tested ? 'bad' : 'warn',
-        text: `${failed.length} 个平台未通过 · ${platformMeta(first.key).name}：${reason}`,
+        text: `${failed.length} 个平台未通过 · ${platformMeta(first.key).name}：${humanizeError(raw)}`,
+        raw,
       };
     }
   }

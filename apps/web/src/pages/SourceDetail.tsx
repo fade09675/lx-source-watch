@@ -15,6 +15,7 @@ import { Icon } from '../components/Icon';
 import { StatusBadge } from '../components/StatusBadge';
 import { EmptyState, PageHeader, SectionCard } from '../components/ui';
 import { hostOf, pickRecommended } from '../lib/endpoints';
+import { humanizeError } from '../lib/errors';
 
 type DetailTab = 'overview' | 'platforms' | 'endpoints' | 'history';
 
@@ -23,6 +24,7 @@ export function SourceDetailPage() {
   const [data, setData] = useState<SourceDetailResponse | null>(null);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState('');
+  const [copiedEndpoint, setCopiedEndpoint] = useState('');
   const [copyTarget, setCopyTarget] = useState('recommended');
   const [tab, setTab] = useState<DetailTab>('overview');
 
@@ -49,6 +51,27 @@ export function SourceDetailPage() {
     copyTarget === 'recommended'
       ? recommended.url
       : (endpoints.find((item) => item.url === copyTarget)?.url ?? data?.source.url ?? '');
+  const primaryEndpoint = endpoints.find((item) => item.role === 'primary');
+  const mirrors = endpoints.filter((item) => item.role !== 'primary');
+  const mirrorsOk = mirrors.filter((item) => item.ok).length;
+  const endpointsCnTested = endpoints.filter((item) => item.cn?.tested);
+  const endpointsCnOk = endpointsCnTested.filter((item) => item.cn?.ok).length;
+  const chosenEndpoint = data?.source.chosenUrl
+    ? endpoints.find((item) => item.url === data.source.chosenUrl)
+    : undefined;
+  const recommendedEndpoint = endpoints.find((item) => item.url === recommended.url);
+
+  function endpointOptionLabel(endpoint: (typeof endpoints)[number]): string {
+    const overseas = endpoint.ok ? '海外可用' : '海外失败';
+    const domestic = endpoint.cn?.tested ? (endpoint.cn.ok ? '国内可达' : '国内失败') : '国内未测';
+    return `${endpoint.role === 'primary' ? '主地址' : `镜像 ${hostOf(endpoint.url)}`} · ${overseas} · ${domestic}`;
+  }
+
+  function endpointStateLabel(endpoint: (typeof endpoints)[number]): string {
+    const overseas = endpoint.ok ? '海外可用' : '海外失败';
+    const domestic = endpoint.cn?.tested ? (endpoint.cn.ok ? '国内可达' : '国内失败') : '国内未测';
+    return `${overseas} · ${domestic}`;
+  }
 
   async function copyLink() {
     if (!copyUrl) return;
@@ -58,6 +81,16 @@ export function SourceDetailPage() {
       window.setTimeout(() => setCopied(''), 1800);
     } catch {
       setCopied('');
+    }
+  }
+
+  async function copyEndpoint(url: string) {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedEndpoint(url);
+      window.setTimeout(() => setCopiedEndpoint(''), 1800);
+    } catch {
+      setCopiedEndpoint('');
     }
   }
 
@@ -130,8 +163,12 @@ export function SourceDetailPage() {
                 </span>
               )}
               {source.via && (
-                <span className={`pill tone-${source.via === 'primary' ? 'ok' : 'warn'}`}>
-                  本轮{source.via === 'primary' ? '主地址' : '镜像'}
+                <span
+                  className={`pill tone-${chosenEndpoint?.ok === false ? 'bad' : source.via === 'primary' ? 'ok' : 'warn'}`}
+                  title={source.chosenUrl ? `本轮实际加载：${source.chosenUrl}` : undefined}
+                >
+                  本轮{source.via === 'primary' ? '主地址' : '镜像'} ·{' '}
+                  {chosenEndpoint?.ok === false ? '失败' : formatMs(chosenEndpoint?.ms)}
                   {source.chosenUrl ? ` · ${hostOf(source.chosenUrl)}` : ''}
                 </span>
               )}
@@ -142,15 +179,24 @@ export function SourceDetailPage() {
         <div className="source-hero-actions">
           <label className="field compact detail-copy-select">
             <span>导入地址</span>
-            <select className="select" value={copyTarget} onChange={(event) => setCopyTarget(event.target.value)}>
-              <option value="recommended">推荐：{recommended.kind}</option>
+            <select
+              className="select"
+              value={copyTarget}
+              title={copyUrl}
+              aria-label="选择导入地址"
+              onChange={(event) => setCopyTarget(event.target.value)}
+            >
+              <option value="recommended">
+                推荐：{recommended.kind}
+                {recommendedEndpoint ? ` · ${endpointStateLabel(recommendedEndpoint)}` : ''}
+              </option>
               {endpoints.map((endpoint, index) => (
                 <option key={`${endpoint.url}-${index}`} value={endpoint.url}>
-                  {endpoint.role === 'primary' ? '主地址' : `镜像（${hostOf(endpoint.url)}）`}
-                  {endpoint.ok ? ' · 可用' : ' · 失败'}
+                  {endpointOptionLabel(endpoint)}
                 </option>
               ))}
             </select>
+            <span className="copy-target-url mono">{copyUrl}</span>
           </label>
           <button type="button" className="primary-button" onClick={() => void copyLink()}>
             {copied || '复制导入链接'}
@@ -191,7 +237,7 @@ export function SourceDetailPage() {
         <div className="detail-overview">
           {!source.initOk && (
             <div className="error-box">
-              <span>初始化失败：{source.initError ?? '未知原因'}</span>
+              <span title={source.initError}>初始化失败：{humanizeError(source.initError, '未知原因')}</span>
             </div>
           )}
           <div className="detail-pair">
@@ -267,7 +313,9 @@ export function SourceDetailPage() {
                   {failedPlatforms.slice(0, 4).map((platform) => (
                     <div key={platform.key}>
                       <strong>{platformMeta(platform.key).name}</strong>
-                      <span>{platform.error ?? platform.errorKind ?? '未知原因'}</span>
+                      <span title={platform.error ?? platform.errorKind}>
+                        {humanizeError(platform.error ?? platform.errorKind, '未知原因')}
+                      </span>
                     </div>
                   ))}
                   {failedPlatforms.length > 4 && (
@@ -329,7 +377,7 @@ export function SourceDetailPage() {
                               {platform.cn.tested
                                 ? platform.cn.ok
                                   ? `可达（${formatMs(platform.cn.ms)}）`
-                                  : `失败：${platform.cn.error ?? '未知'}`
+                                  : `失败：${humanizeError(platform.cn.error)}`
                                 : '未测'}
                             </dd>
                           </div>
@@ -337,7 +385,7 @@ export function SourceDetailPage() {
                       </dl>
                       {platform.error && (
                         <p className="platform-error" title={platform.error}>
-                          {platform.error}
+                          {humanizeError(platform.error)}
                         </p>
                       )}
                     </article>
@@ -362,68 +410,116 @@ export function SourceDetailPage() {
           {endpoints.length === 0 ? (
             <EmptyBox message="这轮没有记录到接入点。" />
           ) : (
-            <div className="table-wrap">
-              <table className="data-table endpoint-table">
-                <thead>
-                  <tr>
-                    <th>角色</th>
-                    <th>地址</th>
-                    <th>下载</th>
-                    <th>版本</th>
-                    <th>耗时</th>
-                    <th>国内</th>
-                    <th>错误</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {endpoints.map((endpoint) => {
-                    const cn = endpoint.cn;
-                    return (
-                      <tr key={endpoint.url}>
-                        <td>
-                          <span className={`pill tone-${endpoint.role === 'primary' ? 'ok' : 'idle'}`}>
-                            {endpoint.role === 'primary' ? '主地址' : '镜像'}
-                          </span>
-                        </td>
-                        <td>
-                          <div className="mono">{hostOf(endpoint.url)}</div>
-                          <div className="muted small endpoint-url" title={endpoint.url}>
-                            {endpoint.url}
-                          </div>
-                        </td>
-                        <td>
-                          <span className={`text-${endpoint.ok ? 'ok' : 'bad'}`}>{endpoint.ok ? '成功' : '失败'}</span>
-                          {endpoint.status ? <span className="muted small"> {endpoint.status}</span> : null}
-                        </td>
-                        <td>
-                          {endpoint.versionState === 'synced'
-                            ? '同步'
-                            : endpoint.versionState === 'lagging'
-                              ? '落后'
-                              : endpoint.versionState === 'unknown'
-                                ? '未知'
-                                : '—'}
-                          {endpoint.version ? <div className="muted small">v{endpoint.version}</div> : null}
-                        </td>
-                        <td className="mono">{formatMs(endpoint.ms)}</td>
-                        <td>
-                          {cn?.tested ? (
-                            <span className={cn.ok ? 'text-ok' : 'text-bad'}>
-                              {cn.ok ? formatMs(cn.ms) : '不可达'}
-                            </span>
-                          ) : (
-                            <span className="muted">未测</span>
-                          )}
-                        </td>
-                        <td className="muted small endpoint-error" title={endpoint.error ?? cn?.error}>
-                          {endpoint.error ?? cn?.error ?? '—'}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <>
+              <div className="endpoint-summary">
+                <div>
+                  <span>主地址</span>
+                  <strong className={primaryEndpoint?.ok ? 'text-ok' : 'text-bad'}>
+                    {primaryEndpoint ? (primaryEndpoint.ok ? '可用' : '失败') : '未记录'}
+                  </strong>
+                  <small>{primaryEndpoint ? hostOf(primaryEndpoint.url) : '—'}</small>
+                </div>
+                <div>
+                  <span>镜像</span>
+                  <strong className={mirrors.length > 0 && mirrorsOk === mirrors.length ? 'text-ok' : 'text-warn'}>
+                    {mirrorsOk}/{mirrors.length} 可用
+                  </strong>
+                  <small>{mirrors.filter((item) => !item.ok).length} 个下载失败</small>
+                </div>
+                <div>
+                  <span>国内补测</span>
+                  <strong className={endpointsCnTested.length === 0 ? 'muted' : 'text-ok'}>
+                    {endpointsCnTested.length > 0
+                      ? `${endpointsCnOk}/${endpointsCnTested.length} 可达`
+                      : '未测'}
+                  </strong>
+                  <small>{endpointsCnTested.length === 0 ? '本轮没有接入点级结果' : '经国内代理实测'}</small>
+                </div>
+                <div>
+                  <span>本轮入口</span>
+                  <strong>
+                    {source.via ? (source.via === 'primary' ? '主地址' : '镜像') : '未记录'}
+                    {chosenEndpoint?.ok === false ? '（失败）' : ''}
+                  </strong>
+                  <small>{source.chosenUrl ? hostOf(source.chosenUrl) : '—'}</small>
+                </div>
+              </div>
+              <div className="table-wrap">
+                <table className="data-table endpoint-table">
+                  <thead>
+                    <tr>
+                      <th>角色</th>
+                      <th>地址</th>
+                      <th>复制</th>
+                      <th>下载</th>
+                      <th>版本</th>
+                      <th>耗时</th>
+                      <th>国内</th>
+                      <th>错误</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {endpoints.map((endpoint) => {
+                      const cn = endpoint.cn;
+                      return (
+                        <tr key={endpoint.url}>
+                          <td>
+                            <div className="endpoint-role">
+                              <span className={`pill tone-${endpoint.role === 'primary' ? 'ok' : 'idle'}`}>
+                                {endpoint.role === 'primary' ? '主地址' : '镜像'}
+                              </span>
+                              {source.chosenUrl === endpoint.url && <span className="pill tone-ok">本轮</span>}
+                            </div>
+                          </td>
+                          <td>
+                            <div className="mono">{hostOf(endpoint.url)}</div>
+                            <div className="muted small endpoint-url" title={endpoint.url}>
+                              {endpoint.url}
+                            </div>
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              className="link-button"
+                              onClick={() => void copyEndpoint(endpoint.url)}
+                            >
+                              {copiedEndpoint === endpoint.url ? '已复制' : '复制'}
+                            </button>
+                          </td>
+                          <td>
+                            <span className={`text-${endpoint.ok ? 'ok' : 'bad'}`}>{endpoint.ok ? '成功' : '失败'}</span>
+                            {endpoint.status ? <span className="muted small"> {endpoint.status}</span> : null}
+                          </td>
+                          <td>
+                            {endpoint.versionState === 'synced'
+                              ? '同步'
+                              : endpoint.versionState === 'lagging'
+                                ? '落后'
+                                : endpoint.versionState === 'unknown'
+                                  ? '未知'
+                                  : '—'}
+                            {endpoint.version ? <div className="muted small">v{endpoint.version}</div> : null}
+                          </td>
+                          <td className="mono">{formatMs(endpoint.ms)}</td>
+                          <td>
+                            {cn?.tested ? (
+                              <span className={cn.ok ? 'text-ok' : 'text-bad'}>
+                                {cn.ok ? formatMs(cn.ms) : '不可达'}
+                              </span>
+                            ) : (
+                              <span className="muted">未测</span>
+                            )}
+                          </td>
+                          <td className="muted small endpoint-error" title={endpoint.error ?? cn?.error}>
+                            {endpoint.error || cn?.error ? humanizeError(endpoint.error ?? cn?.error) : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </section>
       )}
