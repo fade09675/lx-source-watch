@@ -73,4 +73,15 @@ describe('normalizeSettings', () => {
     expect(DEFAULT_SETTINGS.quotaKvWrites).toBe(920);
     expect(DEFAULT_SETTINGS.quotaD1Writes).toBe(90_000);
   });
+
+  it('E3 自动收录门槛会夹取并保留默认值', () => {
+    expect(DEFAULT_SETTINGS.autoPromoteMinPlatforms).toBe(2);
+    expect(DEFAULT_SETTINGS.autoPromoteRequireTestablePlatform).toBe(true);
+    const settings = normalizeSettings({
+      autoPromoteMinPlatforms: 99,
+      autoPromoteRequireTestablePlatform: 'false',
+    });
+    expect(settings.autoPromoteMinPlatforms).toBe(8);
+    expect(settings.autoPromoteRequireTestablePlatform).toBe(true);
+  });
 });

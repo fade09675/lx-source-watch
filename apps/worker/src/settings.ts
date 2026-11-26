@@ -43,6 +43,10 @@ export interface AppSettings {
   discoveryIntervalHours: number;
   /** 候选通过初始化后自动收录进正式清单。 */
   autoPromoteCandidates: boolean;
+  /** 自动收录至少要求声明几个平台。 */
+  autoPromoteMinPlatforms: number;
+  /** 自动收录至少要求一个可测试的平台 key。 */
+  autoPromoteRequireTestablePlatform: boolean;
   /** 每轮最多自动收录几个。 */
   autoPromoteMaxPerRun: number;
   /** 运行明细保留天数。 */
@@ -78,6 +82,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   discoveryEnabled: true,
   discoveryIntervalHours: 12,
   autoPromoteCandidates: true,
+  autoPromoteMinPlatforms: 2,
+  autoPromoteRequireTestablePlatform: true,
   autoPromoteMaxPerRun: 3,
   retentionDetailDays: 14,
   retentionDailyDays: 180,
@@ -127,6 +133,8 @@ export function normalizeSettings(input: unknown): AppSettings {
     discoveryEnabled: bool(raw.discoveryEnabled, d.discoveryEnabled),
     discoveryIntervalHours: int(raw.discoveryIntervalHours, d.discoveryIntervalHours, 1, 168),
     autoPromoteCandidates: bool(raw.autoPromoteCandidates, d.autoPromoteCandidates),
+    autoPromoteMinPlatforms: int(raw.autoPromoteMinPlatforms, d.autoPromoteMinPlatforms, 1, 8),
+    autoPromoteRequireTestablePlatform: bool(raw.autoPromoteRequireTestablePlatform, d.autoPromoteRequireTestablePlatform),
     autoPromoteMaxPerRun: int(raw.autoPromoteMaxPerRun, d.autoPromoteMaxPerRun, 1, 10),
     retentionDetailDays: int(raw.retentionDetailDays, d.retentionDetailDays, 3, 60),
     retentionDailyDays: int(raw.retentionDailyDays, d.retentionDailyDays, 30, 365),

@@ -26,6 +26,8 @@ const EMPTY_DRAFT: Draft = {
   discoveryEnabled: true,
   discoveryIntervalHours: 12,
   autoPromoteCandidates: true,
+  autoPromoteMinPlatforms: 2,
+  autoPromoteRequireTestablePlatform: true,
   autoPromoteMaxPerRun: 3,
   retentionDetailDays: 14,
   retentionDailyDays: 180,
@@ -192,7 +194,8 @@ export function SettingsPage() {
   const promote = async () => {
     try {
       const result = await api.promoteCandidates();
-      setNotice(`自动收录完成：收录 ${result.promoted.length} 个，跳过 ${result.skipped} 个${result.errors.length ? `，${result.errors.length} 个失败` : ''}`);
+      const hint = result.warnings.length ? `；${result.warnings.slice(0, 2).join('；')}` : '';
+      setNotice(`自动收录完成：收录 ${result.promoted.length} 个，跳过 ${result.skipped} 个${result.errors.length ? `，${result.errors.length} 个失败` : ''}${hint}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : '收录失败');
     }
@@ -396,9 +399,23 @@ export function SettingsPage() {
             />
             <SwitchField
               label="自动收录候选"
-              hint="初始化通过并声明了平台，就自动进入正式清单"
+              hint="初始化通过且满足下方门槛，才自动进入正式清单"
               checked={draft.autoPromoteCandidates}
               onChange={(value) => update('autoPromoteCandidates', value)}
+            />
+            <NumberField
+              label="至少声明平台数"
+              hint="低于这个数量不自动收录"
+              min={1}
+              max={8}
+              value={draft.autoPromoteMinPlatforms}
+              onChange={(value) => update('autoPromoteMinPlatforms', value)}
+            />
+            <SwitchField
+              label="至少一个可测试平台"
+              hint="脚本声明的平台 key 必须属于可测试平台"
+              checked={draft.autoPromoteRequireTestablePlatform}
+              onChange={(value) => update('autoPromoteRequireTestablePlatform', value)}
             />
             <NumberField
               label="每轮最多收录"

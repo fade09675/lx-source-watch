@@ -105,6 +105,8 @@ export interface AppSettingsView {
   discoveryEnabled: boolean;
   discoveryIntervalHours: number;
   autoPromoteCandidates: boolean;
+  autoPromoteMinPlatforms: number;
+  autoPromoteRequireTestablePlatform: boolean;
   autoPromoteMaxPerRun: number;
   retentionDetailDays: number;
   retentionDailyDays: number;
@@ -830,7 +832,7 @@ export const api = {
     return request<CandidateList>(`/api/admin/candidates${suffix}`);
   },
   promoteCandidates: () =>
-    request<{ promoted: string[]; skipped: number; errors: string[] }>('/api/admin/candidates/promote', {
+    request<{ promoted: string[]; skipped: number; errors: string[]; warnings: string[] }>('/api/admin/candidates/promote', {
       method: 'POST',
     }),
   deleteRejectedCandidates: () =>

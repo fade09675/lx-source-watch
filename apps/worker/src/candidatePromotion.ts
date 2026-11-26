@@ -1,10 +1,10 @@
 import type { D1Database } from '@cloudflare/workers-types';
-import { parseGitHubRawUrl, renderMirror, type Candidate } from '@lx/shared';
+import { PLATFORMS, parseGitHubRawUrl, renderMirror, type Candidate } from '@lx/shared';
 import { ensureCandidateSha } from './candidateSha';
 import { getCandidate, getCandidates, setCandidateState } from './db';
 import { getMirrorTemplates } from './mirrors';
 import { createSourceRegistry, findSourceRegistryByUrl } from './sourceRegistry';
-import { loadSettings } from './settings';
+import { loadSettings, type AppSettings } from './settings';
 import { decideDuplicate, type DedupDecision } from './dedup';
 import { markCandidateDuplicate, mergeIntoCanonical } from './mergeSources';
 
@@ -27,6 +27,42 @@ export interface SinglePromotion {
 /** 自动收录只处理“唯一”候选；同名同作者的相似候选留给人工确认。 */
 export function shouldSkipAutoPromotion(decision: DedupDecision): boolean {
   return decision.kind === 'similar';
+}
+
+export interface AutoPromoteGateResult {
+  ok: boolean;
+  reason?: string;
+}
+
+type AutoPromoteGateSettings = Pick<
+  AppSettings,
+  'autoPromoteMinPlatforms' | 'autoPromoteRequireTestablePlatform'
+>;
+
+const TESTABLE_PLATFORM_KEYS = new Set(PLATFORMS.filter((platform) => platform.testable).map((platform) => platform.key));
+
+/**
+ * E3 自动收录门槛：初始化、平台数量、平台 key 可测试性。
+ * 只做本地数据判断，不访问网络；手动收录不经过这里。
+ */
+export function autoPromoteGate(
+  candidate: Candidate,
+  settings: AutoPromoteGateSettings,
+): AutoPromoteGateResult {
+  if (candidate.initOk !== true) return { ok: false, reason: '初始化未通过' };
+
+  const platforms = [...new Set((candidate.platforms ?? []).map((key) => key.trim()).filter(Boolean))];
+  if (platforms.length < settings.autoPromoteMinPlatforms) {
+    return {
+      ok: false,
+      reason: `声明平台 ${platforms.length} 个，少于门槛 ${settings.autoPromoteMinPlatforms} 个`,
+    };
+  }
+  if (settings.autoPromoteRequireTestablePlatform && !platforms.some((key) => TESTABLE_PLATFORM_KEYS.has(key))) {
+    return { ok: false, reason: '没有可测试的平台' };
+  }
+
+  return { ok: true };
 }
 
 /** 把候选的 raw 地址按当前镜像模板展开成一组加速地址。 */
@@ -132,8 +168,12 @@ export async function autoPromoteCandidates(env: { DB: D1Database }, now = new D
   const qualified = await getCandidates(env.DB, { state: 'qualified', limit: 60 });
   for (const candidate of qualified) {
     if (result.promoted.length >= settings.autoPromoteMaxPerRun) break;
-    if (candidate.initOk !== true) continue;
-    if (!candidate.platforms?.length) continue;
+    const gate = autoPromoteGate(candidate, settings);
+    if (!gate.ok) {
+      result.skipped += 1;
+      result.warnings.push(`${candidate.id}: ${gate.reason ?? '未达到自动收录门槛'}`);
+      continue;
+    }
 
     try {
       const outcome = await promoteOne(env, candidate, now, true);
