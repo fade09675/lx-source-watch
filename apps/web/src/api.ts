@@ -1005,6 +1005,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ canonicalId, duplicates }),
     }),
+  disableDuplicateVersion: (kind: 'registry' | 'candidate', id: string) =>
+    request<{ ok: boolean; kind: string; id: string; state: string }>('/api/admin/duplicates/versions/disable', {
+      method: 'POST',
+      body: JSON.stringify({ kind, id }),
+    }),
   ignoreAlias: (url: string) =>
     request<{ ok: boolean; url: string; state: string }>('/api/admin/aliases/ignore', {
       method: 'POST',

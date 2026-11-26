@@ -34,6 +34,8 @@ function candidateStateLabel(value: string | null | undefined): string {
     duplicate: '重复',
     rejected: '已拒绝',
     ignored: '已忽略',
+    enabled: '启用中',
+    disabled: '已停用',
   };
   return labels[value ?? ''] ?? value ?? '候选';
 }
@@ -102,6 +104,23 @@ export function DuplicatesPage() {
     }
   }
 
+  async function disableVersion(entry: DuplicateEntryView) {
+    const label = entry.kind === 'registry' ? '停用这个音源版本' : '停用这个候选版本';
+    if (!window.confirm(`${label}？\n\n${entry.url}\n\n不会删除记录，之后可以在对应页面恢复。`)) return;
+    const busyKey = `${entry.kind}:${entry.id}`;
+    setBusy(busyKey);
+    setMessage(null);
+    try {
+      await api.disableDuplicateVersion(entry.kind, entry.id);
+      setMessage('已停用该版本。');
+      await load();
+    } catch (err) {
+      setMessage(err instanceof ApiError ? err.message : '停用版本失败');
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function toggleAlias(alias: AliasView) {
     const next = alias.state === 'active' ? 'ignored' : 'active';
     setBusy(alias.url);
@@ -134,14 +153,14 @@ export function DuplicatesPage() {
       <PageHeader
         eyebrow="DUPLICATES"
         title="重复与别名"
-        description="内容指纹相同的音源只保留一个主源：重复地址变成别名和镜像，重复源停用但保留记录；同名不同内容只提示。"
+        description="内容指纹相同的音源只保留一个主源：重复地址变成别名和镜像，重复源停用但保留记录；同名不同内容按版本并列，可手动停用不需要的版本。"
       />
 
       <StatGrid compact>
         <StatCard label="重复组" value={counts.groups} hint="按完整 sha256 分组" />
         <StatCard label="重复地址" value={counts.duplicateUrls} hint={`已合并 ${counts.mergedUrls}`} />
         <StatCard label="别名" value={counts.aliases} hint="忽略后仍保留记录" />
-        <StatCard label="同名疑似" value={counts.similar} hint="仅提示，不自动合并" tone="warn" />
+        <StatCard label="同名多版本" value={counts.similar} hint="仅提示，可手动停用" tone="warn" />
       </StatGrid>
 
       {message ? <div className="notice">{message}</div> : null}
@@ -219,8 +238,8 @@ export function DuplicatesPage() {
 
       {similar.length > 0 ? (
         <SectionCard
-          title="同名疑似"
-          description="名称和作者相同但内容指纹不同，按你的规则不自动合并"
+          title="同名多版本"
+          description="名称和作者相同但内容指纹不同；按版本并列，可手动停用不需要的版本，不自动合并"
           actions={<span className="muted small">{counts.similar} 组</span>}
         >
           <div className="table-wrap">
@@ -230,25 +249,41 @@ export function DuplicatesPage() {
                   <th>名称</th>
                   <th>作者</th>
                   <th>地址</th>
+                  <th>版本</th>
                   <th>sha256</th>
                   <th>状态</th>
+                  <th>操作</th>
                 </tr>
               </thead>
               <tbody>
                 {similar.flatMap((group) =>
-                  group.entries.map((entry) => (
-                    <tr key={`similar:${entry.id}`}>
-                      <td data-label="名称">{group.title}</td>
-                      <td data-label="作者">{group.author}</td>
-                      <td className="mono" title={entry.url} data-label="地址">
-                        {shortUrl(entry.url)}
-                      </td>
-                      <td className="mono" data-label="sha256">{shortSha(entry.sha256 ?? '')}</td>
-                      <td data-label="状态">
-                        <span className="mini-chip">{candidateStateLabel(entry.state)}</span>
-                      </td>
-                    </tr>
-                  )),
+                  group.entries.map((entry) => {
+                    const busyKey = `${entry.kind}:${entry.id}`;
+                    const disabled = entry.kind === 'registry' ? !entry.enabled : entry.state === 'rejected';
+                    return (
+                      <tr key={`similar:${entry.kind}:${entry.id}`} className={disabled ? 'row-disabled' : undefined}>
+                        <td data-label="名称">{group.title}</td>
+                        <td data-label="作者">{group.author}</td>
+                        <td className="mono" title={entry.url} data-label="地址">
+                          {shortUrl(entry.url)}
+                        </td>
+                        <td data-label="版本">{entry.version || '—'}</td>
+                        <td className="mono" data-label="sha256">{shortSha(entry.sha256 ?? '')}</td>
+                        <td data-label="状态">
+                          <span className="mini-chip">{candidateStateLabel(entry.state)}</span>
+                        </td>
+                        <td className="row-actions" data-label="">
+                          <button
+                            className="link-button"
+                            disabled={disabled || busy === busyKey}
+                            onClick={() => void disableVersion(entry)}
+                          >
+                            {disabled ? '已停用' : busy === busyKey ? '处理中…' : '停用'}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  }),
                 )}
               </tbody>
             </table>

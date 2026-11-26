@@ -358,6 +358,7 @@ export async function listDuplicateOverview(db: D1Database, now = new Date().toI
   );
 
   const bySha = new Map<string, DedupEntry[]>();
+  const allEntries: DedupEntry[] = [];
   const stateById = new Map<string, string>();
 
   for (const row of registry.results ?? []) {
@@ -373,6 +374,8 @@ export async function listDuplicateOverview(db: D1Database, now = new Date().toI
       firstSeen: row.created_at,
       kind: 'registry',
     };
+    allEntries.push(entry);
+    stateById.set(`registry:${row.id}`, row.enabled === 1 ? 'enabled' : 'disabled');
     const list = bySha.get(row.content_sha256!) ?? [];
     list.push(entry);
     bySha.set(row.content_sha256!, list);
@@ -391,6 +394,7 @@ export async function listDuplicateOverview(db: D1Database, now = new Date().toI
       firstSeen: row.first_seen ?? '',
       kind: 'candidate',
     };
+    allEntries.push(entry);
     stateById.set(`candidate:${row.id}`, row.state);
     const list = bySha.get(row.sha256!) ?? [];
     list.push(entry);
@@ -428,21 +432,9 @@ export async function listDuplicateOverview(db: D1Database, now = new Date().toI
   groups.sort((a, b) => b.entries.length - a.entries.length);
 
   const similarMap = new Map<string, DedupEntry[]>();
-  for (const row of candidates.results ?? []) {
-    if (!row.title || !row.author) continue;
-    const key = `${row.title}\u0000${row.author}`;
-    const entry: DedupEntry = {
-      id: row.id,
-      url: comparableUrl(row.url),
-      sha256: row.sha256,
-      title: row.title,
-      author: row.author,
-      version: row.version ?? '',
-      enabled: row.state === 'promoted',
-      official: isOfficialUrl(row.url),
-      firstSeen: row.first_seen ?? '',
-      kind: 'candidate',
-    };
+  for (const entry of allEntries) {
+    if (!entry.title || !entry.author || !entry.sha256) continue;
+    const key = `${entry.title}\u0000${entry.author}`;
     const list = similarMap.get(key) ?? [];
     list.push(entry);
     similarMap.set(key, list);
@@ -454,7 +446,7 @@ export async function listDuplicateOverview(db: D1Database, now = new Date().toI
     similar.push({
       title: list[0]?.title ?? '',
       author: list[0]?.author ?? '',
-      entries: list.map((entry) => toView(entry, stateById.get(`candidate:${entry.id}`) ?? '')),
+      entries: list.map((entry) => toView(entry, stateById.get(`${entry.kind}:${entry.id}`) ?? '')),
     });
   }
   similar.sort((a, b) => b.entries.length - a.entries.length);

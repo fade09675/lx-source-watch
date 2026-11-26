@@ -486,6 +486,40 @@ export function createApi(): Hono<Ctx> {
     );
   });
 
+  // 多版本治理：同名不同内容的版本由管理员手动停用/忽略，不自动合并。
+  api.post('/admin/duplicates/versions/disable', async (c) => {
+    let body: { kind?: unknown; id?: unknown } = {};
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'bad_request', message: '请求格式错误' }, 400);
+    }
+    const kind = body.kind === 'registry' || body.kind === 'candidate' ? body.kind : '';
+    const id = typeof body.id === 'string' ? body.id.trim() : '';
+    if (!kind || !id) return c.json({ error: 'bad_request', message: '缺少版本类型或 id' }, 400);
+    if (id.length > 80) return c.json({ error: 'bad_request', message: '版本 id 过长' }, 400);
+
+    if (kind === 'registry') {
+      const row = await getSourceRegistry(c.env.DB, id);
+      if (!row) return c.json({ error: 'not_found', message: `音源不存在：${id}` }, 404);
+      if (!row.enabled) return c.json({ error: 'already_disabled', message: '该版本已停用' }, 400);
+      const result = await updateSourceRegistry(c.env.DB, id, { enabled: false });
+      if (!result.ok) {
+        return c.json({ error: 'update_failed', message: result.errors.join('；') || '停用失败' }, 400, {
+          'cache-control': CACHE_PRIVATE,
+        });
+      }
+      return c.json({ ok: true, kind, id, state: 'disabled' }, 200, { 'cache-control': CACHE_PRIVATE });
+    }
+
+    const candidate = await getCandidate(c.env.DB, id);
+    if (!candidate) return c.json({ error: 'not_found', message: `候选不存在：${id}` }, 404);
+    if (candidate.state === 'rejected') return c.json({ error: 'already_rejected', message: '该候选版本已停用' }, 400);
+    const updated = await setCandidateState(c.env.DB, id, 'rejected', new Date().toISOString());
+    if (!updated) return c.json({ error: 'update_failed', message: '停用失败' }, 400);
+    return c.json({ ok: true, kind, id, state: 'rejected' }, 200, { 'cache-control': CACHE_PRIVATE });
+  });
+
   api.get('/admin/aliases', async (c) => {
     const sourceId = c.req.query('sourceId')?.trim();
     const aliases = await listAliases(c.env.DB, { canonicalSourceId: sourceId || undefined, limit: 1000 });
