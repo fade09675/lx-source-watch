@@ -1154,7 +1154,11 @@ export function createApi(): Hono<Ctx> {
   });
 
   api.get('/config/discovery', async (c) => {
-    const config = await publicDiscoveryRepos(c.env.DB);
+    const settings = await loadSettings(c.env.DB);
+    const config = await publicDiscoveryRepos(c.env.DB, {
+      maxFetchPerRun: settings.discoveryMaxFetchPerRun,
+      maxFetchPerRepo: settings.discoveryMaxFetchPerRepo,
+    });
     return Response.json(config, {
       headers: { 'cache-control': 'public, max-age=60, s-maxage=300' },
     });

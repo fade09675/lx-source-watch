@@ -41,6 +41,10 @@ export interface AppSettings {
   discoveryEnabled: boolean;
   /** 自动发现间隔（小时）。 */
   discoveryIntervalHours: number;
+  /** 每次自动发现最多抓取多少个候选。 */
+  discoveryMaxFetchPerRun: number;
+  /** 每个仓库每次最多抓取多少个候选。 */
+  discoveryMaxFetchPerRepo: number;
   /** 候选通过初始化后自动收录进正式清单。 */
   autoPromoteCandidates: boolean;
   /** 自动收录至少要求声明几个平台。 */
@@ -81,6 +85,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   proxyTestTimeoutMs: 20_000,
   discoveryEnabled: true,
   discoveryIntervalHours: 12,
+  discoveryMaxFetchPerRun: 20,
+  discoveryMaxFetchPerRepo: 5,
   autoPromoteCandidates: true,
   autoPromoteMinPlatforms: 2,
   autoPromoteRequireTestablePlatform: true,
@@ -132,6 +138,8 @@ export function normalizeSettings(input: unknown): AppSettings {
     proxyTestTimeoutMs: int(raw.proxyTestTimeoutMs, d.proxyTestTimeoutMs, 5_000, 90_000),
     discoveryEnabled: bool(raw.discoveryEnabled, d.discoveryEnabled),
     discoveryIntervalHours: int(raw.discoveryIntervalHours, d.discoveryIntervalHours, 1, 168),
+    discoveryMaxFetchPerRun: int(raw.discoveryMaxFetchPerRun, d.discoveryMaxFetchPerRun, 1, 120),
+    discoveryMaxFetchPerRepo: int(raw.discoveryMaxFetchPerRepo, d.discoveryMaxFetchPerRepo, 1, 40),
     autoPromoteCandidates: bool(raw.autoPromoteCandidates, d.autoPromoteCandidates),
     autoPromoteMinPlatforms: int(raw.autoPromoteMinPlatforms, d.autoPromoteMinPlatforms, 1, 8),
     autoPromoteRequireTestablePlatform: bool(raw.autoPromoteRequireTestablePlatform, d.autoPromoteRequireTestablePlatform),

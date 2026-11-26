@@ -104,6 +104,8 @@ export interface AppSettingsView {
   proxyTestTimeoutMs: number;
   discoveryEnabled: boolean;
   discoveryIntervalHours: number;
+  discoveryMaxFetchPerRun: number;
+  discoveryMaxFetchPerRepo: number;
   autoPromoteCandidates: boolean;
   autoPromoteMinPlatforms: number;
   autoPromoteRequireTestablePlatform: boolean;

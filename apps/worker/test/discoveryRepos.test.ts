@@ -88,5 +88,11 @@ describe('discovery repos', () => {
     expect(config.repos).toEqual([
       { repo: 'owner/a', branch: 'main', pathPrefixes: ['sources'] },
     ]);
+    const custom = await publicDiscoveryRepos(fakeDb(rows), {
+      maxFetchPerRun: 40,
+      maxFetchPerRepo: 8,
+    });
+    expect(custom.maxFetchPerRun).toBe(40);
+    expect(custom.maxFetchPerRepo).toBe(8);
   });
 });

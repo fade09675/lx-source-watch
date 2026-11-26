@@ -63,6 +63,14 @@ describe('normalizeSettings', () => {
     expect(DEFAULT_SETTINGS.proxyTestTimeoutMs).toBe(20_000);
   });
 
+  it('E5 发现默认每轮 20 个、每仓库 5 个', () => {
+    expect(DEFAULT_SETTINGS.discoveryMaxFetchPerRun).toBe(20);
+    expect(DEFAULT_SETTINGS.discoveryMaxFetchPerRepo).toBe(5);
+    const settings = normalizeSettings({ discoveryMaxFetchPerRun: 999, discoveryMaxFetchPerRepo: 99 });
+    expect(settings.discoveryMaxFetchPerRun).toBe(120);
+    expect(settings.discoveryMaxFetchPerRepo).toBe(40);
+  });
+
   it('阶段五额度护栏会夹取到安全范围', () => {
     const settings = normalizeSettings({ quotaKvWrites: 5000, quotaD1Writes: 1 });
     expect(settings.quotaKvWrites).toBe(1_000);

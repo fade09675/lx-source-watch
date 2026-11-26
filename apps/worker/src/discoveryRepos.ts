@@ -203,7 +203,10 @@ export async function deleteDiscoveryRepo(db: D1Database, id: string): Promise<b
 }
 
 /** Runner 公开配置：只下发启用的自定义仓库，内置仓库仍在仓库内 JSON。 */
-export async function publicDiscoveryRepos(db: D1Database): Promise<{
+export async function publicDiscoveryRepos(
+  db: D1Database,
+  limits: { maxFetchPerRun?: number; maxFetchPerRepo?: number } = {},
+): Promise<{
   version: 1;
   maxFetchPerRun: number;
   maxFetchPerRepo: number;
@@ -212,10 +215,11 @@ export async function publicDiscoveryRepos(db: D1Database): Promise<{
   const rows = await listDiscoveryRepos(db);
   return {
     version: 1,
-    maxFetchPerRun: 20,
-    maxFetchPerRepo: 5,
+    maxFetchPerRun: limits.maxFetchPerRun ?? 20,
+    maxFetchPerRepo: limits.maxFetchPerRepo ?? 5,
     repos: rows
       .filter((row) => row.enabled)
+      .slice(0, 200)
       .map((row) => ({
         repo: row.repo,
         branch: row.branch,

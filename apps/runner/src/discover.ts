@@ -11,6 +11,9 @@ import {
 } from '@lx/shared';
 import { log } from './logger.js';
 import { httpRequest, type ProxyConfig } from './net/http.js';
+
+/** 仓库树批量并发数；控制 GitHub API 突发，同时保持结果按仓库顺序处理。 */
+const TREE_FETCH_CONCURRENCY = 4;
 import { errorMessage, nowIso, sha1Short } from './util.js';
 
 export interface DiscoverOptions {
@@ -103,7 +106,7 @@ async function fetchCustomRepos(
   });
   if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
   const payload = JSON.parse(res.body.toString('utf8')) as { repos?: unknown };
-  const parsed = DiscoveryRepoSchema.array().max(50).safeParse(payload.repos ?? []);
+  const parsed = DiscoveryRepoSchema.array().max(200).safeParse(payload.repos ?? []);
   if (!parsed.success) {
     throw new Error(`自定义仓库格式不正确：${parsed.error.issues[0]?.message ?? 'unknown'}`);
   }
@@ -186,55 +189,66 @@ export async function discoverCandidates(opts: DiscoverOptions): Promise<Discove
   const seen = new Set<string>();
   const now = nowIso();
 
-  for (const repo of repos) {
-    if (!repo.enabled) continue;
+  const enabledRepos = repos.filter((repo) => repo.enabled);
+  for (let start = 0; start < enabledRepos.length; start += TREE_FETCH_CONCURRENCY) {
     if (found.length >= maxFetch) break;
-    stats.repos += 1;
-    log.step(`扫描 ${repo.repo}@${repo.branch}`);
-    let tree: TreeResponse;
-    try {
-      tree = await fetchTree(repo.repo, repo.branch, token, opts.proxy);
-    } catch (e) {
-      const msg = `${repo.repo}: ${errorMessage(e)}`;
-      stats.errors.push(msg);
-      log.warn(msg);
-      continue;
-    }
-    if (tree.truncated) log.warn(`${repo.repo} 文件树被截断，只扫描了部分文件`);
-    const entries = rankEntries(tree.tree ?? [], repo);
-
-    let repoFound = 0;
-    for (const entry of entries) {
-      if (found.length >= maxFetch || repoFound >= perRepo) break;
-      const id = sha1Short(`${repo.repo}/${entry.path}`, 12);
-      if (seen.has(id)) continue;
-      seen.add(id);
-      const prev = existing.get(id);
-      if (prev?.state === 'rejected') {
-        stats.skipped += 1;
+    const batch = enabledRepos.slice(start, start + TREE_FETCH_CONCURRENCY);
+    stats.repos += batch.length;
+    for (const repo of batch) log.step(`扫描 ${repo.repo}@${repo.branch}`);
+    const trees = await Promise.all(
+      batch.map(async (repo) => {
+        try {
+          return { repo, tree: await fetchTree(repo.repo, repo.branch, token, opts.proxy) };
+        } catch (e) {
+          return { repo, error: errorMessage(e) };
+        }
+      }),
+    );
+    for (const item of trees) {
+      if (found.length >= maxFetch) break;
+      if ('error' in item) {
+        const msg = `${item.repo.repo}: ${item.error}`;
+        stats.errors.push(msg);
+        log.warn(msg);
         continue;
       }
-      found.push({
-        id,
-        repo: repo.repo,
-        path: entry.path,
-        url: rawUrl(repo.repo, repo.branch, entry.path),
-        sha: entry.sha,
-        title: prev?.title,
-        version: prev?.version,
-        author: prev?.author,
-        description: prev?.description,
-        platforms: prev?.platforms ?? [],
-        bytes: entry.size ?? prev?.bytes,
-        initOk: prev?.initOk,
-        initError: prev?.initError,
-        state: prev?.state ?? 'new',
-        firstSeen: prev?.firstSeen ?? now,
-        lastSeen: now,
-      });
-      repoFound += 1;
+      const { repo, tree } = item;
+      if (tree.truncated) log.warn(`${repo.repo} 文件树被截断，只扫描了部分文件`);
+      const entries = rankEntries(tree.tree ?? [], repo);
+
+      let repoFound = 0;
+      for (const entry of entries) {
+        if (found.length >= maxFetch || repoFound >= perRepo) break;
+        const id = sha1Short(`${repo.repo}/${entry.path}`, 12);
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const prev = existing.get(id);
+        if (prev?.state === 'rejected') {
+          stats.skipped += 1;
+          continue;
+        }
+        found.push({
+          id,
+          repo: repo.repo,
+          path: entry.path,
+          url: rawUrl(repo.repo, repo.branch, entry.path),
+          sha: entry.sha,
+          title: prev?.title,
+          version: prev?.version,
+          author: prev?.author,
+          description: prev?.description,
+          platforms: prev?.platforms ?? [],
+          bytes: entry.size ?? prev?.bytes,
+          initOk: prev?.initOk,
+          initError: prev?.initError,
+          state: prev?.state ?? 'new',
+          firstSeen: prev?.firstSeen ?? now,
+          lastSeen: now,
+        });
+        repoFound += 1;
+      }
+      stats.files += entries.length;
     }
-    stats.files += entries.length;
   }
 
   if (opts.seedPath) {

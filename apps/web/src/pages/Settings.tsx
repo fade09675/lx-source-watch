@@ -25,6 +25,8 @@ const EMPTY_DRAFT: Draft = {
   proxyTestTimeoutMs: 20_000,
   discoveryEnabled: true,
   discoveryIntervalHours: 12,
+  discoveryMaxFetchPerRun: 20,
+  discoveryMaxFetchPerRepo: 5,
   autoPromoteCandidates: true,
   autoPromoteMinPlatforms: 2,
   autoPromoteRequireTestablePlatform: true,
@@ -396,6 +398,22 @@ export function SettingsPage() {
               max={168}
               value={draft.discoveryIntervalHours}
               onChange={(value) => update('discoveryIntervalHours', value)}
+            />
+            <NumberField
+              label="每次最多发现候选"
+              hint="单轮全局上限，默认 20"
+              min={1}
+              max={120}
+              value={draft.discoveryMaxFetchPerRun}
+              onChange={(value) => update('discoveryMaxFetchPerRun', value)}
+            />
+            <NumberField
+              label="每仓库最多候选"
+              hint="避免单仓库占满全局名额，默认 5"
+              min={1}
+              max={40}
+              value={draft.discoveryMaxFetchPerRepo}
+              onChange={(value) => update('discoveryMaxFetchPerRepo', value)}
             />
             <SwitchField
               label="自动收录候选"
