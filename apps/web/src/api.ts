@@ -124,6 +124,7 @@ export interface RunPurgePreview {
   runs: number;
   sourceRuns: number;
   platformResults: number;
+  sourceEndpoints: number;
   tasks: number;
   proxyTestRuns: number;
   proxyTestResults: number;

@@ -78,7 +78,11 @@ export function AdminPage() {
       const result = await api.previewRunPurge(days);
       setPurgePreview(result.preview);
       setPurgeMessage(
-        result.preview.runs === 0 && result.preview.proxyTestRuns === 0 ? '没有需要清理的记录。' : '',
+        result.preview.runs === 0 &&
+          result.preview.proxyTestRuns === 0 &&
+          result.preview.sourceEndpoints === 0
+          ? '没有需要清理的记录。'
+          : '',
       );
     } catch (err) {
       setPurgeMessage(err instanceof ApiError ? err.message : '预览失败');
@@ -98,7 +102,7 @@ export function AdminPage() {
     try {
       const result = await api.purgeRuns(purgePreview.days);
       setPurgeMessage(
-        `已删除：运行 ${result.result.runs} 轮、逐源 ${result.result.sourceRuns} 条、平台 ${result.result.platformResults} 条、测活 ${result.result.proxyTestRuns} 轮、操作记录 ${result.result.activity} 条。`,
+        `已删除：运行 ${result.result.runs} 轮、逐源 ${result.result.sourceRuns} 条、接入点 ${result.result.sourceEndpoints} 条、平台 ${result.result.platformResults} 条、测活 ${result.result.proxyTestRuns} 轮、操作记录 ${result.result.activity} 条。`,
       );
       setPurgePreview(null);
       await reloadHistory();
@@ -441,9 +445,9 @@ export function AdminPage() {
         {purgePreview && (
           <div className="notice">
             <div>
-              将删除：运行 {purgePreview.runs} 轮、逐源 {purgePreview.sourceRuns} 条、平台{' '}
-              {purgePreview.platformResults} 条、任务 {purgePreview.tasks} 条、测活 {purgePreview.proxyTestRuns} 轮/
-              {purgePreview.proxyTestResults} 条、操作记录 {purgePreview.activity} 条。
+              将删除：运行 {purgePreview.runs} 轮、逐源 {purgePreview.sourceRuns} 条、接入点{' '}
+              {purgePreview.sourceEndpoints} 条、平台 {purgePreview.platformResults} 条、任务 {purgePreview.tasks} 条、测活{' '}
+              {purgePreview.proxyTestRuns} 轮/{purgePreview.proxyTestResults} 条、操作记录 {purgePreview.activity} 条。
             </div>
             <div className="muted">
               截止 {formatDateTime(purgePreview.cutoff)}；最新探测{' '}

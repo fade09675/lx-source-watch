@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Env } from '../src/env';
-import { clampCutoff, executeRunPurge, type RunPurgePlan } from '../src/maintenance';
+import { clampCutoff, dayCutoff, executeRunPurge, type RunPurgePlan } from '../src/maintenance';
 
 function plan(overrides: Partial<RunPurgePlan> = {}): RunPurgePlan {
   return {
@@ -13,6 +13,7 @@ function plan(overrides: Partial<RunPurgePlan> = {}): RunPurgePlan {
     runs: 1,
     sourceRuns: 0,
     platformResults: 0,
+    sourceEndpoints: 0,
     tasks: 0,
     proxyTestRuns: 1,
     proxyTestResults: 0,
@@ -40,6 +41,26 @@ describe('executeRunPurge', () => {
     const proxyRuns = sqls.findIndex((sql) => sql.startsWith('DELETE FROM proxy_test_runs'));
     expect(tasks).toBeGreaterThan(-1);
     expect(tasks).toBeLessThan(proxyRuns);
+  });
+
+  it('接入点明细要在运行之前删除', async () => {
+    const sqls: string[] = [];
+    const env = {
+      DB: {
+        prepare(sql: string) {
+          sqls.push(sql);
+          return { bind: () => ({}) };
+        },
+        async batch() {
+          return [];
+        },
+      },
+    } as unknown as Env;
+    await executeRunPurge(env, plan({ sourceEndpoints: 2 }));
+    const endpoints = sqls.findIndex((sql) => sql.startsWith('DELETE FROM source_endpoints'));
+    const runs = sqls.findIndex((sql) => sql.startsWith('DELETE FROM runs'));
+    expect(endpoints).toBeGreaterThan(-1);
+    expect(endpoints).toBeLessThan(runs);
   });
 
   it('只有旧操作记录时也能清理', async () => {
@@ -74,6 +95,18 @@ describe('executeRunPurge', () => {
     } as unknown as Env;
     await executeRunPurge(env, plan({ runs: 0, proxyTestRuns: 0 }));
     expect(sqls).toHaveLength(0);
+  });
+});
+
+describe('dayCutoff', () => {
+  it('按上海时区计算日历日', () => {
+    const now = new Date('2026-11-24T00:00:00.000Z');
+    expect(dayCutoff(now, 30)).toBe('2026-10-25');
+  });
+
+  it('跨月跨年也按天数回退', () => {
+    const now = new Date('2026-01-05T00:00:00.000Z');
+    expect(dayCutoff(now, 7)).toBe('2025-12-29');
   });
 });
 

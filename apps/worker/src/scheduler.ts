@@ -7,6 +7,7 @@ import {
   type TaskType,
 } from './tasks';
 import { loadSettings, normalizeSettings, type AppSettings } from './settings';
+import { runScheduledRetention } from './maintenance';
 
 /** 默认间隔（设置里可改）。 */
 export const PROBE_INTERVAL_HOURS = 4;
@@ -14,6 +15,9 @@ export const PROXY_TEST_INTERVAL_HOURS = 6;
 export const DISCOVERY_INTERVAL_HOURS = 12;
 
 export const SCHEDULER_STATE_KEY = 'scheduler:state';
+export const RETENTION_STATE_KEY = 'retention:last';
+
+const RETENTION_INTERVAL_MS = 86_400_000;
 
 const MANUAL_KEYS = {
   probe: 'run:probe:last',
@@ -151,6 +155,31 @@ async function readSettings(env: Env, deps: SchedulerDeps): Promise<AppSettings>
   return loadSettings(env.DB);
 }
 
+/** 每天最多执行一次保留清理；失败只记录，不影响任务调度。 */
+async function runRetentionIfDue(env: Env, settings: AppSettings, now: number): Promise<void> {
+  if (!env.DB) return;
+  try {
+    const last = await env.SNAPSHOT.get(RETENTION_STATE_KEY);
+    if (last && now - Date.parse(last) < RETENTION_INTERVAL_MS) return;
+  } catch {
+    // KV 读失败时继续尝试清理，避免因为状态读取失败一直不清理。
+  }
+  const at = new Date(now).toISOString();
+  try {
+    const result = await runScheduledRetention(env, settings, new Date(now));
+    console.log(
+      `保留清理完成：运行 ${result.detail.runs} 轮，接入点 ${result.detail.sourceEndpoints} 条，日汇总 ${result.sourceDaily}/${result.platformDaily} 条，事件 ${result.events} 条，操作记录 ${result.activity} 条`,
+    );
+  } catch (error) {
+    console.warn('保留清理失败', errorMessage(error));
+  }
+  try {
+    await env.SNAPSHOT.put(RETENTION_STATE_KEY, at);
+  } catch {
+    // 状态写入失败最多导致下一轮 cron 重试一次。
+  }
+}
+
 /**
  * 由 Worker 的 Cron Trigger 每 5 分钟调用一次。
  *
@@ -245,6 +274,8 @@ export async function runScheduler(
       }
     }
   }
+
+  await runRetentionIfDue(env, settings, now);
 
   return queued;
 }

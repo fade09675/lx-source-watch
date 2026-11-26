@@ -218,6 +218,7 @@ curl.exe -s https://dash.example.com/api/health
 - [ ] 403 订阅刷新返回 502 `fetch_forbidden` + `needsRunner`
 - [ ] 设置页保存/重置额度护栏；`/api/runner/config` 无令牌 401
 - [ ] `/admin` 清理预览计数正确，执行后最新一轮仍可打开
+- [ ] `pnpm audit:ui` 通过（需 `E2E_PASSWORD`，可设 `E2E_BASE_URL`；桌面/移动无横向溢出、无控制台错误）
 - [ ] Cloudflare 控制台 KV 写约为每轮 1 次；D1 写未超过护栏
 
 ---
@@ -226,6 +227,8 @@ curl.exe -s https://dash.example.com/api/health
 
 - GitHub workflow 不配置 `schedule`；Worker cron `*/5 * * * *` 到点后派发。
 - 探测默认 4h、测活 6h、发现 12h；每轮源数、并发、deep、国内补测、自动收录、保留天数都在设置页改，存 D1。
+- 自动清理随调度器执行：同一时刻最多每天一次；明细按“运行明细”天数、日汇总按“日汇总”天数、事件与操作记录按“事件”天数删除，永远保留最新一轮探测与测活。手动清理仍在 `/admin`，使用相同天数。
+- 日期边界按 Asia/Shanghai 计算；清理失败只写 Worker 日志，不影响任务派发。
 - 手动触发时间参与“下次到期”计算；派发失败会写任务/运行记录。
 - 当前线上为手动触发（三个定时任务关闭）；新部署默认开启，建议先手动跑一轮确认额度与耗时，再决定间隔。
 - 额度护栏默认 KV 920/1000、D1 90000/100000；达到阈值暂停派发，可在设置页调低。

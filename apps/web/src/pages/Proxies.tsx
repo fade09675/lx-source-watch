@@ -671,7 +671,7 @@ export function ProxiesPage() {
                           )}
                         </div>
                       </td>
-                      <td className="small muted" data-label="成功率">
+                      <td className="small muted node-rate" data-label="成功率">
                         {item.successCount + item.failCount > 0
                           ? `${item.successCount}/${item.successCount + item.failCount}`
                           : '—'}
@@ -680,6 +680,11 @@ export function ProxiesPage() {
                         <div className="cell-stack">
                           <span className={`pill ${item.enabled ? 'pill-ok' : 'pill-idle'}`}>{item.enabled ? '已启用' : '停用'}</span>
                           {item.lastLatencyMs ? <span className="small muted"> {item.lastLatencyMs}ms</span> : null}
+                          {item.successCount + item.failCount > 0 && (
+                            <span className="small muted node-rate-inline">
+                              成功 {item.successCount}/{item.successCount + item.failCount}
+                            </span>
+                          )}
                           {item.enabled && !item.lastOkAt ? <span className="small text-bad"> 最近未测活成功</span> : null}
                         </div>
                       </td>

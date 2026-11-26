@@ -3608,6 +3608,41 @@ body {
   margin-top: 14px;
 }
 
+.log-panel {
+  overflow: visible;
+}
+
+.node-rate-inline {
+  display: none;
+}
+
+.log-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  backdrop-filter: blur(10px);
+}
+
+@media (max-width: 760px) {
+  .proxy-node-table td[data-label="出口"],
+  .proxy-node-table td[data-label="最近测活"],
+  .proxy-node-table td.node-rate {
+    display: none;
+  }
+
+  .node-rate-inline {
+    display: inline;
+  }
+
+  .proxy-node-table tr {
+    padding: 10px 12px;
+  }
+
+  .proxy-node-table td {
+    padding: 2px 0;
+  }
+}
+
 .empty-box {
   border: 1px dashed var(--border);
   border-radius: 10px;

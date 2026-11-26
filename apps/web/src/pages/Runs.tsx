@@ -72,6 +72,8 @@ export function RunsPage() {
   const [triggerFilter, setTriggerFilter] = useState('all');
   const [limit, setLimit] = useState(10);
   const [offset, setOffset] = useState(0);
+  const [failureKind, setFailureKind] = useState('all');
+  const [failureQuery, setFailureQuery] = useState('');
 
   useEffect(() => {
     setOffset(0);
@@ -118,7 +120,25 @@ export function RunsPage() {
     };
   }, [days, statusFilter, triggerFilter, limit, offset]);
 
-  const maxKind = Math.max(1, ...(aggregate?.byKind.map((item) => item.count) ?? [1]));
+  const failureKinds = useMemo(() => {
+    const query = failureQuery.trim().toLowerCase();
+    return (aggregate?.byKind ?? []).filter((item) => {
+      if (failureKind !== 'all' && item.kind !== failureKind) return false;
+      if (!query) return true;
+      return (
+        errorLabel(item.kind).toLowerCase().includes(query) ||
+        (item.sample ?? '').toLowerCase().includes(query)
+      );
+    });
+  }, [aggregate, failureKind, failureQuery]);
+  const failureSources = useMemo(() => {
+    const query = failureQuery.trim().toLowerCase();
+    if (!query) return aggregate?.bySource ?? [];
+    return (aggregate?.bySource ?? []).filter(
+      (item) => item.title.toLowerCase().includes(query) || (item.topError ?? '').toLowerCase().includes(query),
+    );
+  }, [aggregate, failureQuery]);
+  const maxKind = Math.max(1, ...failureKinds.map((item) => item.count));
   const failureRate =
     aggregate && aggregate.platformTests > 0
       ? `${Math.round((aggregate.platformFailures / aggregate.platformTests) * 100)}%`
@@ -137,11 +157,13 @@ export function RunsPage() {
     return { tested, ok, failed, cnTested, cnOk };
   }, [platforms]);
   const platformPager = useClientPager(platforms?.rows ?? []);
-  const failSourcePager = useClientPager(aggregate?.bySource ?? []);
+  const failKindPager = useClientPager(failureKinds);
+  const failSourcePager = useClientPager(failureSources);
   useEffect(() => {
     platformPager.reset();
+    failKindPager.reset();
     failSourcePager.reset();
-  }, [days, platformPager.reset, failSourcePager.reset]);
+  }, [days, failureKind, failureQuery, platformPager.reset, failKindPager.reset, failSourcePager.reset]);
 
   return (
     <div className="page">
@@ -426,13 +448,41 @@ export function RunsPage() {
               <h2>失败原因</h2>
               <span className="muted">近 {days} 天</span>
             </div>
+            <div className="filter-bar">
+              <input
+                className="search-input"
+                placeholder="筛选原因、平台或错误文案"
+                value={failureQuery}
+                onChange={(event) => setFailureQuery(event.target.value)}
+              />
+              <select value={failureKind} onChange={(event) => setFailureKind(event.target.value)}>
+                <option value="all">全部原因</option>
+                {(aggregate?.byKind ?? []).map((item) => (
+                  <option value={item.kind} key={item.kind}>
+                    {errorLabel(item.kind)}（{item.count}）
+                  </option>
+                ))}
+              </select>
+              {(failureKind !== 'all' || failureQuery) && (
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => {
+                    setFailureKind('all');
+                    setFailureQuery('');
+                  }}
+                >
+                  清除筛选
+                </button>
+              )}
+            </div>
             {!aggregate ? (
               <Spinner />
-            ) : aggregate.byKind.length === 0 ? (
-              <p className="muted">这段时间没有失败记录。</p>
+            ) : failureKinds.length === 0 ? (
+              <p className="muted">没有匹配的失败原因。</p>
             ) : (
               <div className="panel failure-panel">
-                {aggregate.byKind.map((item) => (
+                {failKindPager.pageItems.map((item) => (
                   <div className="failure-row" key={item.kind}>
                     <div className="failure-row-head">
                       <strong>{errorLabel(item.kind)}</strong>
@@ -446,6 +496,9 @@ export function RunsPage() {
                 ))}
               </div>
             )}
+            {failureKinds.length > 0 && (
+              <Pagination {...failKindPager.pagination} label="类原因" />
+            )}
           </section>
 
           <section>
@@ -457,6 +510,8 @@ export function RunsPage() {
               <Spinner />
             ) : aggregate.bySource.length === 0 ? (
               <p className="muted">这段时间没有源失败。</p>
+            ) : failureSources.length === 0 ? (
+              <p className="muted">没有匹配的源。</p>
             ) : (
               <div className="failure-source-list">
                 {failSourcePager.pageItems.map((item) => (
@@ -473,7 +528,7 @@ export function RunsPage() {
                 ))}
               </div>
             )}
-            {aggregate && aggregate.bySource.length > 0 && (
+            {failureSources.length > 0 && (
               <Pagination {...failSourcePager.pagination} label="个源" />
             )}
           </section>
