@@ -154,7 +154,8 @@ async function auditContext(context, viewport, suffix) {
 
   const admin = await context.newPage();
   await admin.goto(`${BASE}/admin`, { waitUntil: 'commit', timeout: 60_000 });
-  await admin.waitForTimeout(400);
+  await admin.waitForURL('**/admin/settings', { timeout: 10_000 }).catch(() => {});
+  await admin.waitForTimeout(300);
   check(`${suffix} 旧控制面板跳转设置`, new URL(admin.url()).pathname === '/admin/settings', admin.url());
   await admin.close();
 
