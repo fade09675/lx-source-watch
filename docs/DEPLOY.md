@@ -217,6 +217,9 @@ curl.exe -s https://dash.example.com/api/health
 - [ ] 重复上报同一 `runId` 返回 `duplicate:true`
 - [ ] 错误 HMAC 返回 401 `bad_signature`
 - [ ] 403 订阅刷新返回 502 `fetch_forbidden` + `needsRunner`
+- [ ] 总览「推荐 / 可用 / 全部」切换正常，卡片/列表出现质量分与推荐标记
+- [ ] 设置页保存自动收录门槛与发现上限，刷新后值保留
+- [ ] 重复与别名页「同名多版本」可停用单个版本，停用后状态变为已停用/已拒绝
 - [ ] 设置页保存/重置额度护栏；`/api/runner/config` 无令牌 401
 - [ ] 设置页「清理运行记录」预览计数正确，执行后最新一轮仍可打开
 - [ ] `pnpm audit:ui` 通过（需 `E2E_PASSWORD`，可设 `E2E_BASE_URL`；桌面/移动无横向溢出、无控制台错误）
@@ -227,7 +230,9 @@ curl.exe -s https://dash.example.com/api/health
 ## 8. 定时与设置
 
 - GitHub workflow 不配置 `schedule`；Worker cron `*/5 * * * *` 到点后派发。
-- 探测默认 4h、测活 6h、发现 12h；每轮源数、并发、deep、自动收录、保留天数都在设置页改，存 D1。
+- 探测默认 4h、测活 6h、发现 12h；每轮源数、并发、deep、自动收录门槛、发现每轮/每仓库上限、保留天数都在设置页改，存 D1。
+- 发现扩容：`discoveryMaxFetchPerRun` 默认 20（最大 120）、`discoveryMaxFetchPerRepo` 默认 5（最大 40）；自定义仓库列表最多 200 个。改动后下一轮发现生效，可在运行日志确认扫描仓库数与候选数。
+- 自动收录门槛：`autoPromoteMinPlatforms` 默认 2、`autoPromoteRequireTestablePlatform` 默认开；只影响自动转正，手动「收录」不受限。被门槛跳过的候选会保留 qualified 状态，并在任务 result warnings 中给出原因。
 - 国内补测不按固定间隔跑：探测上报成功后有失败地址才创建独立 `cn-probe` 任务，24 小时内最多一次；空跑也留任务/运行记录并冷却 6 小时。任务中心「定时计划」显示“国内补测 · 探测后自动”。
 - 自动清理随调度器执行：同一时刻最多每天一次；明细按“运行明细”天数、日汇总按“日汇总”天数、事件与操作记录按“事件”天数删除，永远保留最新一轮探测与测活。每次清理会创建一个 `retention` 任务，任务中心、运行详情和 KV 运行日志都能看到。手动清理在设置页「清理运行记录」，使用相同天数。
 - 日期边界按 Asia/Shanghai 计算；清理失败只写 Worker 日志，不影响任务派发。
@@ -264,6 +269,9 @@ curl.exe -s https://dash.example.com/api/health
 | 订阅刷新 403 | 正常兜底；用 Actions 拉取，或换 UA/headers/粘贴 |
 | 测活一直 running | 看 Actions 是否失败；任务有 45 分钟看门狗 |
 | 内核节点全失败 | 域名失效/IPv6/跨境端口限制；看测活错误和 mihomo 日志尾部 |
+| 候选一直不自动收录 | 看任务 warnings 是否被 E3 门槛跳过（初始化/平台数/可测试平台）；检查设置页门槛；手动收录可绕过 |
+| 发现只扫到少量候选 | 检查 `discoveryMaxFetchPerRun`/`discoveryMaxFetchPerRepo`、仓库是否启用、单仓库是否占满全局名额 |
+| 同名源没有自动合并 | E4 起按设计不自动合并；到「重复与别名 → 同名多版本」手动停用不需要的版本 |
 
 ---
 

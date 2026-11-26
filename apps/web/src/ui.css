@@ -1592,6 +1592,17 @@ body {
   font-size: 9.5px;
 }
 
+.schedule-chip-select {
+  flex: 0 0 auto;
+  max-width: 66px;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 9.5px;
+}
+
 .task-recent,
 .task-activity {
   padding: 16px 18px 14px;
@@ -2207,7 +2218,7 @@ body {
   grid-template-areas:
     'quota coverage quick'
     'task task task';
-  align-items: stretch;
+  align-items: start;
   min-width: 0;
   gap: 14px;
   margin-top: 14px;
