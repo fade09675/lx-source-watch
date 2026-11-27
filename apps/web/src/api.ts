@@ -384,6 +384,8 @@ export interface TaskView {
     preferMirror?: boolean;
     cn?: boolean;
     only?: string;
+    sourceId?: string;
+    proxyId?: string;
     subscriptionId?: string;
     probeRunId?: string;
   };
@@ -976,10 +978,14 @@ export const api = {
   deleteSource: (id: string) =>
     request<{ ok: boolean; id: string }>(`/api/admin/sources/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   testSource: (id: string) =>
-    request<{ ok: boolean; sourceId: string; dispatchedAt: string }>(
-      `/api/admin/sources/${encodeURIComponent(id)}/test`,
-      { method: 'POST' },
-    ),
+    request<{
+      ok: boolean;
+      sourceId: string;
+      taskId: string;
+      status: string;
+      dispatched: boolean;
+      message: string;
+    }>(`/api/admin/sources/${encodeURIComponent(id)}/test`, { method: 'POST' }),
   previewBackups: (input: { text?: string; urls?: string[]; sourceId?: string }) =>
     request<BackupPreview>('/api/admin/sources/backups/preview', {
       method: 'POST',

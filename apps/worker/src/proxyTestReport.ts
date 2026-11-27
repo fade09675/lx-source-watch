@@ -52,6 +52,16 @@ export async function reportProxyTestResult(
   const now = new Date().toISOString();
   const status = proxyTestStatus(report);
   const message = proxyTestMessage(report);
+  const logKey = `run:${report.runId}:log`;
+  const logLines = [
+    `代理测活 ${now}`,
+    `结果：${report.ok}/${report.total} 可用，内核 ${report.kernelOk}，跳过 UDP ${report.skippedUdp}，耗时 ${report.durationMs}ms`,
+    ...report.results.map((row) => {
+      const target = `${row.host ?? ''}:${row.port ?? ''}`;
+      const detail = row.ok ? `${row.latencyMs ?? 0}ms` : row.error ?? '未知错误';
+      return `[${row.ok ? 'OK' : 'FAIL'}] ${row.name || row.id} ${row.protocol ?? ''} ${target} ${detail}`;
+    }),
+  ];
   const steps = JSON.stringify([
     {
       key: 'proxy-test',
@@ -66,9 +76,9 @@ export async function reportProxyTestResult(
     env.DB.prepare(
       `UPDATE runs
           SET status = ?, message = ?, duration_ms = ?, proxies_used = ?,
-              steps = ?
+              steps = ?, log_key = ?
         WHERE run_id = ?`,
-    ).bind(status, message, report.durationMs, report.total, steps, report.runId),
+    ).bind(status, message, report.durationMs, report.total, steps, logKey, report.runId),
     env.DB.prepare(
       `INSERT INTO proxy_test_runs
          (run_id, task_id, trigger, started_at, finished_at, total, ok,
@@ -125,6 +135,11 @@ export async function reportProxyTestResult(
     );
   }
 
+  try {
+    await env.SNAPSHOT.put(logKey, logLines.join('\n'), { expirationTtl: 14 * 86_400 });
+  } catch {
+    // 日志写入失败不影响结果回写。
+  }
   for (let i = 0; i < statements.length; i += 800) {
     await env.DB.batch(statements.slice(i, i + 800));
   }

@@ -78,6 +78,8 @@ export interface ProxyTestOptions {
   allowPrivate?: boolean;
   /** 只测前 N 个，便于本地调试。 */
   limit?: number;
+  /** 任务进度回写；没有 token 时为 undefined。 */
+  progress?: import('../progress.js').ProgressReporter | null;
 }
 
 export interface ProxyTestSummary {
@@ -169,6 +171,13 @@ export async function runProxyTest(options: ProxyTestOptions): Promise<ProxyTest
   const queue = [...testable];
   const rows: ProxyTestRow[] = [];
 
+  await options.progress?.report({
+    stage: 'loading',
+    done: 0,
+    total,
+    unit: '个节点',
+    message: `准备测活 ${total} 个节点`,
+  });
   log.step(`开始代理测活：${total} 个，并发 ${concurrency}，跳板 ${hops.length} 个，单节点超时 ${timeoutMs}ms`);
 
   const workers = Array.from({ length: Math.min(concurrency, total) }, async () => {
@@ -206,6 +215,13 @@ export async function runProxyTest(options: ProxyTestOptions): Promise<ProxyTest
       } else {
         log.warn(`[${done}/${total}] ${label} 不可用：${check.error ?? ''}`);
       }
+      await options.progress?.report({
+        stage: 'sources',
+        done,
+        total,
+        unit: '个节点',
+        message: `代理测活 ${done}/${total}`,
+      });
     }
   });
   await Promise.all(workers);

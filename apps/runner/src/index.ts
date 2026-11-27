@@ -363,17 +363,26 @@ async function cmdProxyTest(args: Args): Promise<void> {
   const token = str(args, 'token') ?? process.env.RUNNER_TOKEN ?? '';
   if (!endpoint) throw new Error('缺少 --endpoint 或 INGEST_URL');
   if (!token) throw new Error('缺少 --token 或 RUNNER_TOKEN');
+  const taskId = str(args, 'task-id') ?? process.env.LX_TASK_ID;
+  const runId = str(args, 'run-id') ?? process.env.LX_RUN_ID;
+  const progress = createProgressReporter({
+    url: str(args, 'progress-url') ?? process.env.LX_PROGRESS_URL,
+    token: str(args, 'progress-token') ?? process.env.LX_PROGRESS_TOKEN,
+    taskId,
+    runId,
+  });
   const summary = await runProxyTest({
     endpoint,
     token,
-    taskId: str(args, 'task-id') ?? process.env.LX_TASK_ID,
-    runId: str(args, 'run-id') ?? process.env.LX_RUN_ID,
+    taskId,
+    runId,
     proxyId: str(args, 'proxy-id'),
     subscriptionId: str(args, 'sub-id'),
     concurrency: num(args, 'concurrency', 0),
     maxHops: num(args, 'max-hops', 0),
     timeoutMs: num(args, 'timeout', 0),
     limit: num(args, 'limit'),
+    progress,
     allowPrivate: bool(args, 'allow-private') || process.env.INGEST_ALLOW_PRIVATE === '1',
   });
   log.success(

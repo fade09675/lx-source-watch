@@ -92,6 +92,7 @@ export interface ProxyTestDispatchInput {
   concurrency?: number;
   taskId?: string;
   runId?: string;
+  progressToken?: string;
 }
 
 /** 触发代理测活工作流。 */
@@ -103,6 +104,8 @@ export async function dispatchProxyTest(env: Env, input: ProxyTestDispatchInput)
     concurrency: String(concurrency),
     task_id: clean(input.taskId, 64),
     run_id: clean(input.runId, 64),
+    progress_token: clean(input.progressToken, 128),
+    progress_url: `${env.PUBLIC_ORIGIN ?? 'https://dash.dpdns.org'}/api/runner/progress`,
   });
 }
 

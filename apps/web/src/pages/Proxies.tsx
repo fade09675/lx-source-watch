@@ -237,11 +237,17 @@ export function ProxiesPage() {
     else setTestingAll(true);
     setMessage('');
     try {
-      await api.runProxyTest(proxyId ? { proxyId } : {});
+      const result = await api.createTask({
+        type: 'proxy-test',
+        payload: proxyId ? { proxyId } : {},
+        priority: 2,
+      });
       setMessage(
-        proxyId
-          ? '已触发该节点的测活，Actions 通常 30–60 秒内开始，稍后刷新查看结果'
-          : '已触发全部节点测活，Actions 通常 30–60 秒内开始，稍后刷新查看结果',
+        result.dispatch.dispatched
+          ? proxyId
+            ? '已派发该节点的测活任务，可在任务中心查看进度'
+            : '已派发全部节点测活任务，可在任务中心查看进度'
+          : `测活任务已入队：${result.dispatch.message ?? '等待派发'}`,
       );
     } catch (e) {
       setMessage(e instanceof ApiError ? e.message : '触发测活失败');

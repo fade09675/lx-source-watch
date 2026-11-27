@@ -77,11 +77,20 @@ export function createRunnerSubscriptionRoutes(): Hono<{ Bindings: Env }> {
     if (!run) return c.json({ error: 'run_not_found', message: '运行记录不存在' }, 404);
 
     const now = new Date().toISOString();
+    const logKey = `run:${runId}:log`;
+    const writeLog = async (lines: string[]) => {
+      try {
+        await c.env.SNAPSHOT.put(logKey, lines.join('\n'), { expirationTtl: 14 * 86_400 });
+      } catch {
+        // 日志不影响订阅结果回写。
+      }
+    };
     const fail = async (message: string) => {
+      await writeLog([`订阅拉取失败 ${now}`, message]);
       await c.env.DB.prepare(
-        'UPDATE runs SET status = ?, message = ?, error = ?, generated_at = ? WHERE run_id = ?',
+        'UPDATE runs SET status = ?, message = ?, error = ?, generated_at = ?, log_key = ? WHERE run_id = ?',
       )
-        .bind('failed', message, message, now, runId)
+        .bind('failed', message, message, now, logKey, runId)
         .run();
       await completeTaskForRun(c.env, runId);
       await refreshTaskState(c.env).catch(() => undefined);
@@ -104,11 +113,17 @@ export function createRunnerSubscriptionRoutes(): Hono<{ Bindings: Env }> {
       .run();
 
     const message = `订阅拉取：新增 ${summary.added}，更新 ${summary.updated}，共 ${summary.total} 个节点`;
+    await writeLog([
+      `订阅拉取 ${now}`,
+      message,
+      `内容 ${body.bytes ?? 0} 字节，识别 ${parsed.nodes.length} 个节点`,
+      ...parsed.warnings.slice(0, 20).map((warning) => `警告：${warning}`),
+    ]);
     await c.env.DB.prepare(
       `UPDATE runs SET status = ?, message = ?, generated_at = ?,
-         proxies_used = ? WHERE run_id = ?`,
+         proxies_used = ?, log_key = ? WHERE run_id = ?`,
     )
-      .bind('success', message, now, summary.total, runId)
+      .bind('success', message, now, summary.total, logKey, runId)
       .run();
     await completeTaskForRun(c.env, runId);
     await refreshTaskState(c.env).catch(() => undefined);

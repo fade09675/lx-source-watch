@@ -231,7 +231,8 @@ export async function createTask(
     (input.type === 'probe' ||
       input.type === 'source-test' ||
       input.type === 'cn-probe' ||
-      input.type === 'discovery') &&
+      input.type === 'discovery' ||
+      input.type === 'proxy-test') &&
     !payload.progressToken
   ) {
     payload.progressToken = randomId(32);
@@ -493,6 +494,7 @@ export function buildDispatch(
         concurrency: payload.concurrency,
         taskId,
         runId,
+        progressToken: payload.progressToken,
       },
     };
   }

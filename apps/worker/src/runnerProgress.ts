@@ -13,7 +13,7 @@ interface ProgressBody {
   message?: string;
 }
 
-const STAGES = new Set(['loading', 'sources', 'reporting', 'publishing']);
+const STAGES = new Set(['loading', 'sources', 'endpoints', 'reporting', 'publishing']);
 
 function text(value: unknown, max: number): string {
   return typeof value === 'string' ? value.trim().slice(0, max) : '';
@@ -52,7 +52,8 @@ export function createRunnerProgressRoutes(): Hono<{ Bindings: Env }> {
       task.type !== 'probe' &&
       task.type !== 'source-test' &&
       task.type !== 'cn-probe' &&
-      task.type !== 'discovery'
+      task.type !== 'discovery' &&
+      task.type !== 'proxy-test'
     ) {
       return c.json({ error: 'bad_request', message: '该任务不支持进度回写' }, 400);
     }

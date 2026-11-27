@@ -24,6 +24,14 @@ on:
         description: "占位运行 id（Worker 派发时传入）"
         required: false
         default: ""
+      progress_token:
+        description: "任务进度回写令牌（Worker 派发时传入）"
+        required: false
+        default: ""
+      progress_url:
+        description: "任务进度回写地址（Worker 派发时传入）"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -44,6 +52,8 @@ jobs:
       CONCURRENCY: ${{ inputs.concurrency || '5' }}
       TASK_ID: ${{ inputs.task_id }}
       RUN_ID: ${{ inputs.run_id }}
+      PROGRESS_TOKEN: ${{ inputs.progress_token }}
+      PROGRESS_URL: ${{ inputs.progress_url }}
     steps:
       - name: 检出代码（不保留凭据）
         uses: actions/checkout@v4
@@ -89,4 +99,6 @@ jobs:
           if [ -n "${SUB_ID}" ]; then args+=(--sub-id "$SUB_ID"); fi
           if [ -n "${TASK_ID}" ]; then args+=(--task-id "$TASK_ID"); fi
           if [ -n "${RUN_ID}" ]; then args+=(--run-id "$RUN_ID"); fi
+          if [ -n "${PROGRESS_TOKEN}" ]; then args+=(--progress-token "$PROGRESS_TOKEN"); fi
+          if [ -n "${PROGRESS_URL}" ]; then args+=(--progress-url "$PROGRESS_URL"); fi
           pnpm proxy-test -- "${args[@]}"

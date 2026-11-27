@@ -47,7 +47,7 @@ import { filterSnapshot, parseList } from './filter';
 import { handleIngest } from './ingest';
 import { getProxyTestRun, listProxyTestRuns } from './proxyTestLogs';
 import { isStale } from './merge';
-import { dispatchProbe, dispatchProxyTest, listAllRuns, listProbeRuns } from './dispatch';
+import { dispatchProbe, listAllRuns, listProbeRuns } from './dispatch';
 import { getUsage, recordKvPut, refreshUsage } from './usage';
 import { getMirrorTemplates, resetMirrorTemplates, saveMirrorTemplates, MirrorConfigError } from './mirrors';
 import {
@@ -80,6 +80,7 @@ import {
   refreshTaskState,
   TASK_STATUS_LABEL,
   TASK_TYPE_LABEL,
+  updateTask,
   type TaskPayload,
   type TaskSource,
   type TaskStatus,
@@ -274,8 +275,57 @@ export function createApi(): Hono<Ctx> {
     if (dryRun) {
       return c.json({ preview: plan }, 200, { 'cache-control': CACHE_PRIVATE });
     }
-    await executeRunPurge(c.env, plan);
-    return c.json({ result: plan }, 200, { 'cache-control': CACHE_PRIVATE });
+    const task = await createTask(c.env.DB, {
+      type: 'retention',
+      source: 'manual',
+      priority: 2,
+      payload: { limit: String(days) },
+    });
+    const startedAt = new Date().toISOString();
+    try {
+      await updateTask(c.env.DB, task.id, {
+        status: 'running',
+        startedAt,
+        message: `清理 ${days} 天前的运行记录`,
+        progressDone: 0,
+        progressTotal: 1,
+        progressUnit: '步',
+      });
+      await executeRunPurge(c.env, plan);
+      const counts = {
+        runs: plan.runs,
+        sourceRuns: plan.sourceRuns,
+        platformResults: plan.platformResults,
+        proxyTestRuns: plan.proxyTestRuns,
+        activity: plan.activity,
+      };
+      await updateTask(c.env.DB, task.id, {
+        status: 'succeeded',
+        finishedAt: new Date().toISOString(),
+        progressDone: 1,
+        progressTotal: 1,
+        progressUnit: '步',
+        message: `清理完成：运行 ${plan.runs} 轮、接入点 ${plan.sourceRuns} 条、平台 ${plan.platformResults} 条`,
+        result: {
+          kind: 'retention',
+          summary: `清理完成：运行 ${plan.runs} 轮、接入点 ${plan.sourceRuns} 条、平台 ${plan.platformResults} 条`,
+          counts,
+        },
+      });
+      return c.json(
+        { result: plan, taskId: task.id },
+        200,
+        { 'cache-control': CACHE_PRIVATE },
+      );
+    } catch (error) {
+      await updateTask(c.env.DB, task.id, {
+        status: 'failed',
+        finishedAt: new Date().toISOString(),
+        error: error instanceof Error ? error.message : '清理失败',
+        message: '清理失败',
+      });
+      throw error;
+    }
   });
 
   // 系统信息：用来确认部署版本与三类令牌是否配置。
@@ -797,33 +847,51 @@ export function createApi(): Hono<Ctx> {
 
   // 网页触发一次代理测活（全部或指定节点）。
   api.post('/admin/run/proxy-test', async (c) => {
-    const last = await c.env.SNAPSHOT.get('run:proxy-test:last');
-    if (last) {
-      return Response.json(
-        { error: 'too_frequent', message: '刚刚已经触发过测活，请等一分钟再试' },
-        { status: 429, headers: { 'retry-after': '60', 'cache-control': CACHE_PRIVATE } },
-      );
-    }
     let body: Record<string, unknown> = {};
     try {
       body = await c.req.json<Record<string, unknown>>();
     } catch {
       // 空请求体表示测全部。
     }
-    const outcome = await dispatchProxyTest(c.env, {
-      proxyId: typeof body.proxyId === 'string' ? body.proxyId.trim().slice(0, 64) : '',
-      subscriptionId: typeof body.subscriptionId === 'string' ? body.subscriptionId.trim().slice(0, 64) : '',
-      concurrency: Number(body.concurrency) || 5,
-    });
-    if (!outcome.ok) {
+    const active = await c.env.DB.prepare(
+      "SELECT id, status FROM tasks WHERE type = 'proxy-test' AND status IN ('queued', 'running') ORDER BY created_at DESC LIMIT 1",
+    ).first<{ id: string; status: string }>();
+    if (active) {
       return Response.json(
-        { error: 'dispatch_failed', message: outcome.message },
-        { status: outcome.status, headers: { 'cache-control': CACHE_PRIVATE } },
+        {
+          ok: true,
+          taskId: active.id,
+          status: active.status,
+          dispatched: active.status === 'running',
+          message: `已有代理测活任务${active.status === 'running' ? '正在运行' : '在排队'}，请到任务中心查看`,
+        },
+        { status: 202, headers: { 'cache-control': CACHE_PRIVATE } },
       );
     }
-    await recordKvPut(c.env);
-    await c.env.SNAPSHOT.put('run:proxy-test:last', outcome.dispatchedAt, { expirationTtl: 60 });
-    return Response.json({ ok: true, dispatchedAt: outcome.dispatchedAt }, { headers: { 'cache-control': CACHE_PRIVATE } });
+    const task = await createTask(c.env.DB, {
+      type: 'proxy-test',
+      source: 'manual',
+      payload: {
+        proxyId: typeof body.proxyId === 'string' ? body.proxyId.trim().slice(0, 64) : undefined,
+        subscriptionId:
+          typeof body.subscriptionId === 'string' ? body.subscriptionId.trim().slice(0, 64) : undefined,
+        concurrency: Number(body.concurrency) || 5,
+      },
+      priority: 2,
+    });
+    const dispatch = await dispatchNext(c.env);
+    return Response.json(
+      {
+        ok: true,
+        taskId: task.id,
+        status: dispatch.task?.status ?? task.status,
+        dispatched: dispatch.dispatched,
+        message: dispatch.dispatched
+          ? '已派发代理测活任务，可在任务中心查看进度'
+          : `代理测活任务已入队：${dispatch.message}`,
+      },
+      { status: 202, headers: { 'cache-control': CACHE_PRIVATE } },
+    );
   });
 
   // 加速镜像模板：网页可替换内置 8 条，探测任务通过公开接口读取。
@@ -950,28 +1018,43 @@ export function createApi(): Hono<Ctx> {
         { status: 404, headers: { 'cache-control': CACHE_PRIVATE } },
       );
     }
-    const last = await c.env.SNAPSHOT.get('run:source-test:last');
-    if (last) {
-      const age = Date.now() - Date.parse(last);
-      if (Number.isFinite(age) && age < 30_000) {
-        return Response.json(
-          { error: 'rate_limited', message: '刚触发过，请 30 秒后再试' },
-          { status: 429, headers: { 'cache-control': CACHE_PRIVATE } },
-        );
-      }
-    }
-    const outcome = await dispatchProbe(c.env, { only: id, limit: '1', preferMirror: true });
-    if (!outcome.ok) {
+    const active = await c.env.DB.prepare(
+      "SELECT id, status FROM tasks WHERE type = 'source-test' AND status IN ('queued', 'running') AND json_extract(payload, '$.sourceId') = ? ORDER BY created_at DESC LIMIT 1",
+    )
+      .bind(id)
+      .first<{ id: string; status: string }>();
+    if (active) {
       return Response.json(
-        { error: 'dispatch_failed', message: outcome.message },
-        { status: outcome.status, headers: { 'cache-control': CACHE_PRIVATE } },
+        {
+          ok: true,
+          sourceId: id,
+          taskId: active.id,
+          status: active.status,
+          dispatched: active.status === 'running',
+          message: `已有该音源的单源测试任务${active.status === 'running' ? '正在运行' : '在排队'}，请到任务中心查看`,
+        },
+        { status: 202, headers: { 'cache-control': CACHE_PRIVATE } },
       );
     }
-    await recordKvPut(c.env);
-    await c.env.SNAPSHOT.put('run:source-test:last', outcome.dispatchedAt, { expirationTtl: 60 });
+    const task = await createTask(c.env.DB, {
+      type: 'source-test',
+      source: 'manual',
+      payload: { sourceId: id, preferMirror: true },
+      priority: 2,
+    });
+    const dispatch = await dispatchNext(c.env);
     return Response.json(
-      { ok: true, sourceId: id, dispatchedAt: outcome.dispatchedAt },
-      { headers: { 'cache-control': CACHE_PRIVATE } },
+      {
+        ok: true,
+        sourceId: id,
+        taskId: task.id,
+        status: dispatch.task?.status ?? task.status,
+        dispatched: dispatch.dispatched,
+        message: dispatch.dispatched
+          ? '已派发单源测试任务，可在任务中心查看进度'
+          : `单源测试任务已入队：${dispatch.message}`,
+      },
+      { status: 202, headers: { 'cache-control': CACHE_PRIVATE } },
     );
   });
 

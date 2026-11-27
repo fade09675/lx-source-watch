@@ -133,7 +133,17 @@ export function ManageSourcesPage() {
   }
 
   async function test(source: AdminSource) {
-    await run(() => api.testSource(source.id), `已触发「${source.title}」的单独探测（30–60 秒后可在运行与日志看到）`);
+    setBusy(true);
+    setMessage('');
+    try {
+      const result = await api.testSource(source.id);
+      setMessage(result.message || `已创建「${source.title}」的单源测试任务，请到任务中心查看`);
+      await load();
+    } catch (e) {
+      setMessage(e instanceof ApiError ? e.message : '触发单源测试失败');
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function copy(text: string) {
