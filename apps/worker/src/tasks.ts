@@ -100,6 +100,8 @@ export interface TaskPayload {
   eventDays?: number;
   probeRunId?: string;
   force?: boolean;
+  /** 仅探测任务使用：允许探测 job 回写本任务进度的短期令牌。 */
+  progressToken?: string;
 }
 
 export interface TaskView {
@@ -177,14 +179,22 @@ function parseResult(raw: string | null): TaskResult | undefined {
   }
 }
 
-function toView(row: TaskRow): TaskView {
+function redactPayload(payload: TaskPayload): TaskPayload {
+  // 进度令牌只给 Actions 的探测 job 用，不回传给管理端。
+  const rest = { ...payload };
+  delete rest.progressToken;
+  return rest;
+}
+
+function toView(row: TaskRow, redact = true): TaskView {
+  const payload = parsePayload(row.payload);
   return {
     id: row.id,
     type: row.type as TaskType,
     source: row.source as TaskSource,
     status: row.status as TaskStatus,
     priority: row.priority,
-    payload: parsePayload(row.payload),
+    payload: redact ? redactPayload(payload) : payload,
     progress: { done: row.progress_done, total: row.progress_total, unit: row.progress_unit },
     message: row.message,
     runId: row.run_id ?? undefined,
@@ -215,6 +225,11 @@ export async function createTask(
   const now = input.now ?? new Date().toISOString();
   const id = input.id ?? newTaskId();
   const runId = input.runId ?? newRunId();
+  const payload: TaskPayload = { ...(input.payload ?? {}) };
+  // 探测 job 本身零密钥；给它一个只能回写本任务进度的短期令牌。
+  if ((input.type === 'probe' || input.type === 'source-test') && !payload.progressToken) {
+    payload.progressToken = randomId(32);
+  }
   await db
     .prepare(
       `INSERT INTO tasks (id, type, source, status, priority, payload, run_id, created_at)
@@ -225,7 +240,7 @@ export async function createTask(
       input.type,
       input.source ?? 'manual',
       Math.max(1, Math.min(9, input.priority ?? 5)),
-      JSON.stringify(input.payload ?? {}),
+      JSON.stringify(payload),
       runId,
       now,
     )
@@ -238,6 +253,12 @@ export async function createTask(
 export async function getTask(db: D1Database, id: string): Promise<TaskView | null> {
   const row = await db.prepare('SELECT * FROM tasks WHERE id = ?').bind(id).first<TaskRow>();
   return row ? toView(row) : null;
+}
+
+/** 仅服务端内部使用：保留 progressToken 供派发/进度校验，不返回给管理端。 */
+export async function getTaskWithSecret(db: D1Database, id: string): Promise<TaskView | null> {
+  const row = await db.prepare('SELECT * FROM tasks WHERE id = ?').bind(id).first<TaskRow>();
+  return row ? toView(row, false) : null;
 }
 
 export interface TaskFilter {
@@ -284,7 +305,7 @@ export async function listTasks(db: D1Database, options: TaskFilter = {}): Promi
     .prepare(`SELECT * FROM tasks ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`)
     .bind(...binds, limit, offset)
     .all<TaskRow>();
-  return rows.results.map(toView);
+  return rows.results.map((row) => toView(row));
 }
 
 export async function countTasksFiltered(db: D1Database, options: TaskFilter = {}): Promise<number> {
@@ -474,6 +495,7 @@ export function buildDispatch(
         preferMirror: payload.preferMirror,
         taskId,
         runId,
+        progressToken: payload.progressToken,
       },
     };
   }
@@ -488,6 +510,7 @@ export function buildDispatch(
         preferMirror: payload.preferMirror ?? true,
         taskId,
         runId,
+        progressToken: payload.progressToken,
       },
     };
   }
@@ -504,6 +527,7 @@ export function buildDispatch(
       proxyId: payload.proxyId,
       taskId,
       runId,
+      progressToken: payload.progressToken,
     },
   };
 }
@@ -569,7 +593,7 @@ export async function dispatchNext(
       "SELECT * FROM tasks WHERE status = 'queued' ORDER BY priority ASC, created_at ASC LIMIT 1",
     ).first<TaskRow>();
     if (!row) return { dispatched: false, message: '没有排队中的任务' };
-    const task = toView(row);
+    const task = toView(row, false);
 
     if (task.type === 'retention') {
       await updateTask(env.DB, task.id, {
@@ -836,13 +860,14 @@ export async function completeTaskForRun(env: Env, runId: string): Promise<void>
   const status: TaskStatus =
     run.status === 'failed' ? 'failed' : run.status === 'partial' ? 'partial' : 'succeeded';
   const result = await buildTaskResult(env, task, runId);
+  const progressTotal = task.progress.total > 0 ? task.progress.total : 1;
   await updateTask(env.DB, task.id, {
     status,
     message: run.message || (status === 'failed' ? '运行失败' : '运行完成'),
     error: status === 'failed' ? run.error : null,
     finishedAt: new Date().toISOString(),
-    progressDone: 1,
-    progressTotal: 1,
+    progressDone: progressTotal,
+    progressTotal,
     result: result ?? null,
   });
 }

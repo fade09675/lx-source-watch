@@ -51,6 +51,14 @@ export interface ProbeOptions {
   repoVars?: { version?: string; author?: string; description?: string; expire?: string };
   /** 由任务系统预分配的运行 id；本地直接跑时自动生成。 */
   runId?: string;
+  /** 任务级进度回调；没有任务系统时为空。 */
+  onProgress?: (event: {
+    stage: 'loading' | 'sources' | 'reporting' | 'publishing';
+    done: number;
+    total: number;
+    unit?: string;
+    message?: string;
+  }) => void | Promise<void>;
 }
 
 export interface ProbeOutput {
@@ -106,6 +114,14 @@ export async function runProbe(opts: ProbeOptions): Promise<ProbeOutput> {
   const sourceConcurrency = Math.max(1, opts.sourceConcurrency ?? 2);
   const platformConcurrency = Math.max(1, opts.platformConcurrency ?? 4);
   let index = 0;
+  let completed = 0;
+  await opts.onProgress?.({
+    stage: 'loading',
+    done: 0,
+    total: sources.length,
+    unit: '源',
+    message: `开始探测 ${sources.length} 个来源`,
+  });
 
   const results = await mapLimit(sources, sourceConcurrency, async (src) => {
     const seq = ++index;
@@ -187,6 +203,15 @@ export async function runProbe(opts: ProbeOptions): Promise<ProbeOutput> {
         result: failed,
         urls: [] as UrlRecord[],
       };
+    } finally {
+      completed += 1;
+      await opts.onProgress?.({
+        stage: 'sources',
+        done: completed,
+        total: sources.length,
+        unit: '源',
+        message: `已测 ${completed}/${sources.length} 个来源`,
+      });
     }
   });
 
@@ -245,6 +270,13 @@ export async function runProbe(opts: ProbeOptions): Promise<ProbeOutput> {
   );
   log.info(`快照：${opts.outPath}`);
   log.info(`URL 清单：${opts.urlsPath}（${urls.length} 条）`);
+  await opts.onProgress?.({
+    stage: 'reporting',
+    done: sources.length,
+    total: sources.length,
+    unit: '源',
+    message: `探测完成，正在上报 ${sources.length} 个来源`,
+  });
   return { snapshot: validated.data, urls };
 }
 

@@ -8,6 +8,7 @@ import { createRunnerProxyTestReportRoutes } from './proxyTestReport';
 import { createRunnerSubscriptionRoutes } from './proxySubRoutes';
 import { createCnProbeRoutes } from './cnProbeRoutes';
 import { createRunnerConfigRoutes } from './runnerConfig';
+import { createRunnerProgressRoutes } from './runnerProgress';
 import { runScheduler } from './scheduler';
 import { TASK_TYPE_LABEL, triggerOf } from './tasks';
 import { reapStaleTasks, refreshTaskState } from './tasks';
@@ -141,6 +142,7 @@ app.use('/api/*', async (c, next) => {
 app.route('/api/admin/proxies', createAdminProxyRoutes());
 app.route('/api/runner/proxies', createRunnerProxyRoutes());
 app.route('/api/runner/config', createRunnerConfigRoutes());
+app.route('/api/runner', createRunnerProgressRoutes());
 app.route('/api/runner', createRunnerProxyTestReportRoutes());
 app.route('/api/runner', createRunnerSubscriptionRoutes());
 app.route('/api/runner', createCnProbeRoutes());

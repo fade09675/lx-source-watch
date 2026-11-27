@@ -56,6 +56,14 @@ on:
         description: "任务系统：触发方式 schedule/manual/retry/local"
         required: false
         type: string
+      progress_token:
+        description: "任务系统：只允许回写本任务进度的短期令牌"
+        required: false
+        type: string
+      progress_url:
+        description: "任务系统：进度回写接口"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -75,6 +83,9 @@ jobs:
       LX_REGISTRY_URL: https://dash.dpdns.org/api/config/sources
       # 网页添加的发现仓库；读不到时只用仓库内置仓库。
       LX_DISCOVERY_URL: https://dash.dpdns.org/api/config/discovery
+      LX_TASK_ID: ${{ inputs.task_id }}
+      LX_PROGRESS_TOKEN: ${{ inputs.progress_token }}
+      LX_PROGRESS_URL: ${{ inputs.progress_url }}
     steps:
       - name: 检出
         uses: actions/checkout@v4
@@ -118,11 +129,17 @@ jobs:
           INPUT_PREFER_MIRROR: ${{ inputs.prefer_mirror }}
           INPUT_CONCURRENCY: ${{ inputs.concurrency }}
           RUN_ID: ${{ inputs.run_id }}
+          TASK_ID: ${{ inputs.task_id }}
+          PROGRESS_TOKEN: ${{ inputs.progress_token }}
+          PROGRESS_URL: ${{ inputs.progress_url }}
         run: |
           set -euo pipefail
           mkdir -p out
           args=(--concurrency "${INPUT_CONCURRENCY:-4}")
           if [ -n "${RUN_ID}" ]; then args+=(--run-id "${RUN_ID}"); fi
+          if [ -n "${TASK_ID}" ]; then args+=(--task-id "${TASK_ID}"); fi
+          if [ -n "${PROGRESS_TOKEN}" ]; then args+=(--progress-token "${PROGRESS_TOKEN}"); fi
+          if [ -n "${PROGRESS_URL}" ]; then args+=(--progress-url "${PROGRESS_URL}"); fi
           if [ -n "${INPUT_ONLY}" ]; then args+=(--only "${INPUT_ONLY}"); fi
           if [ -n "${INPUT_LIMIT}" ]; then args+=(--limit "${INPUT_LIMIT}"); fi
           if [ "${INPUT_DEEP}" = "true" ]; then args+=(--deep); fi

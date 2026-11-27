@@ -476,6 +476,24 @@ export function WorkbenchPage() {
     if (hubTab === 'activity') void loadActivity();
   }, [hubTab, loadActivity]);
 
+  // 有任务在跑时轮询进度，任务中心不再依赖手动刷新。
+  useEffect(() => {
+    if (running.length === 0 && queued.length === 0) return;
+    const timer = window.setInterval(() => {
+      void Promise.all([
+        api.tasks({ status: 'running', limit: 10 }),
+        api.tasks({ status: 'queued', limit: 100 }),
+      ])
+        .then(([runningResult, queuedResult]) => {
+          setRunning(runningResult.tasks);
+          setQueued(queuedResult.tasks);
+        })
+        .catch(() => undefined);
+      void loadRecent();
+    }, 4000);
+    return () => window.clearInterval(timer);
+  }, [running.length, queued.length, loadRecent]);
+
   async function runTask(type: TaskType) {
     setBusy(type);
     setAction('');

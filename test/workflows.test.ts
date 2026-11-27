@@ -143,7 +143,10 @@ describe('probe.yml', () => {
       'INPUT_LIMIT',
       'INPUT_ONLY',
       'INPUT_PREFER_MIRROR',
+      'PROGRESS_TOKEN',
+      'PROGRESS_URL',
       'RUN_ID',
+      'TASK_ID',
     ]);
   });
 

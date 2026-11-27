@@ -15,6 +15,7 @@ import { enrichCandidates } from './candidates.js';
 import { discoverCandidates } from './discover.js';
 import { log } from './logger.js';
 import { parseProxy } from './net/http.js';
+import { createProgressReporter } from './progress.js';
 import { publishIngest } from './publish.js';
 import { runProbe } from './probe/run.js';
 import { loadRegistry } from './registry.js';
@@ -208,6 +209,13 @@ publish:
 
 async function cmdProbe(args: Args): Promise<void> {
   const mode = bool(args, 'deep') ? 'deep' : bool(args, 'skip-verify') ? 'skip-verify' : (str(args, 'mode') as 'default' | 'deep' | 'skip-verify' | undefined) ?? 'default';
+  const runId = str(args, 'run-id') ?? process.env.LX_RUN_ID;
+  const reporter = createProgressReporter({
+    url: str(args, 'progress-url') ?? process.env.LX_PROGRESS_URL,
+    token: str(args, 'progress-token') ?? process.env.LX_PROGRESS_TOKEN,
+    taskId: str(args, 'task-id') ?? process.env.LX_TASK_ID,
+    runId,
+  });
   await runProbe({
     registryPath: str(args, 'registry', 'sources/registry.json') as string,
     registryUrl: str(args, 'registry-url') ?? process.env.LX_REGISTRY_URL,
@@ -227,7 +235,8 @@ async function cmdProbe(args: Args): Promise<void> {
     preferMirror: bool(args, 'prefer-mirror') || process.env.LX_PREFER_MIRROR === '1',
     configUrl: str(args, 'config-url') ?? process.env.LX_CONFIG_URL,
     mirrorTimeoutMs: num(args, 'mirror-timeout', 8_000),
-    runId: str(args, 'run-id') ?? process.env.LX_RUN_ID,
+    runId,
+    onProgress: (event) => reporter?.report(event),
   });
 }
 

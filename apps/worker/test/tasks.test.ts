@@ -30,6 +30,7 @@ describe('tasks 纯函数', () => {
         concurrency: 2,
         discover: true,
         proxyId: 'proxy-1',
+        progressToken: 'progress-token-1',
       },
       'task-1',
       'run-1',
@@ -46,6 +47,7 @@ describe('tasks 纯函数', () => {
       proxyId: 'proxy-1',
       taskId: 'task-1',
       runId: 'run-1',
+      progressToken: 'progress-token-1',
     });
   });
 

@@ -20,6 +20,8 @@ export interface ProbeDispatchInput {
   /** 关联的任务 id 与预分配的运行 id。 */
   taskId?: string;
   runId?: string;
+  /** 只能更新本任务进度的短期令牌。 */
+  progressToken?: string;
 }
 
 export type DispatchResult =
@@ -79,6 +81,8 @@ export async function dispatchProbe(env: Env, input: ProbeDispatchInput): Promis
     proxy_id: clean(input.proxyId, 64),
     task_id: clean(input.taskId, 64),
     run_id: clean(input.runId, 64),
+    progress_token: clean(input.progressToken, 128),
+    progress_url: `${env.PUBLIC_ORIGIN ?? 'https://dash.dpdns.org'}/api/runner/progress`,
   });
 }
 
