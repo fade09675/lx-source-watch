@@ -306,22 +306,51 @@ export function createApi(): Hono<Ctx> {
   });
 
   // 手动跑一次“自动发现”，只发现不探测，结果进候选列表。
+  // 必须走统一任务队列，保证任务中心可见、可追踪、可取消。
   api.post('/admin/run/discovery', async (c) => {
-    const key = 'run:discovery:last';
-    if (await c.env.SNAPSHOT.get(key)) {
-      return c.json({ error: 'too_frequent', message: '刚刚已经触发过，请等一分钟再试' }, 429, {
-        'retry-after': '60',
-        'cache-control': CACHE_PRIVATE,
-      });
+    const running = await c.env.DB.prepare(
+      "SELECT id, status FROM tasks WHERE type = 'discovery' AND status IN ('queued', 'running') ORDER BY created_at DESC LIMIT 1",
+    ).first<{ id: string; status: string }>();
+    if (running) {
+      return c.json(
+        {
+          error: 'discovery_exists',
+          message: `已有自动发现任务${running.status === 'running' ? '正在运行' : '在排队'}，请到任务中心查看`,
+          taskId: running.id,
+        },
+        409,
+        { 'cache-control': CACHE_PRIVATE },
+      );
     }
-    const result = await dispatchProbe(c.env, { discover: true, limit: '1', cn: false });
-    if (!result.ok) {
-      return c.json({ error: 'dispatch_failed', message: result.message }, 503, { 'cache-control': CACHE_PRIVATE });
-    }
+
+    const settings = await loadSettings(c.env.DB);
+    const task = await createTask(c.env.DB, {
+      type: 'discovery',
+      source: 'manual',
+      priority: 2,
+      payload: { concurrency: 1, preferMirror: settings.preferMirror },
+    });
+    const dispatch = await dispatchNext(c.env);
     const now = new Date().toISOString();
     await recordKvPut(c.env);
-    await c.env.SNAPSHOT.put(key, now, { expirationTtl: 60 });
-    return c.json({ ok: true, dispatchedAt: now }, 200, { 'cache-control': CACHE_PRIVATE });
+    await c.env.SNAPSHOT.put('run:discovery:last', now, { expirationTtl: 60 });
+    const current = (await getTask(c.env.DB, task.id)) ?? task;
+    return c.json(
+      {
+        ok: true,
+        taskId: current.id,
+        status: current.status,
+        dispatched: dispatch.dispatched,
+        message:
+          current.status === 'failed'
+            ? `已创建自动发现任务，但派发失败：${current.error ?? '未知原因'}`
+            : dispatch.dispatched
+              ? '已创建自动发现任务并启动，完成后到候选源查看新脚本'
+              : `已创建自动发现任务，当前在排队（${dispatch.message}）`,
+      },
+      dispatch.dispatched ? 200 : 202,
+      { 'cache-control': CACHE_PRIVATE },
+    );
   });
 
   api.get('/admin/candidates', async (c) => {

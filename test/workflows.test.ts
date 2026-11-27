@@ -136,10 +136,11 @@ describe('probe.yml', () => {
     expect(step.run).toContain('pnpm probe');
     expect(step.run).toContain('mkdir -p out');
     expect(step.run).toContain('--concurrency "${INPUT_CONCURRENCY:-4}"');
-    expect(step.run).toContain('tee out/run.log');
+    expect(step.run).toContain('tee -a out/run.log');
     expect(Object.keys(step.env ?? {}).sort()).toEqual([
       'INPUT_CONCURRENCY',
       'INPUT_DEEP',
+      'INPUT_DISCOVER',
       'INPUT_LIMIT',
       'INPUT_ONLY',
       'INPUT_PREFER_MIRROR',
@@ -190,6 +191,14 @@ describe('probe.yml', () => {
     expect(String(discover.if)).toContain('inputs.discover');
     // workflow_dispatch 的 boolean 输入在 inputs 上下文里是布尔值，不能拿字符串比较。
     expect(String(discover.if)).not.toContain("== 'true'");
+    expect(Object.keys(discover.env ?? {}).sort()).toEqual([
+      'GITHUB_TOKEN',
+      'PROGRESS_TOKEN',
+      'PROGRESS_URL',
+      'RUN_ID',
+      'TASK_ID',
+    ]);
+    expect(String(discover.run)).toContain('tee -a out/run.log');
   });
 
   it('工作流里调用的 pnpm 子命令都存在于 package.json', async () => {

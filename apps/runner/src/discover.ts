@@ -11,6 +11,7 @@ import {
 } from '@lx/shared';
 import { log } from './logger.js';
 import { httpRequest, type ProxyConfig } from './net/http.js';
+import type { ProbeProgressEvent } from './progress.js';
 
 /** 仓库树批量并发数；控制 GitHub API 突发，同时保持结果按仓库顺序处理。 */
 const TREE_FETCH_CONCURRENCY = 4;
@@ -28,6 +29,8 @@ export interface DiscoverOptions {
   discoveryUrl?: string;
   /** 测试/本地开发允许访问 localhost。 */
   allowPrivate?: boolean;
+  /** 任务级进度：仓库扫描/候选发现。 */
+  onProgress?: (event: ProbeProgressEvent) => Promise<void> | void;
 }
 
 export interface DiscoverStats {
@@ -190,6 +193,14 @@ export async function discoverCandidates(opts: DiscoverOptions): Promise<Discove
   const now = nowIso();
 
   const enabledRepos = repos.filter((repo) => repo.enabled);
+  const repoTotal = enabledRepos.length;
+  await opts.onProgress?.({
+    stage: 'loading',
+    done: 0,
+    total: repoTotal,
+    unit: '个仓库',
+    message: `准备扫描 ${repoTotal} 个仓库`,
+  });
   for (let start = 0; start < enabledRepos.length; start += TREE_FETCH_CONCURRENCY) {
     if (found.length >= maxFetch) break;
     const batch = enabledRepos.slice(start, start + TREE_FETCH_CONCURRENCY);
@@ -204,6 +215,14 @@ export async function discoverCandidates(opts: DiscoverOptions): Promise<Discove
         }
       }),
     );
+    const scanned = Math.min(enabledRepos.length, start + batch.length);
+    await opts.onProgress?.({
+      stage: 'sources',
+      done: scanned,
+      total: repoTotal,
+      unit: '个仓库',
+      message: `扫描仓库 ${scanned}/${repoTotal}`,
+    });
     for (const item of trees) {
       if (found.length >= maxFetch) break;
       if ('error' in item) {
@@ -276,5 +295,12 @@ export async function discoverCandidates(opts: DiscoverOptions): Promise<Discove
   await mkdir(dirname(opts.outPath), { recursive: true });
   await writeFile(opts.outPath, `${JSON.stringify(validated.data, null, 2)}\n`, 'utf8');
   log.success(`发现候选 ${found.length} 个（扫描 ${stats.repos} 个仓库，跳过已拒绝 ${stats.skipped}）`);
+  await opts.onProgress?.({
+    stage: 'sources',
+    done: stats.repos,
+    total: Math.max(repoTotal, stats.repos),
+    unit: '个仓库',
+    message: `扫描完成，发现候选 ${found.length} 个`,
+  });
   return { file: validated.data, stats };
 }

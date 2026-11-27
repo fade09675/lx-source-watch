@@ -228,7 +228,10 @@ export async function createTask(
   const payload: TaskPayload = { ...(input.payload ?? {}) };
   // 探测/补测 job 本身零密钥；给它们一个只能回写本任务进度的短期令牌。
   if (
-    (input.type === 'probe' || input.type === 'source-test' || input.type === 'cn-probe') &&
+    (input.type === 'probe' ||
+      input.type === 'source-test' ||
+      input.type === 'cn-probe' ||
+      input.type === 'discovery') &&
     !payload.progressToken
   ) {
     payload.progressToken = randomId(32);

@@ -243,6 +243,12 @@ async function cmdProbe(args: Args): Promise<void> {
 }
 
 async function cmdDiscover(args: Args): Promise<void> {
+  const reporter = createProgressReporter({
+    url: str(args, 'progress-url') ?? process.env.LX_PROGRESS_URL,
+    token: str(args, 'progress-token') ?? process.env.LX_PROGRESS_TOKEN,
+    taskId: str(args, 'task-id') ?? process.env.LX_TASK_ID,
+    runId: str(args, 'run-id') ?? process.env.LX_RUN_ID,
+  });
   await discoverCandidates({
     configPath: str(args, 'config', 'sources/discovery.json') as string,
     outPath: str(args, 'out', 'out/candidates.json') as string,
@@ -252,16 +258,24 @@ async function cmdDiscover(args: Args): Promise<void> {
     discoveryUrl: str(args, 'discovery-url'),
     allowPrivate: bool(args, 'allow-private'),
     proxy: parseProxy(str(args, 'proxy') ?? process.env.LX_PROXY_URL),
+    onProgress: reporter ? (event) => reporter.report(event) : undefined,
   });
 }
 
 async function cmdCandidates(args: Args): Promise<void> {
+  const reporter = createProgressReporter({
+    url: str(args, 'progress-url') ?? process.env.LX_PROGRESS_URL,
+    token: str(args, 'progress-token') ?? process.env.LX_PROGRESS_TOKEN,
+    taskId: str(args, 'task-id') ?? process.env.LX_TASK_ID,
+    runId: str(args, 'run-id') ?? process.env.LX_RUN_ID,
+  });
   await enrichCandidates({
     candidatesPath: str(args, 'in', 'out/candidates.json') as string,
     outPath: str(args, 'out'),
     limit: num(args, 'limit', 12),
     concurrency: num(args, 'concurrency', 3),
     proxy: parseProxy(str(args, 'proxy') ?? process.env.LX_PROXY_URL),
+    onProgress: reporter ? (event) => reporter.report(event) : undefined,
   });
 }
 

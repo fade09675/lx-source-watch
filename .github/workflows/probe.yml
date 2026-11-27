@@ -116,10 +116,25 @@ jobs:
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.discover }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ inputs.run_id }}
+          TASK_ID: ${{ inputs.task_id }}
+          PROGRESS_TOKEN: ${{ inputs.progress_token }}
+          PROGRESS_URL: ${{ inputs.progress_url }}
         run: |
           set -euo pipefail
-          pnpm discover -- --config sources/discovery.json --out out/candidates.json --token "$GITHUB_TOKEN"
-          pnpm candidates -- --in out/candidates.json --out out/candidates.json --limit 30
+          mkdir -p out
+          args=(--config sources/discovery.json --out out/candidates.json --token "$GITHUB_TOKEN")
+          if [ -n "${RUN_ID}" ]; then args+=(--run-id "${RUN_ID}"); fi
+          if [ -n "${TASK_ID}" ]; then args+=(--task-id "${TASK_ID}"); fi
+          if [ -n "${PROGRESS_TOKEN}" ]; then args+=(--progress-token "${PROGRESS_TOKEN}"); fi
+          if [ -n "${PROGRESS_URL}" ]; then args+=(--progress-url "${PROGRESS_URL}"); fi
+          pnpm discover -- "${args[@]}" 2>&1 | tee -a out/run.log
+          cargs=(--in out/candidates.json --out out/candidates.json --limit 30)
+          if [ -n "${RUN_ID}" ]; then cargs+=(--run-id "${RUN_ID}"); fi
+          if [ -n "${TASK_ID}" ]; then cargs+=(--task-id "${TASK_ID}"); fi
+          if [ -n "${PROGRESS_TOKEN}" ]; then cargs+=(--progress-token "${PROGRESS_TOKEN}"); fi
+          if [ -n "${PROGRESS_URL}" ]; then cargs+=(--progress-url "${PROGRESS_URL}"); fi
+          pnpm candidates -- "${cargs[@]}" 2>&1 | tee -a out/run.log
 
       - name: 探测
         env:
@@ -128,6 +143,7 @@ jobs:
           INPUT_DEEP: ${{ inputs.deep }}
           INPUT_PREFER_MIRROR: ${{ inputs.prefer_mirror }}
           INPUT_CONCURRENCY: ${{ inputs.concurrency }}
+          INPUT_DISCOVER: ${{ inputs.discover }}
           RUN_ID: ${{ inputs.run_id }}
           TASK_ID: ${{ inputs.task_id }}
           PROGRESS_TOKEN: ${{ inputs.progress_token }}
@@ -137,14 +153,16 @@ jobs:
           mkdir -p out
           args=(--concurrency "${INPUT_CONCURRENCY:-4}")
           if [ -n "${RUN_ID}" ]; then args+=(--run-id "${RUN_ID}"); fi
-          if [ -n "${TASK_ID}" ]; then args+=(--task-id "${TASK_ID}"); fi
-          if [ -n "${PROGRESS_TOKEN}" ]; then args+=(--progress-token "${PROGRESS_TOKEN}"); fi
-          if [ -n "${PROGRESS_URL}" ]; then args+=(--progress-url "${PROGRESS_URL}"); fi
+          if [ "${INPUT_DISCOVER}" != "true" ]; then
+            if [ -n "${TASK_ID}" ]; then args+=(--task-id "${TASK_ID}"); fi
+            if [ -n "${PROGRESS_TOKEN}" ]; then args+=(--progress-token "${PROGRESS_TOKEN}"); fi
+            if [ -n "${PROGRESS_URL}" ]; then args+=(--progress-url "${PROGRESS_URL}"); fi
+          fi
           if [ -n "${INPUT_ONLY}" ]; then args+=(--only "${INPUT_ONLY}"); fi
           if [ -n "${INPUT_LIMIT}" ]; then args+=(--limit "${INPUT_LIMIT}"); fi
           if [ "${INPUT_DEEP}" = "true" ]; then args+=(--deep); fi
           if [ "${INPUT_PREFER_MIRROR}" = "true" ]; then args+=(--prefer-mirror); fi
-          pnpm probe -- "${args[@]}" 2>&1 | tee out/run.log
+          pnpm probe -- "${args[@]}" 2>&1 | tee -a out/run.log
 
       - name: 校验产物
         run: pnpm validate

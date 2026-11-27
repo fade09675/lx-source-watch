@@ -9,6 +9,7 @@ import { parseScriptMeta } from './lx/meta.js';
 import { loadLxSource } from './lx/sandbox.js';
 import { log } from './logger.js';
 import type { ProxyConfig } from './net/http.js';
+import type { ProbeProgressEvent } from './progress.js';
 import { loadScript } from './script.js';
 import { errorMessage, mapLimit, nowIso, sha256Hex } from './util.js';
 
@@ -22,6 +23,8 @@ export interface EnrichOptions {
   scriptTimeoutMs?: number;
   /** 仅本地联调使用；默认禁止访问内网。 */
   allowPrivate?: boolean;
+  /** 任务级进度：候选体检。 */
+  onProgress?: (event: ProbeProgressEvent) => Promise<void> | void;
 }
 
 // 脚本头部的元数据不受控，写入候选文件前先按 schema 上限截断。
@@ -40,6 +43,16 @@ export async function enrichCandidates(opts: EnrichOptions): Promise<CandidateFi
   const limit = Math.max(0, opts.limit ?? 12);
   const targets = file.candidates.filter((c) => c.state === 'new' || c.state === 'qualified').slice(0, limit);
   log.step(`候选体检 ${targets.length}/${file.candidates.length} 个`);
+  const total = targets.length;
+  const progressTotal = Math.max(1, total + 1);
+  let done = 0;
+  await opts.onProgress?.({
+    stage: 'loading',
+    done: 0,
+    total: progressTotal,
+    unit: '个候选',
+    message: `准备体检 ${total} 个候选`,
+  });
 
   const updated = new Map<string, Candidate>();
   const results = await mapLimit(targets, Math.max(1, opts.concurrency ?? 3), async (candidate) => {
@@ -96,6 +109,15 @@ export async function enrichCandidates(opts: EnrichOptions): Promise<CandidateFi
       };
       log.debug(`× ${candidate.id}: ${message}`);
       return next;
+    } finally {
+      done += 1;
+      await opts.onProgress?.({
+        stage: 'reporting',
+        done,
+        total: progressTotal,
+        unit: '个候选',
+        message: `候选体检 ${done}/${total}`,
+      });
     }
   });
 
@@ -108,6 +130,13 @@ export async function enrichCandidates(opts: EnrichOptions): Promise<CandidateFi
   const outPath = opts.outPath ?? opts.candidatesPath;
   await mkdir(dirname(outPath), { recursive: true });
   await writeFile(outPath, `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
+  await opts.onProgress?.({
+    stage: 'reporting',
+    done: total,
+    total: progressTotal,
+    unit: '个候选',
+    message: '候选体检完成，等待上报',
+  });
   const ok = results.filter((c) => c.initOk).length;
   log.success(`候选体检完成：${ok}/${results.length} 可初始化，结果写入 ${outPath}`);
   return merged;

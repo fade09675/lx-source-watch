@@ -96,8 +96,8 @@ export function CandidatesPage() {
   const runDiscovery = async () => {
     setBusy('discovery');
     try {
-      await api.runDiscovery();
-      setNotice('已触发一次自动发现，完成后刷新本页查看新候选');
+      const result = await api.runDiscovery();
+      setNotice(result.message || '已创建自动发现任务，完成后刷新本页查看新候选');
     } catch (err) {
       setError(err instanceof Error ? err.message : '触发失败');
     } finally {

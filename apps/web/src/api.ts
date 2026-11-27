@@ -891,7 +891,10 @@ export const api = {
       body: JSON.stringify(input),
     }),
   runDiscovery: () =>
-    request<{ ok: boolean; dispatchedAt: string }>('/api/admin/run/discovery', { method: 'POST' }),
+    request<{ ok: boolean; taskId: string; status: string; dispatched: boolean; message: string }>(
+      '/api/admin/run/discovery',
+      { method: 'POST' },
+    ),
   settings: () => request<SettingsResult>('/api/admin/settings'),
   saveSettings: (patch: Partial<AppSettingsView>) =>
     request<SettingsResult>('/api/admin/settings', { method: 'PUT', body: JSON.stringify(patch) }),
