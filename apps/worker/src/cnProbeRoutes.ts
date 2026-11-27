@@ -10,7 +10,7 @@ import type { Env } from './env';
 import { runInBatches } from './batch';
 import { readCnInput } from './cnProbe';
 import { buildCnTaskResult } from './cnTaskResult';
-import { dispatchNext, refreshTaskState, updateTask } from './tasks';
+import { dispatchNext, getTask, refreshTaskState, updateTask } from './tasks';
 import { SNAPSHOT_KEY } from './env';
 
 const LOG_TTL_SECONDS = 14 * 24 * 60 * 60;
@@ -215,13 +215,15 @@ export function createCnProbeRoutes(): Hono<{ Bindings: Env }> {
       await c.env.SNAPSHOT.put(logKey, parsed.log, { expirationTtl: LOG_TTL_SECONDS });
     }
 
+    const task = await getTask(c.env.DB, parsed.taskId);
+    const progressTotal = Math.max(task?.progress.total ?? 0, tested, 1);
     await updateTask(c.env.DB, parsed.taskId, {
       status: 'succeeded',
       message,
       error: null,
       finishedAt: now,
-      progressDone: 1,
-      progressTotal: 1,
+      progressDone: progressTotal,
+      progressTotal,
       result: taskResult,
     });
     try {
