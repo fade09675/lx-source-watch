@@ -45,6 +45,45 @@ describe('mergeSnapshot', () => {
     const incoming = makeSnapshot([makeSource({ id: 'a' })]);
     expect(mergeSnapshot(null, incoming).sources).toHaveLength(1);
   });
+
+  it('全量探测保留上一轮已测出的 CN 结果', () => {
+    const cn = { tested: true, ok: true, ms: 88 };
+    const prev = makeSnapshot([
+      makeSource({
+        id: 'a',
+        platforms: [makePlatform({ key: 'kg', ok: false, cn })],
+        endpoints: [
+          {
+            url: 'https://example.com/a.js',
+            role: 'primary',
+            ok: false,
+            ms: 1,
+            checkedAt: '2026-11-23T10:00:00.000Z',
+            cn,
+          },
+        ],
+      }),
+    ]);
+    const incoming = makeSnapshot([
+      makeSource({
+        id: 'a',
+        platforms: [makePlatform({ key: 'kg', ok: false })],
+        endpoints: [
+          {
+            url: 'https://example.com/a.js',
+            role: 'primary',
+            ok: false,
+            ms: 1,
+            checkedAt: '2026-11-23T10:00:00.000Z',
+          },
+        ],
+      }),
+    ]);
+
+    const merged = mergeSnapshot(prev, incoming);
+    expect(merged.sources[0]?.platforms[0]?.cn?.ok).toBe(true);
+    expect(merged.sources[0]?.endpoints[0]?.cn?.ok).toBe(true);
+  });
 });
 
 describe('isStale', () => {

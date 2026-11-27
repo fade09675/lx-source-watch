@@ -401,6 +401,8 @@ export interface StatusEnvelope {
   serverTime: string;
   /** 快照超过 2 个检测周期未更新。 */
   stale: boolean;
+  /** 工作台精简接口附带的国内补测汇总（按接入点计）。 */
+  cn?: { tested: number; ok: number; pending?: boolean };
 }
 
 export interface SourceRunSummary {

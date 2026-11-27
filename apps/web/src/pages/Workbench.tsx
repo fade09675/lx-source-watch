@@ -582,6 +582,8 @@ export function WorkbenchPage() {
   };
   const scheduler = system?.scheduler;
   const runCounts = health?.lastRun?.counts;
+  const cnSummary = status?.cn;
+  const cnPending = Boolean(cnSummary?.pending) || [...running, ...queued].some((task) => task.type === 'cn-probe');
   const total = summary?.total ?? 0;
   const coverage = [
     { key: 'available', label: '可用', value: summary?.available ?? 0, tone: 'ok' },
@@ -615,8 +617,8 @@ export function WorkbenchPage() {
     {
       key: 'cn',
       label: '国内可达',
-      value: runCounts ? `${runCounts.cnOk}/${runCounts.cnTested}` : '—',
-      hint: '经国内代理补测',
+      value: cnPending ? '补测中' : cnSummary ? `${cnSummary.ok}/${cnSummary.tested}` : '—',
+      hint: cnPending ? '本轮探测后正在补测' : '经国内代理补测',
       tone: 'warn',
     },
     {
@@ -802,7 +804,12 @@ export function WorkbenchPage() {
               </div>
               <div className="schedule-chips">
                 {schedules.map((schedule) => (
-                  <div className={`schedule-chip ${schedule.state?.enabled === false ? 'off' : ''}`} key={schedule.key}>
+                  <div
+                    className={`schedule-chip ${schedule.state?.enabled === false ? 'off' : ''} ${
+                      schedule.key === 'cn-probe' ? 'schedule-chip-cn' : ''
+                    }`}
+                    key={schedule.key}
+                  >
                     <Icon name={schedule.icon} size={15} />
                     <div className="schedule-chip-copy">
                       <strong>{schedule.label}</strong>
@@ -816,14 +823,14 @@ export function WorkbenchPage() {
                       </span>
                       <span className={`schedule-chip-last ${schedule.state?.lastOk === false ? 'bad' : ''}`}>
                         {'auto' in schedule
-                          ? '由每次探测完成触发'
+                          ? '每轮全量复测'
                           : schedule.state?.lastAt
                             ? `上次定时 ${schedule.state.lastOk === false ? '失败' : '成功'} · ${formatRelative(schedule.state.lastAt)}`
                             : '上次定时 未运行'}
                       </span>
                     </div>
                     {schedule.key === 'cn-probe' ? (
-                      <>
+                      <div className="schedule-chip-actions">
                         <select
                           className="schedule-chip-select"
                           value={cnLimit}
@@ -844,9 +851,9 @@ export function WorkbenchPage() {
                           disabled={busy !== null || !snapshot?.runId}
                           title={snapshot?.runId ? `基于 ${snapshot.runId} 立即补测` : '还没有可用的探测运行'}
                         >
-                          {busy === 'cn-probe' ? '创建中…' : '立即补测'}
+                          {busy === 'cn-probe' ? '创建中…' : '补测'}
                         </button>
-                      </>
+                      </div>
                     ) : schedule.key === 'retention' ? (
                       <span className="muted small">自动</span>
                     ) : (
@@ -1055,7 +1062,7 @@ export function WorkbenchPage() {
               </div>
               <div>
                 <dt>国内补测</dt>
-                <dd>{runCounts ? `${runCounts.cnOk}/${runCounts.cnTested}` : '—'}</dd>
+                <dd>{cnPending ? '补测中' : cnSummary ? `${cnSummary.ok}/${cnSummary.tested}` : '—'}</dd>
               </div>
               <div>
                 <dt>候选</dt>

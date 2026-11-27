@@ -1200,10 +1200,23 @@ export function createApi(): Hono<Ctx> {
   api.get('/overview', async (c) => {
     const snapshot = await readSnapshot(c.env);
     if (!snapshot) return notReady();
+    let cnTested = 0;
+    let cnOk = 0;
+    for (const source of snapshot.sources) {
+      for (const endpoint of source.endpoints) {
+        if (!endpoint.cn) continue;
+        cnTested += 1;
+        if (endpoint.cn.ok) cnOk += 1;
+      }
+    }
+    const pending = await c.env.DB.prepare(
+      "SELECT 1 AS pending FROM tasks WHERE type = 'cn-probe' AND status IN ('queued','running') LIMIT 1",
+    ).first<{ pending: number }>();
     const envelope: StatusEnvelope = {
       snapshot: { ...snapshot, sources: [] },
       serverTime: new Date().toISOString(),
       stale: isStale(snapshot.generatedAt),
+      cn: { tested: cnTested, ok: cnOk, pending: Boolean(pending) },
     };
     return Response.json(envelope, { headers: { 'cache-control': CACHE_PRIVATE } });
   });

@@ -1,6 +1,29 @@
 import { INTERVAL_HOURS, summarizeSources, type Snapshot, type SourceResult } from '@lx/shared';
 
 /**
+ * 探测是独立于国内补测的：一次新的全量探测没有 CN 数据时，
+ * 沿用上一轮已测出的 CN 结果，避免工作台在两个任务之间显示 0/0。
+ */
+export function carryCnResults(next: SourceResult[], prev: SourceResult[]): SourceResult[] {
+  const prevById = new Map(prev.map((source) => [source.id, source]));
+  return next.map((source) => {
+    const previous = prevById.get(source.id);
+    if (!previous) return source;
+    const prevPlatforms = new Map(previous.platforms.map((platform) => [platform.key, platform]));
+    const prevEndpoints = new Map(previous.endpoints.map((endpoint) => [endpoint.url, endpoint]));
+    return {
+      ...source,
+      platforms: source.platforms.map((platform) =>
+        platform.cn ? platform : { ...platform, cn: prevPlatforms.get(platform.key)?.cn },
+      ),
+      endpoints: source.endpoints.map((endpoint) =>
+        endpoint.cn ? endpoint : { ...endpoint, cn: prevEndpoints.get(endpoint.url)?.cn },
+      ),
+    };
+  });
+}
+
+/**
  * 合并局部复测（checkScope=partial）与上一轮快照。
  * 全量快照直接替换，但仍重算 summary，防止 runner 传来的汇总与明细不一致。
  */
@@ -9,7 +32,7 @@ export function mergeSnapshot(prev: Snapshot | null, incoming: Snapshot): Snapsh
   for (const source of incoming.sources) incomingSources.set(source.id, source);
 
   if (!prev || incoming.checkScope === 'all') {
-    const sources = [...incomingSources.values()];
+    const sources = carryCnResults([...incomingSources.values()], prev?.sources ?? []);
     return { ...incoming, sources, summary: summarizeSources(sources) };
   }
 
@@ -17,7 +40,7 @@ export function mergeSnapshot(prev: Snapshot | null, incoming: Snapshot): Snapsh
   for (const source of prev.sources) merged.set(source.id, source);
   for (const [id, source] of incomingSources) merged.set(id, source);
 
-  const sources = [...merged.values()];
+  const sources = carryCnResults([...merged.values()], prev.sources);
   return { ...incoming, sources, summary: summarizeSources(sources) };
 }
 
