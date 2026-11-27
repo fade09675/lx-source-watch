@@ -793,6 +793,97 @@ async function buildTaskResult(env: Env, task: TaskView, runId: string): Promise
     };
   }
 
+  if (task.type === 'source-test') {
+    const sourceId = task.payload.sourceId ?? task.payload.only;
+    const source = sourceId
+      ? await env.DB.prepare(
+          `SELECT sr.source_id AS id, COALESCE(r.title, sr.source_id) AS title,
+                  sr.status, sr.init_error AS error, sr.ok, sr.tested,
+                  sr.endpoints_ok, sr.endpoints_total
+             FROM source_runs sr
+             LEFT JOIN source_registry r ON r.id = sr.source_id
+            WHERE sr.run_id = ? AND sr.source_id = ?
+            LIMIT 1`,
+        )
+          .bind(runId, sourceId)
+          .first<{
+            id: string;
+            title: string;
+            status: string;
+            error: string | null;
+            ok: number;
+            tested: number;
+            endpoints_ok: number;
+            endpoints_total: number;
+          }>()
+      : null;
+    if (!source) {
+      return {
+        kind: task.type,
+        summary: '单源测试没有找到该源的运行结果',
+        counts: { ...counts, total: 0, available: 0, partial: 0, unavailable: 0, untested: 1 },
+        warnings: warningsOf(run.warnings),
+      };
+    }
+    const platforms = await env.DB.prepare(
+      `SELECT source_id AS sourceId, COALESCE(name, platform) AS name,
+              ok, error_kind AS errorKind, error
+         FROM platform_results
+        WHERE run_id = ? AND source_id = ? AND tested = 1
+        ORDER BY platform
+        LIMIT 50`,
+    )
+      .bind(runId, source.id)
+      .all<{ sourceId: string; name: string; ok: number; errorKind: string | null; error: string | null }>();
+    const sourceItem: TaskResultSource = {
+      id: source.id,
+      title: source.title,
+      status: source.status,
+      error: source.error ?? undefined,
+    };
+    const platformItem = (row: {
+      sourceId: string;
+      name: string;
+      errorKind: string | null;
+      error: string | null;
+    }): TaskResultPlatform => ({
+      sourceId: row.sourceId,
+      name: row.name,
+      errorKind: row.errorKind ?? undefined,
+      error: row.error ?? undefined,
+    });
+    const statusLabel: Record<string, string> = {
+      available: '可用',
+      partial: '部分可用',
+      unavailable: '不可用',
+      untested: '未测',
+    };
+    return {
+      kind: task.type,
+      summary: `单源测试：${source.title} ${statusLabel[source.status] ?? source.status}，平台 ${source.ok}/${source.tested}，接入点 ${source.endpoints_ok}/${source.endpoints_total}`,
+      counts: {
+        ...counts,
+        total: 1,
+        available: source.status === 'available' ? 1 : 0,
+        partial: source.status === 'partial' ? 1 : 0,
+        unavailable: source.status === 'unavailable' ? 1 : 0,
+        untested: source.status === 'untested' ? 1 : 0,
+        platformsOk: source.ok,
+        platformsTested: source.tested,
+        endpointsOk: source.endpoints_ok,
+        endpointsTotal: source.endpoints_total,
+        cnTested: 0,
+        cnOk: 0,
+      },
+      failedSources: source.status === 'unavailable' ? [sourceItem] : [],
+      partialSources: source.status === 'partial' ? [sourceItem] : [],
+      okSources: source.status === 'available' ? [sourceItem] : [],
+      failedPlatforms: platforms.results.filter((row) => row.ok === 0).map(platformItem),
+      okPlatforms: platforms.results.filter((row) => row.ok === 1).map(platformItem),
+      warnings: warningsOf(run.warnings),
+    };
+  }
+
   const sourceQuery = (condition: string, limit: number) =>
     env.DB.prepare(
       `SELECT sr.source_id AS id, COALESCE(r.title, sr.source_id) AS title,
