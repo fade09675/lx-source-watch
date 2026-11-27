@@ -58,7 +58,15 @@ async function resolveWithRetry(
     if (!isTransientError(first) || !budget.take()) throw first;
     log.warn(`${label} 取链瞬时失败，${RETRY_DELAY_MS}ms 后重试一次：${first.message}`);
     await sleep(RETRY_DELAY_MS);
-    return source.call(payload, timeoutMs);
+    try {
+      const url = await source.call(payload, timeoutMs);
+      log.info(`${label} 取链重试成功`);
+      return url;
+    } catch (retryError) {
+      const second = classifyResolveError(retryError);
+      log.warn(`${label} 取链重试仍失败：${second.message}`);
+      throw second;
+    }
   }
 }
 
@@ -180,6 +188,11 @@ export async function testPlatform(
           proxy: opts.proxy,
           allowPrivate: opts.allowPrivate,
         });
+        if (verified.ok) {
+          log.info(`${name} ${quality} 拉流重试成功`);
+        } else {
+          log.warn(`${name} ${quality} 拉流重试仍失败：${verified.error?.message ?? '未知错误'}`);
+        }
       }
       if (verified.ok) {
         record.ok = true;

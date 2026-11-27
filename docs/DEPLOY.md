@@ -202,7 +202,7 @@ curl.exe -s https://dash.example.com/api/health
 | `proxy-test.yml` | Worker 派发 / 手动 | 代理测活，逐节点回传 |
 | `proxy-fetch-sub.yml` | Worker 派发 / 手动 | 经 Actions 拉取 403 订阅并回传 |
 
-手动跑第一轮：Actions → 「音源探测」→ Run workflow，`limit` 填 `3`，确认 `publish` 日志出现 `ingest ok`。若设置里开启国内补测且本轮有失败地址，Worker 会自动排队一个「国内补测」任务，可在任务中心看到它及独立日志，不需要手动传 `cn` 参数。
+手动跑第一轮：Actions → 「音源探测」→ Run workflow，`limit` 填 `3`，确认 `publish` 日志出现 `ingest ok`。若设置里开启国内补测，Worker 会在每轮探测上报后自动排队一个「国内补测」任务，对本轮全部播放地址复测；可在任务中心看到它及独立日志，不需要手动传 `cn` 参数。
 
 ---
 
@@ -233,7 +233,7 @@ curl.exe -s https://dash.example.com/api/health
 - 探测默认 4h、测活 6h、发现 12h；每轮源数、并发、deep、自动收录门槛、发现每轮/每仓库上限、保留天数都在设置页改，存 D1。
 - 发现扩容：`discoveryMaxFetchPerRun` 默认 20（最大 120）、`discoveryMaxFetchPerRepo` 默认 5（最大 40）；自定义仓库列表最多 200 个。改动后下一轮发现生效，可在运行日志确认扫描仓库数与候选数。
 - 自动收录门槛：`autoPromoteMinPlatforms` 默认 2、`autoPromoteRequireTestablePlatform` 默认开；只影响自动转正，手动「收录」不受限。被门槛跳过的候选会保留 qualified 状态，并在任务 result warnings 中给出原因。
-- 国内补测不按固定间隔跑：探测上报成功后有失败地址才创建独立 `cn-probe` 任务，24 小时内最多一次；空跑也留任务/运行记录并冷却 6 小时。任务中心「定时计划」显示“国内补测 · 探测后自动”。
+- 国内补测不按固定间隔跑：每次探测上报成功后立即创建独立 `cn-probe` 任务，对全部播放地址全量复测；不设时间冷却，也没有“只测失败地址”的筛选。没有可补测地址时仍留一条已完成任务/运行，任务中心「定时计划」显示“国内补测 · 探测后自动”。
 - 自动清理随调度器执行：同一时刻最多每天一次；明细按“运行明细”天数、日汇总按“日汇总”天数、事件与操作记录按“事件”天数删除，永远保留最新一轮探测与测活。每次清理会创建一个 `retention` 任务，任务中心、运行详情和 KV 运行日志都能看到。手动清理在设置页「清理运行记录」，使用相同天数。
 - 日期边界按 Asia/Shanghai 计算；清理失败只写 Worker 日志，不影响任务派发。
 - 手动触发时间参与“下次到期”计算；派发失败会写任务/运行记录。
@@ -249,7 +249,7 @@ curl.exe -s https://dash.example.com/api/health
 - 导入先「预览」：显示总数、新增、已存在、内核数、协议分布、样例与告警；确认后才写库。
 - 测活在 `/admin/proxy-tests` 看轮次与逐节点结果；Windows 本地不能跑 mihomo，内核节点需在 Actions 验证。
 - 订阅刷新被 403 时，行内「用 Actions 拉取」会高亮；也可在 Actions 手动跑 `proxy-fetch-sub.yml`。
-- 国内补测默认只测失败/未测地址；接入点补测独立写 `endpoint.cn`，不改变总状态。
+- 国内补测每轮测全部播放地址，不再只测失败/未测地址；接入点补测独立写 `endpoint.cn`，不改变总状态。
 - 代理池为空或全部失败时，cn job 输出中文原因并跳过，不影响探测主结果。
 
 ---

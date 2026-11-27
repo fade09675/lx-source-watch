@@ -405,7 +405,6 @@ export function WorkbenchPage() {
   const [error, setError] = useState('');
   const [action, setAction] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
-  const [cnLimit, setCnLimit] = useState(200);
   const [loaded, setLoaded] = useState(false);
 
   const loadOverview = useCallback(async () => {
@@ -511,7 +510,7 @@ export function WorkbenchPage() {
     try {
       const result: CreateTaskResult = await api.createTask({
         type: 'cn-probe',
-        payload: { probeRunId, limit: cnLimit },
+        payload: { probeRunId },
       });
       const message = result.dispatch.dispatched
         ? '已派发国内补测任务，约 2–3 分钟后刷新可看到结果。'
@@ -844,25 +843,12 @@ export function WorkbenchPage() {
                     </div>
                     {schedule.key === 'cn-probe' ? (
                       <div className="schedule-chip-actions">
-                        <select
-                          className="schedule-chip-select"
-                          value={cnLimit}
-                          onChange={(event) => setCnLimit(Number(event.target.value))}
-                          disabled={busy !== null}
-                          aria-label="手动补测条数上限"
-                          title="立即补测最多测试多少条"
-                        >
-                          <option value={20}>20 条</option>
-                          <option value={50}>50 条</option>
-                          <option value={100}>100 条</option>
-                          <option value={200}>200 条</option>
-                        </select>
                         <button
                           type="button"
                           className="link-button"
                           onClick={() => void runCnProbeNow()}
                           disabled={busy !== null || !snapshot?.runId}
-                          title={snapshot?.runId ? `基于 ${snapshot.runId} 立即补测` : '还没有可用的探测运行'}
+                          title={snapshot?.runId ? `基于 ${snapshot.runId} 全量补测` : '还没有可用的探测运行'}
                         >
                           {busy === 'cn-probe' ? '创建中…' : '补测'}
                         </button>

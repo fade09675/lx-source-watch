@@ -1,5 +1,6 @@
 import { SCHEMA_VERSION, SnapshotSchema, type ExportItem, type Snapshot, type SourceResult, type StatusEnvelope } from '@lx/shared';
 import { Hono } from 'hono';
+import { readCnInput } from './cnProbe';
 import { toCsv } from './csv';
 import {
   buildClearSessionCookie,
@@ -1109,15 +1110,29 @@ export function createApi(): Hono<Ctx> {
       );
     }
     const payload = body.payload ?? {};
-    if (type === 'cn-probe' && payload.limit !== undefined) {
-      const limit = Number(payload.limit);
-      if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+    if (type === 'cn-probe') {
+      const probeRunId = String(payload.probeRunId ?? '');
+      const input = await readCnInput(c.env, probeRunId);
+      if (!input) {
         return Response.json(
-          { error: 'bad_payload', message: '国内补测 limit 必须是 1–200 的整数' },
-          { status: 400, headers: { 'cache-control': CACHE_PRIVATE } },
+          {
+            error: 'cn_input_expired',
+            message: '这轮探测的补测输入已过期，请先重新跑一轮音源探测。',
+          },
+          { status: 409, headers: { 'cache-control': CACHE_PRIVATE } },
         );
       }
-      payload.limit = String(limit);
+      if (input.urls.length === 0) {
+        return Response.json(
+          {
+            error: 'cn_no_urls',
+            message: '这轮探测没有可补测的播放地址，不需要创建补测任务。',
+          },
+          { status: 409, headers: { 'cache-control': CACHE_PRIVATE } },
+        );
+      }
+      // 国内补测必须覆盖全部播放地址，不接受手动限流。
+      payload.limit = undefined;
     }
     if (type === 'source-test' && !payload.only) {
       return Response.json(
