@@ -9,7 +9,8 @@ import {
 import type { Env } from './env';
 import { runInBatches } from './batch';
 import { readCnInput } from './cnProbe';
-import { dispatchNext, refreshTaskState, updateTask, type TaskResultCnFailure } from './tasks';
+import { buildCnTaskResult } from './cnTaskResult';
+import { dispatchNext, refreshTaskState, updateTask } from './tasks';
 import { SNAPSHOT_KEY } from './env';
 
 const LOG_TTL_SECONDS = 14 * 24 * 60 * 60;
@@ -170,34 +171,22 @@ export function createCnProbeRoutes(): Hono<{ Bindings: Env }> {
     }
 
     const selected = parsed.selected ?? tested;
-    const message = `国内补测：测试 ${tested} 条，可达 ${ok} 条（${sourceIds.size} 个源）`;
     const endpoints = parsed.cn.endpoints ?? [];
-    const cnFailures: TaskResultCnFailure[] = [
-      ...parsed.cn.rows
-        .filter((row) => !row.ok)
-        .slice(0, 8)
-        .map((row) => ({
-          sourceId: row.sourceId,
-          sourceTitle: sourceTitles.get(row.sourceId),
-          kind: 'platform' as const,
-          platform: row.platform,
-          error: row.error?.slice(0, 300) ?? `HTTP ${row.status ?? '-'}`,
-        })),
-      ...endpoints
-        .filter((row) => !row.ok)
-        .slice(0, 4)
-        .map((row) => ({
-          sourceId: row.sourceId,
-          sourceTitle: sourceTitles.get(row.sourceId),
-          kind: 'endpoint' as const,
-          url: row.url,
-          error: row.error?.slice(0, 300) ?? `HTTP ${row.status ?? '-'}`,
-        })),
-    ];
+    const taskResult = buildCnTaskResult({
+      rows: parsed.cn.rows,
+      endpoints,
+      sourceIds,
+      sourceTitles,
+      selected,
+      tested,
+      ok,
+    });
+    const counts = taskResult.counts;
+    const message = `国内补测：源 ${sourceIds.size}（可用 ${counts.available} / 部分 ${counts.partial} / 失效 ${counts.unavailable} / 未测 ${counts.untested}），平台 ${counts.platformsOk}/${counts.platformsTested}，接入点 ${counts.endpointsOk}/${counts.endpointsTotal}`;
     await c.env.DB.prepare(
       `UPDATE runs SET status = 'success', message = ?, error = NULL, generated_at = ?,
           runner = 'github-actions', check_scope = 'cn', trigger = 'schedule', log_key = ?,
-          total = ?, available = 0, partial = 0, unavailable = 0, untested = 0,
+          total = ?, available = ?, partial = ?, unavailable = ?, untested = ?,
           platforms_ok = ?, platforms_tested = ?, endpoints_ok = ?, endpoints_total = ?,
           cn_tested = ?, cn_ok = ?, duration_ms = ?
         WHERE run_id = ?`,
@@ -207,10 +196,14 @@ export function createCnProbeRoutes(): Hono<{ Bindings: Env }> {
         now,
         logKey,
         sourceIds.size,
-        ok,
-        tested,
-        endpoints.filter((row) => row.ok).length,
-        endpoints.length,
+        counts.available,
+        counts.partial,
+        counts.unavailable,
+        counts.untested,
+        counts.platformsOk,
+        counts.platformsTested,
+        counts.endpointsOk,
+        counts.endpointsTotal,
         tested,
         ok,
         durationMs,
@@ -229,19 +222,7 @@ export function createCnProbeRoutes(): Hono<{ Bindings: Env }> {
       finishedAt: now,
       progressDone: 1,
       progressTotal: 1,
-      result: {
-        kind: 'cn-probe',
-        summary: message,
-        counts: {
-          selected,
-          tested,
-          ok,
-          failed: Math.max(0, tested - ok),
-          sources: sourceIds.size,
-          endpoints: endpoints.length,
-        },
-        cnFailures,
-      },
+      result: taskResult,
     });
     try {
       await dispatchNext(c.env);

@@ -113,18 +113,26 @@ function countValue(result: TaskResult | undefined, key: string): number {
   return result?.counts[key] ?? 0;
 }
 
+function probeStatItems(result: TaskResult) {
+  return [
+    { label: '可用', value: String(countValue(result, 'available')), tone: 'ok' },
+    { label: '部分', value: String(countValue(result, 'partial')), tone: 'warn' },
+    { label: '失效', value: String(countValue(result, 'unavailable')), tone: 'bad' },
+    { label: '未测', value: String(countValue(result, 'untested')) },
+    { label: '平台', value: `${countValue(result, 'platformsOk')}/${countValue(result, 'platformsTested')}` },
+    { label: '接入点', value: `${countValue(result, 'endpointsOk')}/${countValue(result, 'endpointsTotal')}` },
+    { label: '国内', value: `${countValue(result, 'cnOk')}/${countValue(result, 'cnTested')}` },
+  ];
+}
+
 function ResultStats({ result }: { result: TaskResult }) {
   const items: Array<{ label: string; value: string; tone?: string }> = [];
-  if (result.kind === 'probe' || result.kind === 'source-test') {
-    items.push(
-      { label: '可用', value: String(countValue(result, 'available')), tone: 'ok' },
-      { label: '部分', value: String(countValue(result, 'partial')), tone: 'warn' },
-      { label: '失效', value: String(countValue(result, 'unavailable')), tone: 'bad' },
-      { label: '未测', value: String(countValue(result, 'untested')) },
-      { label: '平台', value: `${countValue(result, 'platformsOk')}/${countValue(result, 'platformsTested')}` },
-      { label: '接入点', value: `${countValue(result, 'endpointsOk')}/${countValue(result, 'endpointsTotal')}` },
-      { label: '国内', value: `${countValue(result, 'cnOk')}/${countValue(result, 'cnTested')}` },
-    );
+  if (
+    result.kind === 'probe' ||
+    result.kind === 'source-test' ||
+    (result.kind === 'cn-probe' && result.counts.platformsTested !== undefined)
+  ) {
+    items.push(...probeStatItems(result));
   } else if (result.kind === 'proxy-test') {
     items.push(
       { label: '节点', value: String(countValue(result, 'proxyTotal')) },
