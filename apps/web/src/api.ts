@@ -323,7 +323,14 @@ export interface WorkflowRunsResult {
 /* ------------------------------- tasks ---------------------------------- */
 
 export type TaskType = 'probe' | 'discovery' | 'source-test' | 'proxy-test' | 'proxy-fetch-sub' | 'retention' | 'cn-probe';
-export type TaskStatus = 'queued' | 'running' | 'succeeded' | 'partial' | 'failed' | 'cancelled';
+export type TaskStatus =
+  | 'queued'
+  | 'paused'
+  | 'running'
+  | 'succeeded'
+  | 'partial'
+  | 'failed'
+  | 'cancelled';
 export type TaskSource = 'manual' | 'schedule' | 'api' | 'retry' | 'local';
 
 export interface TaskResultSource {
@@ -550,6 +557,13 @@ export interface RunLogResult {
   runId: string;
   available: boolean;
   log: string;
+  bytes: number;
+}
+
+export interface RunJsonlResult {
+  runId: string;
+  available: boolean;
+  jsonl: string;
   bytes: number;
 }
 
@@ -935,6 +949,25 @@ export const api = {
     request<CreateTaskResult>('/api/admin/tasks', { method: 'POST', body: JSON.stringify(input) }),
   cancelTask: (id: string) =>
     request<{ ok: boolean; task: TaskView }>(`/api/admin/tasks/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
+  pauseTask: (id: string) =>
+    request<{ ok: boolean; task: TaskView; state: TaskStateSnapshot }>(
+      `/api/admin/tasks/${encodeURIComponent(id)}/pause`,
+      { method: 'POST' },
+    ),
+  resumeTask: (id: string) =>
+    request<{
+      ok: boolean;
+      task: TaskView;
+      dispatch: { dispatched: boolean; message?: string };
+      state: TaskStateSnapshot;
+    }>(`/api/admin/tasks/${encodeURIComponent(id)}/resume`, { method: 'POST' }),
+  runNowTask: (id: string) =>
+    request<{
+      ok: boolean;
+      task: TaskView;
+      dispatch: { dispatched: boolean; message?: string };
+      state: TaskStateSnapshot;
+    }>(`/api/admin/tasks/${encodeURIComponent(id)}/run-now`, { method: 'POST' }),
   retryTask: (id: string) =>
     request<{ ok: boolean; task: TaskView; dispatch: { dispatched: boolean; message?: string } }>(
       `/api/admin/tasks/${encodeURIComponent(id)}/retry`,
@@ -957,6 +990,8 @@ export const api = {
   },
   snapshot: (runId: string) => request<RunDetailResult>(`/api/admin/snapshots/${encodeURIComponent(runId)}`),
   runLog: (runId: string) => request<RunLogResult>(`/api/admin/snapshots/${encodeURIComponent(runId)}/log`),
+  runLogJsonl: (runId: string) =>
+    request<RunJsonlResult>(`/api/admin/snapshots/${encodeURIComponent(runId)}/log?format=jsonl`),
   failures: (days = 7) => request<FailureAggregate>(`/api/admin/failures?days=${days}`),
   proxyTests: (days = 7) =>
     request<{ days: number; runs: ProxyTestRunView[] }>(`/api/admin/proxy-tests?days=${days}`),

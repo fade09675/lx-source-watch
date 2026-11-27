@@ -5,6 +5,7 @@ import {
   CandidateFileSchema,
   IngestPayloadSchema,
   SnapshotSchema,
+  textToJsonl,
   type Candidate,
   type IngestPayload,
   type Snapshot,
@@ -172,7 +173,7 @@ export async function publishIngest(opts: PublishOptions): Promise<{ status: num
   const meta = {
     ...(opts.taskId ? { taskId: opts.taskId } : {}),
     trigger: opts.trigger ?? (process.env.GITHUB_ACTIONS === 'true' ? 'schedule' : 'local'),
-    ...(runLog ? { log: runLog } : {}),
+    ...(runLog ? { log: runLog, logJsonl: textToJsonl(runLog).slice(0, 200_000) } : {}),
   };
   const payload: IngestPayload = IngestPayloadSchema.parse({ snapshot, candidates, urls, meta });
   const body = JSON.stringify(payload);

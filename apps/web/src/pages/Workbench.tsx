@@ -31,6 +31,7 @@ const TASK_TYPE_LABEL: Record<TaskType, string> = {
 
 const TASK_STATUS_LABEL: Record<string, string> = {
   queued: '排队中',
+  paused: '已暂停',
   running: '运行中',
   succeeded: '成功',
   partial: '部分成功',
@@ -309,7 +310,7 @@ function TaskRow({
   onRetry: (task: TaskView) => void;
 }) {
   const result = task.result;
-  const retryable = task.status === 'failed' || task.status === 'cancelled' || task.status === 'partial';
+  const retryable = task.status === 'failed' || task.status === 'cancelled';
   return (
     <li className="task-row">
       <div className="task-row-status">
@@ -378,9 +379,24 @@ function RunningTask({ task, busy, onCancel }: { task: TaskView; busy: boolean; 
   );
 }
 
-function QueuedTask({ task, busy, onCancel }: { task: TaskView; busy: boolean; onCancel: () => void }) {
+function QueuedTask({
+  task,
+  busy,
+  onCancel,
+  onPause,
+  onResume,
+  onRunNow,
+}: {
+  task: TaskView;
+  busy: boolean;
+  onCancel: () => void;
+  onPause: () => void;
+  onResume: () => void;
+  onRunNow: () => void;
+}) {
+  const paused = task.status === 'paused';
   return (
-    <li className="compact-task">
+    <li className={`compact-task${paused ? ' is-paused' : ''}`}>
       <span className="compact-task-icon queue">
         <Icon name="runs" size={16} />
       </span>
@@ -388,16 +404,32 @@ function QueuedTask({ task, busy, onCancel }: { task: TaskView; busy: boolean; o
         <div className="compact-task-head">
           <strong>{taskType(task)}</strong>
           <span className="task-trigger">{TRIGGER_LABEL[task.source] ?? task.source}</span>
-          <span className="muted small">P{task.priority}</span>
+          <span className="muted small">{paused ? '已暂停' : `P${task.priority}`}</span>
         </div>
         <div className="compact-task-meta">
           <span>{formatRelative(task.createdAt)}</span>
           {task.payload.limit ? <span>最多 {task.payload.limit} 源</span> : null}
         </div>
       </div>
-      <button type="button" className="link-button danger" onClick={onCancel} disabled={busy}>
-        取消
-      </button>
+      <div className="compact-task-actions">
+        {paused ? (
+          <button type="button" className="link-button" onClick={onResume} disabled={busy}>
+            恢复
+          </button>
+        ) : (
+          <>
+            <button type="button" className="link-button" onClick={onRunNow} disabled={busy}>
+              立即执行
+            </button>
+            <button type="button" className="link-button" onClick={onPause} disabled={busy}>
+              暂停
+            </button>
+          </>
+        )}
+        <button type="button" className="link-button danger" onClick={onCancel} disabled={busy}>
+          取消
+        </button>
+      </div>
     </li>
   );
 }
@@ -415,7 +447,7 @@ export function WorkbenchPage() {
   const [recentPage, setRecentPage] = useState({ limit: 10, offset: 0 });
   const [activityPage, setActivityPage] = useState({ limit: 10, offset: 0 });
   const [recentType, setRecentType] = useState<TaskType | ''>('');
-  const [hubTab, setHubTab] = useState<'recent' | 'activity'>('recent');
+  const [hubTab, setHubTab] = useState<'recent' | 'activity' | 'planned'>('recent');
   const [error, setError] = useState('');
   const [action, setAction] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -569,6 +601,45 @@ export function WorkbenchPage() {
     }
   }
 
+  async function pause(task: TaskView) {
+    setBusy(task.id);
+    try {
+      await api.pauseTask(task.id);
+      setAction(`已暂停${taskType(task)}任务。`);
+      await load();
+    } catch (err) {
+      setAction(err instanceof ApiError ? err.message : '暂停失败');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function resume(task: TaskView) {
+    setBusy(task.id);
+    try {
+      const result = await api.resumeTask(task.id);
+      setAction(result.dispatch.dispatched ? '已恢复并派发。' : '已恢复排队。');
+      await load();
+    } catch (err) {
+      setAction(err instanceof ApiError ? err.message : '恢复失败');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function runNow(task: TaskView) {
+    setBusy(task.id);
+    try {
+      const result = await api.runNowTask(task.id);
+      setAction(result.dispatch.dispatched ? '已立即执行。' : result.dispatch.message ?? '已置顶排队。');
+      await load();
+    } catch (err) {
+      setAction(err instanceof ApiError ? err.message : '立即执行失败');
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function retry(task: TaskView) {
     setBusy(task.id);
     try {
@@ -626,6 +697,7 @@ export function WorkbenchPage() {
   const summary = snapshot?.summary;
   const counts = recent?.counts ?? {
     queued: 0,
+    paused: 0,
     running: 0,
     succeeded: 0,
     partial: 0,
@@ -796,8 +868,8 @@ export function WorkbenchPage() {
               <div>
                 <h2>任务中心</h2>
                 <p>
-                  运行 {counts.running} · 排队 {counts.queued} · 成功 {counts.succeeded} · 部分 {counts.partial} · 失败{' '}
-                  {counts.failed} · 取消 {counts.cancelled}
+                  运行 {counts.running} · 排队 {counts.queued} · 暂停 {counts.paused ?? 0} · 成功 {counts.succeeded} · 部分{' '}
+                  {counts.partial} · 失败 {counts.failed} · 取消 {counts.cancelled}
                 </p>
               </div>
               <div className="dash-card-actions">
@@ -846,7 +918,15 @@ export function WorkbenchPage() {
                 ) : (
                   <ul className="compact-task-list">
                     {queuedPager.pageItems.map((task) => (
-                      <QueuedTask key={task.id} task={task} busy={busy !== null} onCancel={() => void cancel(task)} />
+                      <QueuedTask
+                        key={task.id}
+                        task={task}
+                        busy={busy !== null}
+                        onCancel={() => void cancel(task)}
+                        onPause={() => void pause(task)}
+                        onResume={() => void resume(task)}
+                        onRunNow={() => void runNow(task)}
+                      />
                     ))}
                   </ul>
                 )}
@@ -934,6 +1014,15 @@ export function WorkbenchPage() {
               >
                 操作记录
               </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={hubTab === 'planned'}
+                className={hubTab === 'planned' ? 'active' : ''}
+                onClick={() => setHubTab('planned')}
+              >
+                计划任务 {schedules.length}
+              </button>
               <span className="hub-tabs-spacer" />
               {hubTab === 'recent' && (
               <select
@@ -979,7 +1068,7 @@ export function WorkbenchPage() {
                 />
               )}
             </div>
-            ) : (
+            ) : hubTab === 'activity' ? (
             <div className="task-activity">
               {!activity || activity.items.length === 0 ? (
                 <p className="task-lane-empty">还没有操作记录。</p>
@@ -1024,6 +1113,84 @@ export function WorkbenchPage() {
                   label="条操作"
                 />
               )}
+            </div>
+            ) : (
+            <div className="task-planned">
+              <div className="table-wrap">
+                <table className="data-table compact-table planned-table">
+                  <thead>
+                    <tr>
+                      <th>任务</th>
+                      <th>触发</th>
+                      <th>下次运行</th>
+                      <th>上次运行</th>
+                      <th>状态</th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {schedules.map((schedule) => {
+                      const auto = 'auto' in schedule;
+                      const enabled = schedule.state?.enabled !== false;
+                      const last = auto
+                        ? '每轮全量复测'
+                        : schedule.state?.lastAt
+                          ? `${schedule.state.lastOk === false ? '失败' : '成功'} · ${formatRelative(schedule.state.lastAt)}`
+                          : '未运行';
+                      return (
+                        <tr key={schedule.key} className={enabled ? '' : 'is-off'}>
+                          <td>
+                            <span className="planned-task-name">
+                              <Icon name={schedule.icon} size={15} />
+                              <strong>{schedule.label}</strong>
+                            </span>
+                          </td>
+                          <td className="muted small">
+                            {auto ? '每次探测完成' : `每 ${schedule.interval} 小时`}
+                          </td>
+                          <td className="muted small">
+                            {auto
+                              ? '探测完成后自动'
+                              : schedule.state?.nextAt
+                                ? formatDateTime(schedule.state.nextAt)
+                                : '—'}
+                          </td>
+                          <td className={schedule.state?.lastOk === false ? 'bad small' : 'muted small'}>{last}</td>
+                          <td>
+                            <StatusBadge tone={auto ? 'idle' : enabled ? 'ok' : 'idle'} dot={false}>
+                              {auto ? '自动' : enabled ? '启用' : '已关闭'}
+                            </StatusBadge>
+                          </td>
+                          <td>
+                            {schedule.key === 'cn-probe' ? (
+                              <button
+                                type="button"
+                                className="link-button"
+                                onClick={() => void runCnProbeNow()}
+                                disabled={busy !== null || !snapshot?.runId}
+                                title={snapshot?.runId ? `基于 ${snapshot.runId} 全量补测` : '还没有可用的探测运行'}
+                              >
+                                {busy === 'cn-probe' ? '创建中…' : '补测'}
+                              </button>
+                            ) : schedule.key === 'retention' ? (
+                              <span className="muted small">自动</span>
+                            ) : (
+                              <button
+                                type="button"
+                                className="link-button"
+                                onClick={() => void runTask(schedule.key as TaskType)}
+                                disabled={busy !== null}
+                              >
+                                立即执行
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
             )}
           </section>

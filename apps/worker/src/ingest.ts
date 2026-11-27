@@ -82,6 +82,10 @@ export async function handleIngest(c: Ctx): Promise<Response> {
       await recordKvPut(env);
       await env.SNAPSHOT.put(`run:${snapshot.runId}:log`, meta.log, { expirationTtl: LOG_TTL_SECONDS });
     }
+    if (meta?.logJsonl) {
+      await recordKvPut(env);
+      await env.SNAPSHOT.put(`run:${snapshot.runId}:jsonl`, meta.logJsonl, { expirationTtl: LOG_TTL_SECONDS });
+    }
     await recordKvPut(env);
     await env.SNAPSHOT.put(SNAPSHOT_KEY, JSON.stringify(merged));
     await completeTaskForRun(env, snapshot.runId);
@@ -123,6 +127,10 @@ export async function handleIngest(c: Ctx): Promise<Response> {
   if (meta?.log) {
     await recordKvPut(env);
     await env.SNAPSHOT.put(`run:${snapshot.runId}:log`, meta.log, { expirationTtl: LOG_TTL_SECONDS });
+  }
+  if (meta?.logJsonl) {
+    await recordKvPut(env);
+    await env.SNAPSHOT.put(`run:${snapshot.runId}:jsonl`, meta.logJsonl, { expirationTtl: LOG_TTL_SECONDS });
   }
 
   // 上报后自动合并注册表里的同内容源：重复源只停用、地址转成主源别名。

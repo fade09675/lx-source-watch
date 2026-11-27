@@ -13,7 +13,7 @@ import {
 import { checkQuota } from './usage';
 
 export type TaskType = 'probe' | 'discovery' | 'source-test' | 'proxy-test' | 'proxy-fetch-sub' | 'retention' | 'cn-probe';
-export type TaskStatus = 'queued' | 'running' | 'succeeded' | 'partial' | 'failed' | 'cancelled';
+export type TaskStatus = 'queued' | 'paused' | 'running' | 'succeeded' | 'partial' | 'failed' | 'cancelled';
 export type TaskSource = 'manual' | 'schedule' | 'api' | 'retry' | 'local' | 'system';
 
 export interface TaskResultSource {
@@ -74,6 +74,7 @@ export const TASK_TYPE_LABEL: Record<TaskType, string> = {
 
 export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
   queued: '排队中',
+  paused: '已暂停',
   running: '运行中',
   succeeded: '成功',
   partial: '部分成功',
@@ -272,14 +273,14 @@ export async function getTaskWithSecret(db: D1Database, id: string): Promise<Tas
   return row ? toView(row, false) : null;
 }
 
-const RETRYABLE_STATUSES: TaskStatus[] = ['failed', 'cancelled', 'partial'];
+const RETRYABLE_STATUSES: TaskStatus[] = ['failed', 'cancelled'];
 
 /** 从已完成任务复制一个重试任务；短令牌不复制，由 createTask 重新生成。 */
 export async function retryTask(env: Env, id: string): Promise<TaskView | null> {
   const task = await getTaskWithSecret(env.DB, id);
   if (!task) return null;
   if (!RETRYABLE_STATUSES.includes(task.status)) {
-    throw new Error('只有失败、取消或部分完成的任务可以重试');
+    throw new Error('只有失败或已取消的任务可以重试');
   }
   const { progressToken: _token, ...payload } = task.payload;
   return createTask(env.DB, {
@@ -290,6 +291,39 @@ export async function retryTask(env: Env, id: string): Promise<TaskView | null> 
     retryCount: task.retryCount + 1,
     retryOf: task.id,
   });
+}
+
+/** 暂停一个还在排队、尚未派发的任务。 */
+export async function pauseTask(env: Env, id: string): Promise<TaskView | null> {
+  const task = await getTask(env.DB, id);
+  if (!task) return null;
+  if (task.status !== 'queued') {
+    throw new Error('只有排队中的任务可以暂停');
+  }
+  await updateTask(env.DB, id, { status: 'paused', message: '已暂停，恢复后继续排队' });
+  return getTask(env.DB, id);
+}
+
+/** 恢复暂停任务，并尝试立即派发。 */
+export async function resumeTask(env: Env, id: string): Promise<TaskView | null> {
+  const task = await getTask(env.DB, id);
+  if (!task) return null;
+  if (task.status !== 'paused') {
+    throw new Error('只有已暂停的任务可以恢复');
+  }
+  await updateTask(env.DB, id, { status: 'queued', message: '已恢复排队' });
+  return getTask(env.DB, id);
+}
+
+/** 将排队任务置顶；只影响下一次单并发派发顺序。 */
+export async function prioritizeTask(env: Env, id: string): Promise<TaskView | null> {
+  const task = await getTask(env.DB, id);
+  if (!task) return null;
+  if (task.status !== 'queued') {
+    throw new Error('只有排队中的任务可以立即执行');
+  }
+  await updateTask(env.DB, id, { priority: 0, message: '已置顶，等待当前任务结束' });
+  return getTask(env.DB, id);
 }
 
 export interface TaskFilter {
@@ -351,6 +385,7 @@ export async function countTasks(db: D1Database): Promise<Record<TaskStatus, num
     .all<{ status: string; n: number }>();
   const counts: Record<TaskStatus, number> = {
     queued: 0,
+    paused: 0,
     running: 0,
     succeeded: 0,
     partial: 0,
@@ -391,6 +426,7 @@ export async function updateTask(
     finishedAt?: string;
     heartbeatAt?: string;
     githubRunId?: string;
+    priority?: number;
     progressDone?: number;
     progressTotal?: number;
     progressUnit?: string;
@@ -426,6 +462,10 @@ export async function updateTask(
   if (patch.githubRunId) {
     sets.push('github_run_id = ?');
     binds.push(patch.githubRunId);
+  }
+  if (patch.priority !== undefined) {
+    sets.push('priority = ?');
+    binds.push(Math.max(0, Math.min(9, patch.priority)));
   }
   if (patch.progressDone !== undefined) {
     sets.push('progress_done = ?');
@@ -619,6 +659,7 @@ export async function dispatchNext(
     dispatchProxyTest?: (env: Env, input: ProxyTestDispatchInput) => Promise<DispatchResult>;
     dispatchProxyFetchSub?: (env: Env, input: ProxyFetchSubDispatchInput) => Promise<DispatchResult>;
     dispatchCnProbe?: (env: Env, input: CnProbeDispatchInput) => Promise<DispatchResult>;
+    taskId?: string;
   } = {},
 ): Promise<DispatchNextResult> {
   const now = deps.now ?? new Date().toISOString();
@@ -638,9 +679,11 @@ export async function dispatchNext(
     if (running) return { dispatched: false, message: `已有任务运行中：${running.id}` };
 
     const row = await env.DB.prepare(
-      "SELECT * FROM tasks WHERE status = 'queued' ORDER BY priority ASC, created_at ASC LIMIT 1",
-    ).first<TaskRow>();
-    if (!row) return { dispatched: false, message: '没有排队中的任务' };
+      `SELECT * FROM tasks WHERE status = 'queued'${deps.taskId ? ' AND id = ?' : ''} ORDER BY priority ASC, created_at ASC LIMIT 1`,
+    )
+      .bind(...(deps.taskId ? [deps.taskId] : []))
+      .first<TaskRow>();
+    if (!row) return { dispatched: false, message: deps.taskId ? '指定任务不在排队中' : '没有排队中的任务' };
     const task = toView(row, false);
 
     if (task.type === 'retention') {
@@ -1027,7 +1070,7 @@ export async function completeTaskForRun(env: Env, runId: string): Promise<void>
 export async function cancelTask(env: Env, id: string): Promise<TaskView | null> {
   const task = await getTask(env.DB, id);
   if (!task) return null;
-  if (task.status !== 'queued' && task.status !== 'running') return task;
+  if (task.status !== 'queued' && task.status !== 'paused' && task.status !== 'running') return task;
   await updateTask(env.DB, id, {
     status: 'cancelled',
     message: '已取消',
@@ -1077,7 +1120,7 @@ export async function refreshTaskState(env: Env, now = new Date().toISOString())
   const [counts, running, queued] = await Promise.all([
     countTasks(env.DB),
     listTasks(env.DB, { status: 'running', limit: 10 }),
-    listTasks(env.DB, { status: 'queued', limit: 20 }),
+    listTasks(env.DB, { statuses: ['queued', 'paused'], limit: 20 }),
   ]);
   const snapshot: TaskStateSnapshot = { counts, running, queued, updatedAt: now };
   await env.DB.prepare(

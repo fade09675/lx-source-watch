@@ -219,6 +219,8 @@ export const RunMetaSchema = z.object({
   steps: z.array(RunStepSchema).max(30).default([]),
   /** 本次运行的完整日志（通常几十 KB），由 Worker 写入 KV。 */
   log: z.string().max(200_000).optional(),
+  /** 结构化 JSONL 日志，一行一个事件；旧 runner 可省略。 */
+  logJsonl: z.string().max(200_000).optional(),
   counts: RunCountsSchema.optional(),
 });
 export type RunMeta = z.infer<typeof RunMetaSchema>;

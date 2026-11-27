@@ -1507,6 +1507,34 @@ body {
   font-size: 10.5px;
 }
 
+.compact-task-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.compact-task.is-paused {
+  border-style: dashed;
+  background: color-mix(in srgb, var(--warn) 6%, var(--panel));
+}
+
+.planned-task-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.planned-table tr.is-off td {
+  opacity: 0.6;
+}
+
+.planned-table td:last-child {
+  text-align: right;
+}
+
 .schedule-strip {
   display: flex;
   align-items: flex-start;
@@ -4359,4 +4387,28 @@ details.panel[open] > summary.panel-head::after {
     flex-direction: column;
     gap: 4px;
   }
+}
+
+.structured-log-table td:last-child {
+  overflow-wrap: anywhere;
+}
+
+.log-level {
+  display: inline-flex;
+  min-width: 34px;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 10.5px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.log-level-step { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); }
+.log-level-success { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 30%, var(--border)); }
+.log-level-warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, var(--border)); }
+.log-level-error { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 35%, var(--border)); }
+
+.structured-log-foot {
+  margin-top: 8px;
 }

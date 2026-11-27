@@ -4,6 +4,7 @@ export * from './format.js';
 export * from './mirrors.js';
 export * from './platforms.js';
 export * from './quality.js';
+export * from './run-log.js';
 export * from './schema.js';
 export * from './status.js';
 export * from './test-songs.js';

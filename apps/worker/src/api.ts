@@ -1,4 +1,12 @@
-import { SCHEMA_VERSION, SnapshotSchema, type ExportItem, type Snapshot, type SourceResult, type StatusEnvelope } from '@lx/shared';
+import {
+  SCHEMA_VERSION,
+  SnapshotSchema,
+  textToJsonl,
+  type ExportItem,
+  type Snapshot,
+  type SourceResult,
+  type StatusEnvelope,
+} from '@lx/shared';
 import { Hono } from 'hono';
 import { readCnInput } from './cnProbe';
 import { toCsv } from './csv';
@@ -76,8 +84,11 @@ import {
   getTask,
   getTaskState,
   listTasks,
+  pauseTask,
+  prioritizeTask,
   reapStaleTasks,
   refreshTaskState,
+  resumeTask,
   retryTask,
   TASK_STATUS_LABEL,
   TASK_TYPE_LABEL,
@@ -764,6 +775,21 @@ export function createApi(): Hono<Ctx> {
         { status: 404, headers: { 'cache-control': CACHE_PRIVATE } },
       );
     }
+    const format = c.req.query('format');
+    if (format === 'jsonl') {
+      const stored = await c.env.SNAPSHOT.get(`run:${runId}:jsonl`);
+      const text = await c.env.SNAPSHOT.get(`run:${runId}:log`);
+      const jsonl = stored ?? (text ? textToJsonl(text) : '');
+      return Response.json(
+        {
+          runId,
+          available: Boolean(jsonl),
+          jsonl,
+          bytes: jsonl ? new TextEncoder().encode(jsonl).byteLength : 0,
+        },
+        { headers: { 'cache-control': 'private, max-age=30' } },
+      );
+    }
     const log = await c.env.SNAPSHOT.get(`run:${runId}:log`);
     return Response.json(
       {
@@ -1134,7 +1160,15 @@ export function createApi(): Hono<Ctx> {
   });
 
   const TASK_TYPES: TaskType[] = ['probe', 'discovery', 'source-test', 'proxy-test', 'proxy-fetch-sub', 'retention', 'cn-probe'];
-  const TASK_STATUSES: TaskStatus[] = ['queued', 'running', 'succeeded', 'partial', 'failed', 'cancelled'];
+  const TASK_STATUSES: TaskStatus[] = [
+    'queued',
+    'paused',
+    'running',
+    'succeeded',
+    'partial',
+    'failed',
+    'cancelled',
+  ];
   const TASK_SOURCES: TaskSource[] = ['manual', 'schedule', 'api', 'retry', 'local'];
   const FINISHED_STATUSES: TaskStatus[] = ['succeeded', 'partial', 'failed', 'cancelled'];
 
@@ -1297,6 +1331,67 @@ export function createApi(): Hono<Ctx> {
     }
     const state = await refreshTaskState(c.env);
     return Response.json({ ok: true, task, state }, { headers: { 'cache-control': CACHE_PRIVATE } });
+  });
+
+  api.post('/admin/tasks/:id/pause', async (c) => {
+    try {
+      const task = await pauseTask(c.env, c.req.param('id'));
+      if (!task) {
+        return Response.json(
+          { error: 'not_found', message: '任务不存在' },
+          { status: 404, headers: { 'cache-control': CACHE_PRIVATE } },
+        );
+      }
+      const state = await refreshTaskState(c.env);
+      return Response.json({ ok: true, task, state }, { headers: { 'cache-control': CACHE_PRIVATE } });
+    } catch (error) {
+      return Response.json(
+        { error: 'bad_request', message: error instanceof Error ? error.message : '暂停失败' },
+        { status: 409, headers: { 'cache-control': CACHE_PRIVATE } },
+      );
+    }
+  });
+
+  api.post('/admin/tasks/:id/resume', async (c) => {
+    const id = c.req.param('id');
+    try {
+      const task = await resumeTask(c.env, id);
+      if (!task) {
+        return Response.json(
+          { error: 'not_found', message: '任务不存在' },
+          { status: 404, headers: { 'cache-control': CACHE_PRIVATE } },
+        );
+      }
+      const dispatch = await dispatchNext(c.env, { taskId: id });
+      const state = await refreshTaskState(c.env);
+      return Response.json({ ok: true, task, dispatch, state }, { headers: { 'cache-control': CACHE_PRIVATE } });
+    } catch (error) {
+      return Response.json(
+        { error: 'bad_request', message: error instanceof Error ? error.message : '恢复失败' },
+        { status: 409, headers: { 'cache-control': CACHE_PRIVATE } },
+      );
+    }
+  });
+
+  api.post('/admin/tasks/:id/run-now', async (c) => {
+    const id = c.req.param('id');
+    try {
+      const task = await prioritizeTask(c.env, id);
+      if (!task) {
+        return Response.json(
+          { error: 'not_found', message: '任务不存在' },
+          { status: 404, headers: { 'cache-control': CACHE_PRIVATE } },
+        );
+      }
+      const dispatch = await dispatchNext(c.env, { taskId: id });
+      const state = await refreshTaskState(c.env);
+      return Response.json({ ok: true, task, dispatch, state }, { headers: { 'cache-control': CACHE_PRIVATE } });
+    } catch (error) {
+      return Response.json(
+        { error: 'bad_request', message: error instanceof Error ? error.message : '立即执行失败' },
+        { status: 409, headers: { 'cache-control': CACHE_PRIVATE } },
+      );
+    }
   });
 
   api.post('/admin/tasks/:id/retry', async (c) => {

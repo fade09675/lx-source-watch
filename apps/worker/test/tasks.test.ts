@@ -121,6 +121,7 @@ describe('tasks 纯函数', () => {
       'cancelled',
       'failed',
       'partial',
+      'paused',
       'queued',
       'running',
       'succeeded',

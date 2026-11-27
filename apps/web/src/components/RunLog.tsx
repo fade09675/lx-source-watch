@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ApiError, api } from '../api';
 import { ErrorBox, Spinner } from './Feedback';
 import { Pagination, useClientPager } from './Pagination';
+import { RunStructuredLog } from './RunStructuredLog';
 
 const ANSI = /\u001b\[[0-9;]*m/g;
 const ERROR_LINE = /error|fail|exception|timeout|refused|reset|unreachable|失败|异常|超时|错误/i;
@@ -25,6 +26,7 @@ export function RunLog({ runId, query: externalQuery, onQueryChange }: RunLogPro
   const [internalQuery, setInternalQuery] = useState('');
   const [onlyErrors, setOnlyErrors] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [structured, setStructured] = useState(false);
 
   const query = externalQuery ?? internalQuery;
   const updateQuery = (value: string) => {
@@ -132,6 +134,9 @@ export function RunLog({ runId, query: externalQuery, onQueryChange }: RunLogPro
             <span className="muted small">
               {visible.length}/{lines.length} 行
             </span>
+            <button type="button" className="ghost-button" onClick={() => setStructured((value) => !value)}>
+              {structured ? '文本' : '结构化'}
+            </button>
             <button type="button" className="ghost-button" onClick={copyLog}>
               {copied ? '已复制' : '复制'}
             </button>
@@ -139,7 +144,9 @@ export function RunLog({ runId, query: externalQuery, onQueryChange }: RunLogPro
               下载
             </button>
           </div>
-          {visible.length === 0 ? (
+          {structured ? (
+            <RunStructuredLog runId={runId} query={query} />
+          ) : visible.length === 0 ? (
             <p className="muted log-empty">没有匹配的日志行。</p>
           ) : (
             <>
