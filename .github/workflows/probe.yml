@@ -83,9 +83,6 @@ jobs:
       LX_REGISTRY_URL: https://dash.dpdns.org/api/config/sources
       # 网页添加的发现仓库；读不到时只用仓库内置仓库。
       LX_DISCOVERY_URL: https://dash.dpdns.org/api/config/discovery
-      LX_TASK_ID: ${{ inputs.task_id }}
-      LX_PROGRESS_TOKEN: ${{ inputs.progress_token }}
-      LX_PROGRESS_URL: ${{ inputs.progress_url }}
     steps:
       - name: 检出
         uses: actions/checkout@v4
