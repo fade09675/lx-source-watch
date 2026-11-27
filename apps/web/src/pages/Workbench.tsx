@@ -583,6 +583,7 @@ export function WorkbenchPage() {
   const scheduler = system?.scheduler;
   const runCounts = health?.lastRun?.counts;
   const cnSummary = status?.cn;
+  const endpointSummary = status?.endpoints;
   const cnPending = Boolean(cnSummary?.pending) || [...running, ...queued].some((task) => task.type === 'cn-probe');
   const total = summary?.total ?? 0;
   const coverage = [
@@ -610,7 +611,11 @@ export function WorkbenchPage() {
     {
       key: 'endpoints',
       label: '接入点通过',
-      value: runCounts ? `${runCounts.endpointsOk}/${runCounts.endpointsTotal}` : '—',
+      value: endpointSummary
+        ? `${endpointSummary.ok}/${endpointSummary.total}`
+        : runCounts
+          ? `${runCounts.endpointsOk}/${runCounts.endpointsTotal}`
+          : '—',
       hint: '主地址与镜像',
       tone: 'ok',
     },
@@ -1058,7 +1063,13 @@ export function WorkbenchPage() {
               </div>
               <div>
                 <dt>接入点</dt>
-                <dd>{runCounts ? `${runCounts.endpointsOk}/${runCounts.endpointsTotal}` : '—'}</dd>
+                <dd>
+                  {endpointSummary
+                    ? `${endpointSummary.ok}/${endpointSummary.total}`
+                    : runCounts
+                      ? `${runCounts.endpointsOk}/${runCounts.endpointsTotal}`
+                      : '—'}
+                </dd>
               </div>
               <div>
                 <dt>国内补测</dt>

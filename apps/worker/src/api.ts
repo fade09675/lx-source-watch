@@ -1202,8 +1202,12 @@ export function createApi(): Hono<Ctx> {
     if (!snapshot) return notReady();
     let cnTested = 0;
     let cnOk = 0;
+    let endpointsOk = 0;
+    let endpointsTotal = 0;
     for (const source of snapshot.sources) {
       for (const endpoint of source.endpoints) {
+        endpointsTotal += 1;
+        if (endpoint.ok) endpointsOk += 1;
         if (!endpoint.cn) continue;
         cnTested += 1;
         if (endpoint.cn.ok) cnOk += 1;
@@ -1216,6 +1220,7 @@ export function createApi(): Hono<Ctx> {
       snapshot: { ...snapshot, sources: [] },
       serverTime: new Date().toISOString(),
       stale: isStale(snapshot.generatedAt),
+      endpoints: { ok: endpointsOk, total: endpointsTotal },
       cn: { tested: cnTested, ok: cnOk, pending: Boolean(pending) },
     };
     return Response.json(envelope, { headers: { 'cache-control': CACHE_PRIVATE } });

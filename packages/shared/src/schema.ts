@@ -403,6 +403,8 @@ export interface StatusEnvelope {
   stale: boolean;
   /** 工作台精简接口附带的国内补测汇总（按接入点计）。 */
   cn?: { tested: number; ok: number; pending?: boolean };
+  /** 工作台精简接口附带的接入点汇总（按主地址+镜像计）。 */
+  endpoints?: { ok: number; total: number };
 }
 
 export interface SourceRunSummary {
