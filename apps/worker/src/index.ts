@@ -10,6 +10,7 @@ import { createCnProbeRoutes } from './cnProbeRoutes';
 import { createRunnerConfigRoutes } from './runnerConfig';
 import { createRunnerProgressRoutes } from './runnerProgress';
 import { runScheduler } from './scheduler';
+import { reconcileTaskRuns } from './taskReconcile';
 import { TASK_TYPE_LABEL, triggerOf } from './tasks';
 import { reapStaleTasks, refreshTaskState } from './tasks';
 
@@ -175,6 +176,7 @@ export default {
       (async () => {
         try {
           await runScheduler(env);
+          await reconcileTaskRuns(env);
           await reapStaleTasks(env);
           await refreshTaskState(env);
         } catch (error) {

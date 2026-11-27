@@ -220,6 +220,8 @@ export async function createTask(
     id?: string;
     runId?: string;
     now?: string;
+    retryCount?: number;
+    retryOf?: string;
   },
 ): Promise<TaskView> {
   const now = input.now ?? new Date().toISOString();
@@ -239,8 +241,8 @@ export async function createTask(
   }
   await db
     .prepare(
-      `INSERT INTO tasks (id, type, source, status, priority, payload, run_id, created_at)
-       VALUES (?, ?, ?, 'queued', ?, ?, ?, ?)`,
+      `INSERT INTO tasks (id, type, source, status, priority, payload, run_id, retry_count, retry_of, created_at)
+       VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id,
@@ -249,6 +251,8 @@ export async function createTask(
       Math.max(1, Math.min(9, input.priority ?? 5)),
       JSON.stringify(payload),
       runId,
+      Math.max(0, Math.min(9, input.retryCount ?? 0)),
+      input.retryOf ?? null,
       now,
     )
     .run();
@@ -266,6 +270,26 @@ export async function getTask(db: D1Database, id: string): Promise<TaskView | nu
 export async function getTaskWithSecret(db: D1Database, id: string): Promise<TaskView | null> {
   const row = await db.prepare('SELECT * FROM tasks WHERE id = ?').bind(id).first<TaskRow>();
   return row ? toView(row, false) : null;
+}
+
+const RETRYABLE_STATUSES: TaskStatus[] = ['failed', 'cancelled', 'partial'];
+
+/** 从已完成任务复制一个重试任务；短令牌不复制，由 createTask 重新生成。 */
+export async function retryTask(env: Env, id: string): Promise<TaskView | null> {
+  const task = await getTaskWithSecret(env.DB, id);
+  if (!task) return null;
+  if (!RETRYABLE_STATUSES.includes(task.status)) {
+    throw new Error('只有失败、取消或部分完成的任务可以重试');
+  }
+  const { progressToken: _token, ...payload } = task.payload;
+  return createTask(env.DB, {
+    type: task.type,
+    source: 'retry',
+    priority: task.priority,
+    payload,
+    retryCount: task.retryCount + 1,
+    retryOf: task.id,
+  });
 }
 
 export interface TaskFilter {
@@ -577,6 +601,16 @@ export interface DispatchNextResult {
  * 单并发派发：拿到派发锁 → 确认没有运行中的任务 → 取优先级最高的排队任务 →
  * 占位运行 → 触发 Actions → 标记 running。
  */
+function isRetryableDispatch(result: DispatchResult): boolean {
+  if (result.ok) return false;
+  if (result.status === 429) return true;
+  if (result.status === 502) {
+    const message = result.message;
+    return !/令牌|权限|未配置|401|403/.test(message);
+  }
+  return false;
+}
+
 export async function dispatchNext(
   env: Env,
   deps: {
@@ -650,11 +684,12 @@ export async function dispatchNext(
     }
 
     if (!result.ok) {
+      const retryable = isRetryableDispatch(result) && task.retryCount < 2;
       await updateTask(env.DB, task.id, {
         status: 'failed',
         error: result.message,
         finishedAt: new Date().toISOString(),
-        message: '派发失败',
+        message: retryable ? '派发失败，已安排重试' : '派发失败',
       });
       if (task.runId) {
         await env.DB.prepare(
@@ -663,7 +698,19 @@ export async function dispatchNext(
           .bind('派发失败', result.message.slice(0, 500), task.runId)
           .run();
       }
-      return { dispatched: false, task: (await getTask(env.DB, task.id)) ?? undefined, message: result.message };
+      let retry: TaskView | null = null;
+      if (retryable) {
+        try {
+          retry = await retryTask(env, task.id);
+        } catch (error) {
+          console.warn('派发重试任务创建失败', error instanceof Error ? error.message : String(error));
+        }
+      }
+      return {
+        dispatched: false,
+        task: (await getTask(env.DB, task.id)) ?? undefined,
+        message: retry ? `${result.message}；已创建重试任务 ${retry.id}` : result.message,
+      };
     }
 
     await updateTask(env.DB, task.id, { message: 'Actions 已启动' });

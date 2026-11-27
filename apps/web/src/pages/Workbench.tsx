@@ -299,8 +299,17 @@ function taskHasDetail(result: TaskResult): boolean {
   );
 }
 
-function TaskRow({ task }: { task: TaskView }) {
+function TaskRow({
+  task,
+  busy,
+  onRetry,
+}: {
+  task: TaskView;
+  busy: boolean;
+  onRetry: (task: TaskView) => void;
+}) {
   const result = task.result;
+  const retryable = task.status === 'failed' || task.status === 'cancelled' || task.status === 'partial';
   return (
     <li className="task-row">
       <div className="task-row-status">
@@ -329,6 +338,11 @@ function TaskRow({ task }: { task: TaskView }) {
         <span className="task-row-duration">耗时 {taskElapsed(task)}</span>
         {task.runId && <Link to={`/runs/${task.runId}`}>运行详情</Link>}
         {task.runId && <Link to={`/runs/${task.runId}?tab=logs`}>日志</Link>}
+        {retryable && (
+          <button type="button" className="link-button" disabled={busy} onClick={() => onRetry(task)}>
+            {busy ? '提交中…' : '重试'}
+          </button>
+        )}
       </div>
     </li>
   );
@@ -550,6 +564,19 @@ export function WorkbenchPage() {
       await load();
     } catch (err) {
       setAction(err instanceof ApiError ? err.message : '取消失败');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function retry(task: TaskView) {
+    setBusy(task.id);
+    try {
+      const result = await api.retryTask(task.id);
+      setAction(result.dispatch?.dispatched ? '已创建重试任务并派发。' : '已创建重试任务，等待派发。');
+      await load();
+    } catch (err) {
+      setAction(err instanceof ApiError ? err.message : '重试失败');
     } finally {
       setBusy(null);
     }
@@ -938,7 +965,7 @@ export function WorkbenchPage() {
               ) : (
                 <ul className="task-rows">
                   {recent.tasks.map((task) => (
-                    <TaskRow key={task.id} task={task} />
+                    <TaskRow key={task.id} task={task} busy={busy === task.id} onRetry={retry} />
                   ))}
                 </ul>
               )}

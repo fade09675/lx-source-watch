@@ -78,6 +78,7 @@ import {
   listTasks,
   reapStaleTasks,
   refreshTaskState,
+  retryTask,
   TASK_STATUS_LABEL,
   TASK_TYPE_LABEL,
   updateTask,
@@ -86,6 +87,7 @@ import {
   type TaskStatus,
   type TaskType,
 } from './tasks';
+import { reconcileTaskRuns } from './taskReconcile';
 import { listAdminActivity } from './activity';
 import {
   createDiscoveryRepo,
@@ -1295,6 +1297,33 @@ export function createApi(): Hono<Ctx> {
     }
     const state = await refreshTaskState(c.env);
     return Response.json({ ok: true, task, state }, { headers: { 'cache-control': CACHE_PRIVATE } });
+  });
+
+  api.post('/admin/tasks/:id/retry', async (c) => {
+    const id = c.req.param('id');
+    try {
+      const task = await retryTask(c.env, id);
+      if (!task) {
+        return Response.json(
+          { error: 'not_found', message: '任务不存在' },
+          { status: 404, headers: { 'cache-control': CACHE_PRIVATE } },
+        );
+      }
+      const dispatch = await dispatchNext(c.env);
+      const state = await refreshTaskState(c.env);
+      return Response.json({ ok: true, task, dispatch, state }, { headers: { 'cache-control': CACHE_PRIVATE } });
+    } catch (error) {
+      return Response.json(
+        { error: 'bad_request', message: error instanceof Error ? error.message : '重试失败' },
+        { status: 409, headers: { 'cache-control': CACHE_PRIVATE } },
+      );
+    }
+  });
+
+  api.post('/admin/tasks/reconcile', async (c) => {
+    const result = await reconcileTaskRuns(c.env);
+    const state = await refreshTaskState(c.env);
+    return Response.json({ ok: true, result, state }, { headers: { 'cache-control': CACHE_PRIVATE } });
   });
 
   api.get('/config/sources', async (c) => {

@@ -935,6 +935,11 @@ export const api = {
     request<CreateTaskResult>('/api/admin/tasks', { method: 'POST', body: JSON.stringify(input) }),
   cancelTask: (id: string) =>
     request<{ ok: boolean; task: TaskView }>(`/api/admin/tasks/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
+  retryTask: (id: string) =>
+    request<{ ok: boolean; task: TaskView; dispatch: { dispatched: boolean; message?: string } }>(
+      `/api/admin/tasks/${encodeURIComponent(id)}/retry`,
+      { method: 'POST' },
+    ),
   dispatchTasks: () => request<{ dispatched: boolean; message?: string; state: TaskStateSnapshot }>('/api/admin/tasks/dispatch', { method: 'POST' }),
   reapTasks: () => request<{ ok: boolean; reaped: number; state: TaskStateSnapshot }>('/api/admin/tasks/reap', { method: 'POST' }),
   usage: (refresh = false) => request<{ usage: UsageView }>(`/api/admin/usage${refresh ? '?refresh=1' : ''}`),
