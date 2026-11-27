@@ -260,7 +260,7 @@ export function OverviewPage() {
             onClick={() => changeQualityMode('available')}
             title="只看本轮全部声明平台都通过的音源"
           >
-            可用
+            仅可用
           </button>
           <button
             type="button"

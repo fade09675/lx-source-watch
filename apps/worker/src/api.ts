@@ -515,6 +515,30 @@ export function createApi(): Hono<Ctx> {
     const candidate = await getCandidate(c.env.DB, id);
     if (!candidate) return c.json({ error: 'not_found', message: `候选不存在：${id}` }, 404);
     if (candidate.state === 'rejected') return c.json({ error: 'already_rejected', message: '该候选版本已停用' }, 400);
+
+    // 已转正候选同时存在正式源；只把候选标 rejected 不会停用实际音源，改为停用对应 registry。
+    if (candidate.state === 'promoted' && candidate.sha256) {
+      const registry = await c.env.DB.prepare(
+        'SELECT id, enabled FROM source_registry WHERE content_sha256 = ? ORDER BY enabled DESC LIMIT 1',
+      )
+        .bind(candidate.sha256)
+        .first<{ id: string; enabled: number }>();
+      if (registry) {
+        if (!registry.enabled) {
+          return c.json({ error: 'already_disabled', message: '该版本已停用' }, 400);
+        }
+        const result = await updateSourceRegistry(c.env.DB, registry.id, { enabled: false });
+        if (!result.ok) {
+          return c.json({ error: 'update_failed', message: result.errors.join('；') || '停用失败' }, 400, {
+            'cache-control': CACHE_PRIVATE,
+          });
+        }
+        return c.json({ ok: true, kind: 'registry', id: registry.id, state: 'disabled' }, 200, {
+          'cache-control': CACHE_PRIVATE,
+        });
+      }
+    }
+
     const updated = await setCandidateState(c.env.DB, id, 'rejected', new Date().toISOString());
     if (!updated) return c.json({ error: 'update_failed', message: '停用失败' }, 400);
     return c.json({ ok: true, kind, id, state: 'rejected' }, 200, { 'cache-control': CACHE_PRIVATE });
@@ -1170,6 +1194,18 @@ export function createApi(): Hono<Ctx> {
       { templates: config.templates },
       { headers: { 'cache-control': 'public, max-age=300, s-maxage=600' } },
     );
+  });
+
+  // 工作台只需要快照汇总，不需要 sources 大数组；单独精简接口减少首屏传输与解析。
+  api.get('/overview', async (c) => {
+    const snapshot = await readSnapshot(c.env);
+    if (!snapshot) return notReady();
+    const envelope: StatusEnvelope = {
+      snapshot: { ...snapshot, sources: [] },
+      serverTime: new Date().toISOString(),
+      stale: isStale(snapshot.generatedAt),
+    };
+    return Response.json(envelope, { headers: { 'cache-control': CACHE_PRIVATE } });
   });
 
   api.get('/status', async (c) => {

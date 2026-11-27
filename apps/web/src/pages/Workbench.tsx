@@ -401,26 +401,32 @@ export function WorkbenchPage() {
   const [loaded, setLoaded] = useState(false);
 
   const loadOverview = useCallback(async () => {
-    try {
-      const [statusResult, healthResult, usageResult, systemResult, runningResult, queuedResult] = await Promise.all([
-        api.status(),
-        api.health(),
-        api.usage().then((result) => result.usage).catch(() => null),
-        api.system(),
-        api.tasks({ status: 'running', limit: 10 }),
-        api.tasks({ status: 'queued', limit: 100 }),
-      ]);
-      setStatus(statusResult);
-      setHealth(healthResult);
-      setUsage(usageResult);
-      setSystem(systemResult);
-      setRunning(runningResult.tasks);
-      setQueued(queuedResult.tasks);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : '加载工作台失败');
-    } finally {
-      setLoaded(true);
-    }
+    // 汇总数据走精简接口；先让指标出现，额度/调度/任务状态随后补齐，避免首屏被慢接口拖住。
+    const statusPromise = api.overview();
+    const restPromise = Promise.all([
+      api.health(),
+      api.usage().then((result) => result.usage).catch(() => null),
+      api.system(),
+      api.tasks({ status: 'running', limit: 10 }),
+      api.tasks({ status: 'queued', limit: 100 }),
+    ]);
+
+    statusPromise
+      .then(setStatus)
+      .catch((err) => setError(err instanceof ApiError ? err.message : '加载工作台失败'))
+      .finally(() => setLoaded(true));
+
+    restPromise
+      .then(([healthResult, usageResult, systemResult, runningResult, queuedResult]) => {
+        setHealth(healthResult);
+        setUsage(usageResult);
+        setSystem(systemResult);
+        setRunning(runningResult.tasks);
+        setQueued(queuedResult.tasks);
+      })
+      .catch((err) => setError(err instanceof ApiError ? err.message : '加载工作台失败'));
+
+    await statusPromise.catch(() => undefined);
   }, []);
 
   const loadRecent = useCallback(async () => {

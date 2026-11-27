@@ -312,6 +312,21 @@ export interface DuplicateOverview {
   counts: { groups: number; duplicateUrls: number; mergedUrls: number; aliases: number; similar: number };
 }
 
+/** Same content can exist as both a registry row and a promoted candidate; show one row per sha. */
+export function dedupeSimilarEntries(entries: DedupEntry[]): DedupEntry[] {
+  const rank = (entry: DedupEntry): number => {
+    if (entry.kind === 'registry') return entry.enabled ? 4 : 3;
+    return entry.enabled ? 2 : 1;
+  };
+  const bySha = new Map<string, DedupEntry>();
+  for (const entry of entries) {
+    if (!entry.sha256) continue;
+    const current = bySha.get(entry.sha256);
+    if (!current || rank(entry) > rank(current)) bySha.set(entry.sha256, entry);
+  }
+  return [...bySha.values()];
+}
+
 function toView(entry: DedupEntry, state = ''): DuplicateEntryView {
   return {
     kind: entry.kind,
@@ -441,12 +456,13 @@ export async function listDuplicateOverview(db: D1Database, now = new Date().toI
   }
   const similar: SimilarGroup[] = [];
   for (const list of similarMap.values()) {
-    const shas = new Set(list.map((entry) => entry.sha256).filter(Boolean));
+    const unique = dedupeSimilarEntries(list);
+    const shas = new Set(unique.map((entry) => entry.sha256).filter(Boolean));
     if (shas.size < 2) continue;
     similar.push({
-      title: list[0]?.title ?? '',
-      author: list[0]?.author ?? '',
-      entries: list.map((entry) => toView(entry, stateById.get(`${entry.kind}:${entry.id}`) ?? '')),
+      title: unique[0]?.title ?? '',
+      author: unique[0]?.author ?? '',
+      entries: unique.map((entry) => toView(entry, stateById.get(`${entry.kind}:${entry.id}`) ?? '')),
     });
   }
   similar.sort((a, b) => b.entries.length - a.entries.length);

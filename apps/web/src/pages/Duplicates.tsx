@@ -105,7 +105,12 @@ export function DuplicatesPage() {
   }
 
   async function disableVersion(entry: DuplicateEntryView) {
-    const label = entry.kind === 'registry' ? '停用这个音源版本' : '停用这个候选版本';
+    const promoted = entry.kind === 'candidate' && entry.state === 'promoted';
+    const label = entry.kind === 'registry'
+      ? '停用这个音源版本'
+      : promoted
+        ? '拒绝这个已转正的候选版本'
+        : '停用这个候选版本';
     if (!window.confirm(`${label}？\n\n${entry.url}\n\n不会删除记录，之后可以在对应页面恢复。`)) return;
     const busyKey = `${entry.kind}:${entry.id}`;
     setBusy(busyKey);
@@ -259,6 +264,7 @@ export function DuplicatesPage() {
                 {similar.flatMap((group) =>
                   group.entries.map((entry) => {
                     const busyKey = `${entry.kind}:${entry.id}`;
+                    const promoted = entry.kind === 'candidate' && entry.state === 'promoted';
                     const disabled = entry.kind === 'registry' ? !entry.enabled : entry.state === 'rejected';
                     return (
                       <tr key={`similar:${entry.kind}:${entry.id}`} className={disabled ? 'row-disabled' : undefined}>
@@ -278,7 +284,7 @@ export function DuplicatesPage() {
                             disabled={disabled || busy === busyKey}
                             onClick={() => void disableVersion(entry)}
                           >
-                            {disabled ? '已停用' : busy === busyKey ? '处理中…' : '停用'}
+                            {disabled ? '已停用' : busy === busyKey ? '处理中…' : promoted ? '拒绝候选' : '停用'}
                           </button>
                         </td>
                       </tr>

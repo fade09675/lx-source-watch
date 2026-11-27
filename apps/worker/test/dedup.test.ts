@@ -4,6 +4,7 @@ import {
   classifyDuplicate,
   comparableUrl,
   compareVersion,
+  dedupeSimilarEntries,
   isOfficialUrl,
   type DedupEntry,
 } from '../src/dedup';
@@ -89,5 +90,15 @@ describe('dedup', () => {
   it('compares versions numerically', () => {
     expect(compareVersion('1.10.0', '1.9.9')).toBeGreaterThan(0);
     expect(compareVersion('v2.0.0', '2.0.1')).toBeLessThan(0);
+  });
+
+  it('dedupes same sha across registry and candidate, preferring registry', () => {
+    const registry = entry({ id: 'same', kind: 'registry' });
+    const candidate = entry({ id: 'same', kind: 'candidate', version: '2.0.0' });
+    const other = entry({ id: 'other', sha256: 'b'.repeat(64), kind: 'candidate', version: '3.0.0' });
+    const unique = dedupeSimilarEntries([registry, candidate, other]);
+    expect(unique).toHaveLength(2);
+    expect(unique[0]?.kind).toBe('registry');
+    expect(unique[1]?.sha256).toBe('b'.repeat(64));
   });
 });

@@ -812,6 +812,7 @@ export const api = {
       body: JSON.stringify({ oldPassword, newPassword }),
     }),
 
+  overview: () => request<StatusEnvelope>('/api/overview'),
   status: (filters: StatusFilters = {}) =>
     request<StatusEnvelope>(
       `/api/status${query({
