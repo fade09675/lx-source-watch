@@ -705,6 +705,7 @@ export function WorkbenchPage() {
     cancelled: 0,
   };
   const scheduler = system?.scheduler;
+  const schedulerLoaded = system !== null;
   const runCounts = health?.lastRun?.counts;
   const cnSummary = status?.cn;
   const endpointSummary = status?.endpoints;
@@ -961,9 +962,11 @@ export function WorkbenchPage() {
                       <span className={`schedule-chip-last ${schedule.state?.lastOk === false ? 'bad' : ''}`}>
                         {'auto' in schedule
                           ? '每轮全量复测'
-                          : schedule.state?.lastAt
-                            ? `上次定时 ${schedule.state.lastOk === false ? '失败' : '成功'} · ${formatRelative(schedule.state.lastAt)}`
-                            : '上次定时 未运行'}
+                          : !schedulerLoaded
+                            ? '加载中…'
+                            : schedule.state?.lastAt
+                              ? `上次定时 ${schedule.state.lastOk === false ? '失败' : '成功'} · ${formatRelative(schedule.state.lastAt)}`
+                              : '上次定时 未运行'}
                       </span>
                     </div>
                     {schedule.key === 'cn-probe' ? (
@@ -1139,29 +1142,33 @@ export function WorkbenchPage() {
                           : '未运行';
                       return (
                         <tr key={schedule.key} className={enabled ? '' : 'is-off'}>
-                          <td>
+                          <td data-label="任务">
                             <span className="planned-task-name">
                               <Icon name={schedule.icon} size={15} />
                               <strong>{schedule.label}</strong>
                             </span>
                           </td>
-                          <td className="muted small">
+                          <td data-label="触发" className="muted small">
                             {auto ? '每次探测完成' : `每 ${schedule.interval} 小时`}
                           </td>
-                          <td className="muted small">
+                          <td data-label="下次运行" className="muted small">
                             {auto
                               ? '探测完成后自动'
-                              : schedule.state?.nextAt
-                                ? formatDateTime(schedule.state.nextAt)
-                                : '—'}
+                              : !schedulerLoaded
+                                ? '加载中…'
+                                : schedule.state?.nextAt
+                                  ? formatDateTime(schedule.state.nextAt)
+                                  : '—'}
                           </td>
-                          <td className={schedule.state?.lastOk === false ? 'bad small' : 'muted small'}>{last}</td>
-                          <td>
-                            <StatusBadge tone={auto ? 'idle' : enabled ? 'ok' : 'idle'} dot={false}>
-                              {auto ? '自动' : enabled ? '启用' : '已关闭'}
+                          <td data-label="上次运行" className={schedule.state?.lastOk === false ? 'bad small' : 'muted small'}>
+                            {!schedulerLoaded && !auto ? '加载中…' : last}
+                          </td>
+                          <td data-label="状态">
+                            <StatusBadge tone={auto ? 'idle' : !schedulerLoaded ? 'idle' : enabled ? 'ok' : 'idle'} dot={false}>
+                              {auto ? '自动' : !schedulerLoaded ? '加载中' : enabled ? '启用' : '已关闭'}
                             </StatusBadge>
                           </td>
-                          <td>
+                          <td data-label="操作">
                             {schedule.key === 'cn-probe' ? (
                               <button
                                 type="button"

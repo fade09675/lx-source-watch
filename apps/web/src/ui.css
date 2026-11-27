@@ -4412,3 +4412,67 @@ details.panel[open] > summary.panel-head::after {
 .structured-log-foot {
   margin-top: 8px;
 }
+
+@media (max-width: 760px) {
+  .planned-table,
+  .planned-table tbody,
+  .planned-table tr,
+  .planned-table td {
+    display: block;
+    width: auto;
+  }
+  .planned-table thead {
+    display: none;
+  }
+  .planned-table tr {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    background: var(--panel);
+  }
+  .planned-table tr:last-child {
+    margin-bottom: 0;
+  }
+  .planned-table td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border: 0;
+    padding: 3px 0;
+    text-align: right;
+  }
+  .planned-table td::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    color: var(--muted);
+    font-size: 10.5px;
+    font-weight: 500;
+  }
+  .planned-table td[data-label="任务"] {
+    display: block;
+    border-bottom: 1px solid var(--border);
+    padding: 0 0 7px;
+    margin-bottom: 5px;
+    text-align: left;
+  }
+  .planned-table td[data-label="任务"]::before {
+    display: none;
+  }
+  .planned-table .planned-task-name {
+    white-space: normal;
+  }
+  .planned-table td[data-label="操作"] {
+    justify-content: flex-end;
+    padding-top: 7px;
+    margin-top: 3px;
+    border-top: 1px dashed var(--border);
+  }
+  .planned-table td[data-label="操作"]::before {
+    display: none;
+  }
+  .planned-table td:last-child {
+    text-align: right;
+  }
+}
