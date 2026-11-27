@@ -48,6 +48,14 @@ export interface CnFile {
   endpoints?: CnEndpointRow[];
 }
 
+export interface CnProgressEvent {
+  stage: 'loading' | 'sources' | 'endpoints' | 'reporting';
+  done: number;
+  total: number;
+  unit?: string;
+  message?: string;
+}
+
 export interface CnVerifyOptions {
   urlsPath: string;
   outPath: string;
@@ -64,6 +72,8 @@ export interface CnVerifyOptions {
   statusPath?: string;
   /** 跳过接入点补测（只测平台播放地址）。 */
   skipEndpoints?: boolean;
+  /** 任务进度回调；没有任务系统时为空。 */
+  onProgress?: (event: CnProgressEvent) => void | Promise<void>;
 }
 
 export type CnScope = 'failed' | 'all';
@@ -263,10 +273,36 @@ export async function cnVerify(opts: CnVerifyOptions): Promise<CnFile> {
   });
 
   log.step(`国内补测：${unique.length} 条 URL，代理 ${opts.proxyLabel ?? opts.proxy.label}，并发 ${opts.concurrency ?? 5}`);
+  await opts.onProgress?.({
+    stage: 'loading',
+    done: 0,
+    total: unique.length,
+    unit: '地址',
+    message: `开始补测 ${unique.length} 个播放地址`,
+  });
   const label = opts.proxyLabel ?? opts.proxy.label;
-  const rows = await mapLimit(unique, Math.max(1, opts.concurrency ?? 5), (u) =>
-    probeUrl(u, opts.proxy as ProxyConfig, opts.timeoutMs ?? 15_000, label),
-  );
+  let completed = 0;
+  const rows = await mapLimit(unique, Math.max(1, opts.concurrency ?? 5), async (u) => {
+    const row = await probeUrl(u, opts.proxy as ProxyConfig, opts.timeoutMs ?? 15_000, label);
+    completed += 1;
+    if (completed === unique.length || completed % 10 === 0) {
+      await opts.onProgress?.({
+        stage: 'sources',
+        done: completed,
+        total: unique.length,
+        unit: '地址',
+        message: `已补测 ${completed}/${unique.length} 个地址`,
+      });
+    }
+    return row;
+  });
+  await opts.onProgress?.({
+    stage: 'endpoints',
+    done: unique.length,
+    total: unique.length,
+    unit: '地址',
+    message: '地址补测完成，正在检查接入点',
+  });
   const ok = rows.filter((r) => r.ok).length;
   const endpoints = opts.skipEndpoints
     ? undefined

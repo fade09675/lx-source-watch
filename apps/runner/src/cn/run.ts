@@ -1,4 +1,4 @@
-import { cnVerify, type CnFile, type CnScope } from '../cn.js';
+import { cnVerify, type CnFile, type CnProgressEvent, type CnScope } from '../cn.js';
 import { log } from '../logger.js';
 import { errorMessage } from '../util.js';
 import {
@@ -32,6 +32,7 @@ export interface CnRunOptions {
   statusPath?: string;
   skipEndpoints?: boolean;
   allowPrivate?: boolean;
+  onProgress?: (event: CnProgressEvent) => void | Promise<void>;
 }
 
 /** 普通代理优先（快），内核节点最后（要启动进程）；指定节点置顶。 */
@@ -127,6 +128,7 @@ export async function cnRun(opts: CnRunOptions): Promise<CnFile> {
         scope: opts.scope ?? 'failed',
         statusPath: opts.statusPath,
         skipEndpoints: opts.skipEndpoints,
+        onProgress: opts.onProgress,
       });
       await reportProxyCheck(
         opts.endpoint,

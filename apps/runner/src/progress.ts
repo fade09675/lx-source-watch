@@ -1,5 +1,5 @@
 export interface ProbeProgressEvent {
-  stage: 'loading' | 'sources' | 'reporting' | 'publishing';
+  stage: 'loading' | 'sources' | 'endpoints' | 'reporting' | 'publishing';
   done: number;
   total: number;
   unit?: string;

@@ -129,6 +129,7 @@ export interface CnProbeDispatchInput {
   taskId?: string;
   runId?: string;
   limit?: string;
+  progressToken?: string;
 }
 
 export async function dispatchCnProbe(env: Env, input: CnProbeDispatchInput): Promise<DispatchResult> {
@@ -137,6 +138,8 @@ export async function dispatchCnProbe(env: Env, input: CnProbeDispatchInput): Pr
     task_id: clean(input.taskId, 64),
     run_id: clean(input.runId, 64),
     limit: clean(input.limit, 6),
+    progress_token: clean(input.progressToken, 128),
+    progress_url: `${env.PUBLIC_ORIGIN ?? 'https://dash.dpdns.org'}/api/runner/progress`,
   });
 }
 

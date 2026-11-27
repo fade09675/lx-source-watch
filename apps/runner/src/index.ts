@@ -164,6 +164,8 @@ cn-probe:
   --probe-run-id <id>       触发本轮补测的探测运行 id（必填）
   --task-id <id>            关联任务 id
   --run-id <id>             关联运行 id
+  --progress-url <url>      任务进度回写接口
+  --progress-token <token>  本任务进度短期令牌
   --limit <n>               最多补测 n 条
   --proxy-id <id>           指定代理节点
   --max-proxies <n>         最多预检几个节点，默认取设置（8）
@@ -332,6 +334,8 @@ async function cmdCnProbe(args: Args): Promise<void> {
     probeRunId,
     taskId,
     runId,
+    progressUrl: str(args, 'progress-url') ?? process.env.LX_PROGRESS_URL,
+    progressToken: str(args, 'progress-token') ?? process.env.LX_PROGRESS_TOKEN,
     limit: num(args, 'limit'),
     preferredId: str(args, 'proxy-id'),
     maxProxies: num(args, 'max-proxies', 8),

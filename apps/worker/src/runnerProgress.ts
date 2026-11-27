@@ -48,7 +48,7 @@ export function createRunnerProgressRoutes(): Hono<{ Bindings: Env }> {
 
     const task = await getTaskWithSecret(c.env.DB, taskId);
     if (!task) return c.json({ error: 'not_found', message: '任务不存在' }, 404);
-    if (task.type !== 'probe' && task.type !== 'source-test') {
+    if (task.type !== 'probe' && task.type !== 'source-test' && task.type !== 'cn-probe') {
       return c.json({ error: 'bad_request', message: '该任务不支持进度回写' }, 400);
     }
     if (task.payload.progressToken !== token) {

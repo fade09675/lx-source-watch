@@ -1,8 +1,9 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import type { CnFile } from '../cn.js';
+import type { CnFile, CnProgressEvent } from '../cn.js';
 import { cnRun } from './run.js';
 import { httpRequest } from '../net/http.js';
 import { log } from '../logger.js';
+import { createProgressReporter } from '../progress.js';
 import { errorMessage } from '../util.js';
 
 export interface CnProbeTaskOptions {
@@ -11,6 +12,8 @@ export interface CnProbeTaskOptions {
   probeRunId: string;
   taskId: string;
   runId: string;
+  progressUrl?: string;
+  progressToken?: string;
   limit?: number;
   preferredId?: string;
   maxProxies?: number;
@@ -79,6 +82,23 @@ export async function runCnProbeTask(options: CnProbeTaskOptions): Promise<CnFil
   );
   log.step(`国内补测任务：${input.urls.length} 个候选地址（来源运行 ${options.probeRunId}）`);
 
+  const reporter = createProgressReporter({
+    url: options.progressUrl,
+    token: options.progressToken,
+    taskId: options.taskId,
+    runId: options.runId,
+  });
+  let lastDone = 0;
+  let lastTotal = 0;
+  const report = async (event: CnProgressEvent) => {
+    // 换代理会从 0 重新测；任务进度只允许前进，避免进度条倒退。
+    const done = Math.max(lastDone, event.done);
+    const total = Math.max(lastTotal, event.total, done);
+    lastDone = done;
+    lastTotal = total;
+    await reporter?.report({ ...event, done, total });
+  };
+
   try {
     const cn = await cnRun({
       urlsPath: 'out/urls.json',
@@ -92,6 +112,14 @@ export async function runCnProbeTask(options: CnProbeTaskOptions): Promise<CnFil
       limit: options.limit,
       scope: 'all',
       allowPrivate: options.allowPrivate,
+      onProgress: report,
+    });
+    await report({
+      stage: 'reporting',
+      done: lastTotal,
+      total: lastTotal,
+      unit: '地址',
+      message: '补测完成，正在回传结果',
     });
     const raw = await readFile('out/cn.json', 'utf8').catch(() => '');
     const file = (raw ? JSON.parse(raw) : cn) as CnFile;

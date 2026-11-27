@@ -100,7 +100,7 @@ export interface TaskPayload {
   eventDays?: number;
   probeRunId?: string;
   force?: boolean;
-  /** 仅探测任务使用：允许探测 job 回写本任务进度的短期令牌。 */
+  /** 探测/补测任务使用：允许 job 回写本任务进度的短期令牌。 */
   progressToken?: string;
 }
 
@@ -226,8 +226,11 @@ export async function createTask(
   const id = input.id ?? newTaskId();
   const runId = input.runId ?? newRunId();
   const payload: TaskPayload = { ...(input.payload ?? {}) };
-  // 探测 job 本身零密钥；给它一个只能回写本任务进度的短期令牌。
-  if ((input.type === 'probe' || input.type === 'source-test') && !payload.progressToken) {
+  // 探测/补测 job 本身零密钥；给它们一个只能回写本任务进度的短期令牌。
+  if (
+    (input.type === 'probe' || input.type === 'source-test' || input.type === 'cn-probe') &&
+    !payload.progressToken
+  ) {
     payload.progressToken = randomId(32);
   }
   await db
@@ -463,7 +466,13 @@ export function buildDispatch(
   if (type === 'cn-probe') {
     return {
       workflow: 'cn-probe',
-      cnProbe: { probeRunId: payload.probeRunId ?? '', taskId, runId, limit: payload.limit },
+      cnProbe: {
+        probeRunId: payload.probeRunId ?? '',
+        taskId,
+        runId,
+        limit: payload.limit,
+        progressToken: payload.progressToken,
+      },
     };
   }
   if (type === 'proxy-fetch-sub') {
