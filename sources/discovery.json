@@ -1,19 +1,53 @@
 {
   "version": 1,
-  "maxFetchPerRun": 30,
-  "maxFetchPerRepo": 8,
+  "maxFetchPerRun": 40,
+  "maxFetchPerRepo": 5,
   "repos": [
     {
-      "repo": "pdone/lx-music-source",
+      "repo": "guoyue2010/lxmusic-",
+      "branch": "main",
+      "pathPrefixes": [
+        "V2603/优质-支持四平台FLAC/",
+        "V2603/良好-支持至少两平台FLAC/"
+      ],
+      "exclude": ["node_modules", ".min.js", "dist/", "docs/", "历史版本"],
+      "enabled": true
+    },
+    {
+      "repo": "wzh15802/lxmusic",
       "branch": "main",
       "pathPrefixes": [],
+      "exclude": ["node_modules", ".min.js", "dist/", "docs/", "历史版本"],
+      "enabled": true
+    },
+    {
+      "repo": "Lingeng27/lx-music-1010-source",
+      "branch": "main",
+      "pathPrefixes": [],
+      "exclude": ["node_modules", ".min.js", "dist/", "docs/", "历史版本"],
+      "enabled": true
+    },
+    {
+      "repo": "tfappstore/lx-music-source",
+      "branch": "main",
+      "pathPrefixes": [
+        "kulao/",
+        "changqing/",
+        "flower/",
+        "grass/",
+        "huibq/",
+        "lx/",
+        "nianxin/",
+        "yiyin/",
+        "xiazaiqi/"
+      ],
       "exclude": ["node_modules", ".min.js", "dist/", "docs/"],
       "enabled": true
     },
     {
-      "repo": "shellsec/lx-music-source",
-      "branch": "master",
-      "pathPrefixes": ["sources/"],
+      "repo": "pdone/lx-music-source",
+      "branch": "main",
+      "pathPrefixes": [],
       "exclude": ["node_modules", ".min.js", "dist/", "docs/"],
       "enabled": true
     },
@@ -35,13 +69,6 @@
       "repo": "hwxlikemi/lxs",
       "branch": "main",
       "pathPrefixes": [],
-      "exclude": ["node_modules", ".min.js", "dist/", "docs/"],
-      "enabled": true
-    },
-    {
-      "repo": "tfappstore/lx-music-source",
-      "branch": "main",
-      "pathPrefixes": ["kulao/"],
       "exclude": ["node_modules", ".min.js", "dist/", "docs/"],
       "enabled": true
     }
