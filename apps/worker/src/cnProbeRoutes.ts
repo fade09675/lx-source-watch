@@ -101,7 +101,7 @@ export function createCnProbeRoutes(): Hono<{ Bindings: Env }> {
       const message = `国内补测失败：${parsed.error.slice(0, 500)}`;
       await c.env.DB.prepare(
         `UPDATE runs SET status = 'failed', message = ?, error = ?, runner = 'github-actions',
-            check_scope = 'cn', trigger = 'schedule', generated_at = ?, log_key = ?, duration_ms = ?
+            check_scope = 'cn', generated_at = ?, log_key = ?, duration_ms = ?
           WHERE run_id = ?`,
       )
         .bind(message, parsed.error.slice(0, 500), now, logKey, durationMs, parsed.runId)
@@ -185,7 +185,7 @@ export function createCnProbeRoutes(): Hono<{ Bindings: Env }> {
     const message = `国内补测：源 ${sourceIds.size}（可用 ${counts.available} / 部分 ${counts.partial} / 失效 ${counts.unavailable} / 未测 ${counts.untested}），平台 ${counts.platformsOk}/${counts.platformsTested}，接入点 ${counts.endpointsOk}/${counts.endpointsTotal}`;
     await c.env.DB.prepare(
       `UPDATE runs SET status = 'success', message = ?, error = NULL, generated_at = ?,
-          runner = 'github-actions', check_scope = 'cn', trigger = 'schedule', log_key = ?,
+          runner = 'github-actions', check_scope = 'cn', log_key = ?,
           total = ?, available = ?, partial = ?, unavailable = ?, untested = ?,
           platforms_ok = ?, platforms_tested = ?, endpoints_ok = ?, endpoints_total = ?,
           cn_tested = ?, cn_ok = ?, duration_ms = ?
