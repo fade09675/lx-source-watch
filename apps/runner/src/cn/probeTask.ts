@@ -1,6 +1,5 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import type { CnFile, CnProgressEvent } from '../cn.js';
-import type { CnPlatformTarget } from '@lx/shared';
 import { cnRun } from './run.js';
 import { httpRequest } from '../net/http.js';
 import { log } from '../logger.js';
@@ -27,7 +26,6 @@ interface CnInputFile {
   createdAt: string;
   snapshot: unknown;
   urls: unknown[];
-  platformTargets?: CnPlatformTarget[];
 }
 
 function apiBase(endpoint: string): string {
@@ -111,7 +109,6 @@ export async function runCnProbeTask(options: CnProbeTaskOptions): Promise<CnFil
       limit: options.limit,
       scope: 'all',
       allowPrivate: options.allowPrivate,
-      platformTargets: input.platformTargets,
       onProgress: report,
     });
     await report({

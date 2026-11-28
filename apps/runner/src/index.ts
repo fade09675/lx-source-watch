@@ -6,7 +6,7 @@ import {
   SnapshotSchema,
   type Quality,
 } from '@lx/shared';
-import { cnExecute, cnVerify } from './cn.js';
+import { cnVerify } from './cn.js';
 import { runProxyTest } from './cn/proxyTest.js';
 import { runProxyFetch } from './cn/proxyFetch.js';
 import { runCnProbeTask } from './cn/probeTask.js';
@@ -103,7 +103,7 @@ lx-source-watch runner
   pnpm probe [选项]        监测来源清单并写出快照
   pnpm discover [选项]     从 GitHub 发现候选脚本
   pnpm candidates [选项]   对候选脚本做初始化体检
-  pnpm cn [选项]           国内代理补测（verify=只测已解析 URL / --execute 重跑脚本）
+  pnpm cn [选项]           国内代理补测（只测已解析 URL）
   pnpm cn-probe [选项]     执行独立国内补测任务（从 Worker 取输入并回传结果）
   pnpm proxy-test [选项]   代理池测活：出口、地区、成功率写回
   pnpm proxy-fetch [选项]  Actions 侧拉取代理订阅并回传 Worker 解析
@@ -154,9 +154,7 @@ cn:
   --status-in <path>        探测快照，用来补测接入点，默认 out/status.json
   --skip-endpoints          跳过接入点国内连通性补测
   --proxy <url>             直接指定代理，跳过代理池
-  --execute                 走代理重新执行脚本（危险，仅 trusted 来源）
-  --registry <path>
-  --only a,b --platform kg --limit <n> --concurrency <n> --timeout <ms>
+  --platform kg --limit <n> --concurrency <n> --timeout <ms>
 
 cn-probe:
   --endpoint <url>          默认读 INGEST_URL
@@ -282,7 +280,7 @@ async function cmdCandidates(args: Args): Promise<void> {
 async function cmdCn(args: Args): Promise<void> {
   const endpoint = str(args, 'endpoint') ?? process.env.INGEST_URL ?? '';
   const token = str(args, 'token') ?? process.env.RUNNER_TOKEN ?? '';
-  if (!bool(args, 'execute') && endpoint && token && !str(args, 'proxy')) {
+  if (endpoint && token && !str(args, 'proxy')) {
     await cnRun({
       urlsPath: str(args, 'urls-in', 'out/urls.json') as string,
       outPath: str(args, 'out', 'out/cn.json') as string,
@@ -305,19 +303,6 @@ async function cmdCn(args: Args): Promise<void> {
 
   const proxy = parseProxy(str(args, 'proxy') ?? process.env.CN_PROXY_URL);
   if (!proxy) throw new Error('缺少国内代理：传 --proxy、设置 CN_PROXY_URL，或用 --endpoint + --token 从代理池取');
-  if (bool(args, 'execute')) {
-    await cnExecute({
-      registryPath: str(args, 'registry', 'sources/registry.json') as string,
-      outPath: str(args, 'out', 'out/cn-execute.json') as string,
-      proxy,
-      only: splitList(str(args, 'only')),
-      limit: num(args, 'limit', 5),
-      concurrency: num(args, 'concurrency', 1),
-      timeoutMs: num(args, 'timeout', 15_000),
-      platform: str(args, 'platform'),
-    });
-    return;
-  }
   await cnVerify({
     urlsPath: str(args, 'urls-in', 'out/urls.json') as string,
     outPath: str(args, 'out', 'out/cn.json') as string,

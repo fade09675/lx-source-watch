@@ -1,13 +1,10 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { SnapshotSchema, type SourceResult } from '@lx/shared';
+import { SnapshotSchema } from '@lx/shared';
 import { log } from './logger.js';
 import { httpRequest, type ProxyConfig } from './net/http.js';
-import { loadRegistry } from './registry.js';
-import { loadScript } from './script.js';
 import { errorMessage, mapLimit, nowIso } from './util.js';
 import type { UrlRecord } from './probe/platform.js';
-import { probeSource } from './probe/source.js';
 
 export interface CnRow {
   sourceId: string;
@@ -329,47 +326,4 @@ export async function cnVerify(opts: CnVerifyOptions): Promise<CnFile> {
   await writeFile(opts.outPath, `${JSON.stringify(file, null, 2)}\n`, 'utf8');
   log.success(`国内补测完成：${ok}/${rows.length} 可达（${opts.proxyLabel ?? opts.proxy.label}）`);
   return file;
-}
-
-export interface CnExecuteOptions extends Omit<CnVerifyOptions, 'urlsPath'> {
-  registryPath: string;
-  only?: string[];
-  limit?: number;
-}
-
-/**
- * 走代理重新执行脚本（高风险模式）。
- * 会执行第三方 JS，并让脚本看到代理凭据，因此只应对 trusted 来源开启。
- */
-export async function cnExecute(opts: CnExecuteOptions): Promise<{ sources: SourceResult[]; outPath: string }> {
-  const sources = await loadRegistry(opts.registryPath, { only: opts.only, limit: opts.limit ?? 5 });
-  log.step(`国内执行模式：${sources.length} 个来源，代理 ${opts.proxy.label}`);
-  const results = await mapLimit(sources, 1, async (src) => {
-    try {
-      const script = await loadScript(src, { proxy: opts.proxy });
-      const outcome = await probeSource(src, script, {
-        mode: 'default',
-        requestTimeoutMs: 30_000,
-        platformTimeoutMs: 20_000,
-        streamTimeoutMs: opts.timeoutMs ?? 15_000,
-        initTimeoutMs: 12_000,
-        scriptTimeoutMs: 15_000,
-        platformConcurrency: 3,
-        proxy: opts.proxy,
-      });
-      log.info(`✓ ${src.id} ${outcome.result.stats.ok}/${outcome.result.stats.tested}`);
-      return outcome.result;
-    } catch (e) {
-      log.warn(`× ${src.id}: ${errorMessage(e)}`);
-      return undefined;
-    }
-  });
-  const kept = results.filter((r): r is SourceResult => Boolean(r));
-  await mkdir(dirname(opts.outPath), { recursive: true });
-  await writeFile(
-    opts.outPath,
-    `${JSON.stringify({ version: 1, generatedAt: nowIso(), proxy: opts.proxy.label, sources: kept }, null, 2)}\n`,
-    'utf8',
-  );
-  return { sources: kept, outPath: opts.outPath };
 }

@@ -662,7 +662,7 @@ export function WorkbenchPage() {
         payload: { probeRunId },
       });
       const message = result.dispatch.dispatched
-        ? '已派发国内补测任务，约 2–3 分钟后刷新可看到结果。'
+        ? '已派发国内补测任务，几分钟后刷新可看到结果。'
         : `国内补测任务已入队：${result.dispatch.message ?? '等待派发'}`;
       setAction(message);
       window.setTimeout(() => void load(), 3000);

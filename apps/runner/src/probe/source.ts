@@ -23,7 +23,7 @@ export interface SourceProbeOptions {
   platformConcurrency: number;
   proxy?: ProxyConfig;
   allowPrivate?: boolean;
-  /** 只测这些平台 key；国内平台补测用，避免重复测已通过平台。 */
+  /** 只测这些平台 key；可选，用于单平台探测。 */
   onlyPlatforms?: string[];
   onPlatform?: (key: string, outcome: PlatformOutcome) => void;
 }

@@ -235,19 +235,11 @@ export const IngestUrlSchema = z.object({
 });
 export type IngestUrl = z.infer<typeof IngestUrlSchema>;
 
-export const CnPlatformTargetSchema = z.object({
-  sourceId: z.string().min(1).max(80),
-  title: z.string().min(1).max(160),
-  scriptUrl: z.string().url().max(2048),
-  platforms: z.array(z.string().min(1).max(32)).min(1).max(16),
-});
-export type CnPlatformTarget = z.infer<typeof CnPlatformTargetSchema>;
-
 export const CnProbeRowSchema = z.object({
   sourceId: z.string().min(1).max(80),
   platform: z.string().min(1).max(32),
   quality: z.string().max(32).optional(),
-  // 国内平台补测的失败行没有播放地址，允许空 URL。
+  // 兼容旧数据：历史平台补测的失败行没有播放地址。
   url: z.union([z.string().url(), z.literal('')]),
   proxy: z.string().max(160).optional(),
   ok: z.boolean(),

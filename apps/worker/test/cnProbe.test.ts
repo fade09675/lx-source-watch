@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { selectCnUrls, selectPlatformTargets } from '../src/cnProbe.js';
+import { selectCnUrls } from '../src/cnProbe.js';
 
 describe('selectCnUrls', () => {
   it('保留全部地址，不论海外是否通过', () => {
@@ -24,47 +24,5 @@ describe('selectCnUrls', () => {
       ok: index % 2 === 0,
     }));
     expect(selectCnUrls(urls)).toHaveLength(254);
-  });
-});
-
-describe('selectPlatformTargets', () => {
-  it('只选声明但失败或未测的平台', () => {
-    const targets = selectPlatformTargets({
-      sources: [
-        {
-          id: 'a',
-          title: '源 A',
-          url: 'https://x/a.js',
-          platforms: [
-            { key: 'kw', declared: true, tested: false, ok: false },
-            { key: 'tx', declared: true, tested: true, ok: false },
-            { key: 'wy', declared: true, tested: true, ok: true },
-            { key: 'mg', declared: false, tested: false, ok: false },
-          ],
-        },
-      ],
-    });
-    expect(targets).toEqual([
-      { sourceId: 'a', title: '源 A', scriptUrl: 'https://x/a.js', platforms: ['kw', 'tx'] },
-    ]);
-  });
-
-  it('跳过没有脚本地址或没有失败平台的源', () => {
-    const targets = selectPlatformTargets({
-      sources: [
-        {
-          id: 'a',
-          title: '无地址',
-          platforms: [{ key: 'kw', declared: true, tested: true, ok: false }],
-        },
-        {
-          id: 'b',
-          title: '全通过',
-          url: 'https://x/b.js',
-          platforms: [{ key: 'kw', declared: true, tested: true, ok: true }],
-        },
-      ],
-    });
-    expect(targets).toEqual([]);
   });
 });
