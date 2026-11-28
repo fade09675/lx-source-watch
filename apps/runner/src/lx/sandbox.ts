@@ -207,7 +207,7 @@ function makeLxRequest(proxy: ProxyConfig | undefined, allowPrivate: boolean | u
         allowPrivate,
       });
 
-      const contentType = res.headers['content-type'] ?? '';
+      const contentType = (res.headers['content-type'] ?? '').toLowerCase();
       const text = res.body.toString('utf8');
       let parsed: unknown = text;
       const head = text.slice(0, 64).trimStart();
@@ -218,12 +218,20 @@ function makeLxRequest(proxy: ProxyConfig | undefined, allowPrivate: boolean | u
           parsed = text;
         }
       }
+      // 部分音源会用 Range 请求校验音频头；这类响应必须保留原始字节，
+      // 不能把二进制按 UTF-8 解码后再交给脚本。
+      const binary =
+        contentType.startsWith('audio/') ||
+        contentType.startsWith('video/') ||
+        contentType.startsWith('image/') ||
+        contentType.includes('application/octet-stream') ||
+        contentType.includes('application/mpeg');
       traceStore.getStore()?.push({ host: hostOf(String(url)), status: res.status });
       return {
         statusCode: res.status,
         statusMessage: res.statusText,
         headers: res.headers,
-        body: parsed,
+        body: binary ? res.body : parsed,
         raw: res.body,
         bytes: res.body.length,
       };

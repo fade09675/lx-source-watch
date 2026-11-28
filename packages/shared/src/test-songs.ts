@@ -38,6 +38,7 @@ export const TEST_SONGS: Record<string, TestCase[]> = {
       label: '酷我候选 1',
       musicInfo: {
         musicrid: 'MUSIC_321946135',
+        rid: '321946135',
         songmid: '321946135',
         hash: 'MUSIC_321946135',
         name: '测试曲',
@@ -74,7 +75,8 @@ export const TEST_SONGS: Record<string, TestCase[]> = {
       id: 'wy-1',
       label: '网易云候选 1',
       musicInfo: {
-        id: 1357375695,
+        id: '1357375695',
+        songmid: '1357375695',
         name: '测试曲',
         singer: '测试',
         albumName: '测试专辑',
@@ -84,7 +86,7 @@ export const TEST_SONGS: Record<string, TestCase[]> = {
       id: 'wy-2',
       label: '网易云候选 2',
       musicInfo: {
-        id: 347230,
+        id: '347230',
         name: '测试曲',
         singer: '测试',
         albumName: '测试专辑',
@@ -93,10 +95,25 @@ export const TEST_SONGS: Record<string, TestCase[]> = {
   ],
   mg: [
     {
+      id: 'mg-jay',
+      label: '咪咕候选 0',
+      musicInfo: {
+        copyrightId: '60054704965',
+        songId: '600929000000096577',
+        contentId: '600929000000096577',
+        songmid: '600929000000096577',
+        albumId: '1133556323',
+        name: '测试曲',
+        singer: '测试',
+      },
+    },
+    {
       id: 'mg-1',
       label: '咪咕候选 1',
       musicInfo: {
         copyrightId: '600913000009337537',
+        songId: '6005752DXKE',
+        contentId: '6005752DXKE',
         songmid: '6005752DXKE',
         albumId: '1133556323',
         name: '测试曲',
