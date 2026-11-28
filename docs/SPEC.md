@@ -103,7 +103,7 @@
 
 ### 5.6 管理页
 
-- `/admin/sources`：单卡片列表，行内显示版本、中文状态、来源、接入点/镜像/最近变化；新增/编辑走右侧抽屉；备用线路导入折叠在卡片内；列表分页。
+- `/admin/sources`：单卡片列表，行内显示版本、中文状态、来源、接入点/镜像/最近变化；新增/编辑走右侧抽屉；新增支持「在线链接 / 上传 JS」两种模式，上传模式显示文件/名称/分类/主页/备注/保存后立即测试；上传来源行显示「上传」标记与「下载」；备用线路导入折叠在卡片内；列表分页。
 - `/admin/proxies`：顶部 3 张统计（节点总数/最近可用/订阅数）、订阅表、批量导入、折叠的手动添加节点、节点表；订阅与节点列表分别分页。
 - `/admin/proxy-tests`：测活轮次与逐节点日志、CSV；逐节点结果分页。
 - `/admin/settings`：调度、发现扩容（每轮/每仓库上限）、国内补测、测活、自动发现/收录（最少声明平台数、可测试平台要求）、保留天数、加速镜像、清理运行记录、额度护栏、系统信息；三列面板，清理与镜像占满整行，移动端单列；关闭的任务显示“已关闭，未安排下次运行”。
@@ -186,6 +186,9 @@
 | PATCH/DELETE | `/api/admin/discovery-repos/:id` | 启停/修改/删除自定义发现仓库 |
 | POST | `/api/admin/sources/backups/preview` | 解析备用线路地址并匹配音源，不写库 |
 | POST | `/api/admin/sources/backups/import` | 把匹配结果追加为音源镜像 |
+| POST | `/api/admin/sources/upload` | 上传 `.js` 脚本创建正式源；同 sha 409；可选创建 source-test 任务 |
+| GET | `/api/admin/sources/:id/script` | 下载该音源的脚本文件（只读，不建任务） |
+| GET | `/scripts/:sha256.js` | 公开的哈希脚本地址；长缓存、CORS `*` |
 | GET | `/api/health` | 健康检查 |
 | POST | `/api/ingest` | 仅 publish job，HMAC + runId 幂等 |
 | POST | `/api/admin/proxies/preview` | 导入预览，只统计不写库 |
@@ -233,6 +236,15 @@
 - 对账：`reconcileTaskRuns` 每 5 分钟检查 running 任务；优先 `github_run_id`，否则取 startedAt-120s 后最早 run；无 run 超 20 分钟 failed，run 已结束超 60 秒未回写则 failed/「成功但未回写」。
 - 重试：仅 failed/cancelled 可手动重试；派发 429/502（非令牌/权限/未配置）自动重试最多 2 次；partial 不自动重试。
 - 操作记录：所有管理员写操作写 `admin_activity`；同步 CRUD 不建 task，但必须留操作记录。
+
+### 6.8 上传型音源与脚本下载
+
+- 存储：脚本内容存 KV `script:<sha256>`；`source_files(source_id, sha256, filename, bytes, created_at)` 记录归属，同 sha 已存在时复用，不重复写 KV。
+- 上传：`POST /api/admin/sources/upload`，仅 `.js`、≤2MB、非 NUL/HTML、≥50 字符；按 sha256 去重；创建 `origin='upload'` 的正式源，公开地址为 `PUBLIC_ORIGIN/scripts/<sha256>.js`。
+- 公开：`GET /scripts/:sha256.js`，不可枚举，`cache-control: public, max-age=31536000, immutable`，`access-control-allow-origin: *`。
+- 选项：`testAfterSave` 为 true 时创建 `source-test` 任务（走统一队列）；否则只建源。
+- 下载：`GET /api/admin/sources/:id/script` 只读，不建任务；返回 attachment，中文文件名用 `filename*=UTF-8''`；来源音源在详情页显示「下载 JS」。
+- 删除源时同步删除 `source_files` 记录，KV 内容按 sha 复用/保留。
 
 ---
 

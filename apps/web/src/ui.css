@@ -3272,6 +3272,27 @@ body {
   grid-column: auto;
 }
 
+.source-create-tabs {
+  width: fit-content;
+  margin: 0 0 14px;
+}
+
+.checkbox-line {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px !important;
+  color: var(--text) !important;
+}
+
+.checkbox-line input {
+  width: auto !important;
+}
+
+.source-form input[type='file'] {
+  padding: 8px;
+  font-size: 12px;
+}
+
 .drawer-actions {
   display: flex;
   align-items: center;

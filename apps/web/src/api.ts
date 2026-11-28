@@ -707,6 +707,30 @@ export interface SourceInputPayload {
   notes?: string;
 }
 
+export interface UploadSourcePayload {
+  filename: string;
+  content: string;
+  title?: string;
+  category?: string;
+  homepage?: string;
+  notes?: string;
+  testAfterSave?: boolean;
+}
+
+export interface UploadedSourceResult {
+  ok: boolean;
+  source: AdminSource;
+  file: { sha256: string; bytes: number; filename: string; url: string };
+  testTaskId: string | null;
+  testStatus: string | null;
+  testDispatchMessage: string | null;
+}
+
+export interface DownloadedScript {
+  blob: Blob;
+  filename: string;
+}
+
 export interface DiscoveryRepoView {
   id: string;
   repo: string;
@@ -1010,6 +1034,40 @@ export const api = {
   sources: () => request<SourceListResult>('/api/admin/sources'),
   createSource: (input: SourceInputPayload) =>
     request<{ source: AdminSource }>('/api/admin/sources', { method: 'POST', body: JSON.stringify(input) }),
+  uploadSource: (input: UploadSourcePayload) =>
+    request<UploadedSourceResult>('/api/admin/sources/upload', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  downloadSourceScript: async (id: string): Promise<DownloadedScript> => {
+    const response = await fetch(`/api/admin/sources/${encodeURIComponent(id)}/script`, {
+      credentials: 'same-origin',
+      headers: { accept: 'application/javascript' },
+    });
+    if (response.status === 401) {
+      const next = encodeURIComponent(`${window.location.pathname}${window.location.search}`);
+      window.location.assign(`/login?next=${next}`);
+      throw new ApiError(401, 'unauthorized', '请先登录');
+    }
+    if (!response.ok) {
+      let body: Partial<ApiErrorBody> = {};
+      try {
+        body = (await response.json()) as Partial<ApiErrorBody>;
+      } catch {
+        // 非 JSON 错误体走默认文案。
+      }
+      throw new ApiError(
+        response.status,
+        body.error ?? 'http_error',
+        body.message ?? `下载失败（HTTP ${response.status}）`,
+      );
+    }
+    const disposition = response.headers.get('content-disposition') ?? '';
+    const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+    const fallback = /filename="?([^";]+)"?/i.exec(disposition)?.[1];
+    const filename = encoded ? decodeURIComponent(encoded) : fallback || 'source.js';
+    return { blob: await response.blob(), filename };
+  },
   updateSource: (id: string, patch: SourceInputPayload) =>
     request<{ source: AdminSource }>(`/api/admin/sources/${encodeURIComponent(id)}`, {
       method: 'PATCH',

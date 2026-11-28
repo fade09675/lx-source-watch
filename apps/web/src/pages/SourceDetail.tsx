@@ -29,6 +29,8 @@ export function SourceDetailPage() {
   const [copiedEndpoint, setCopiedEndpoint] = useState('');
   const [copyTarget, setCopyTarget] = useState('recommended');
   const [tab, setTab] = useState<DetailTab>('overview');
+  const [downloading, setDownloading] = useState(false);
+  const [downloadNote, setDownloadNote] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -93,6 +95,28 @@ export function SourceDetailPage() {
       window.setTimeout(() => setCopiedEndpoint(''), 1800);
     } catch {
       setCopiedEndpoint('');
+    }
+  }
+
+  async function downloadScript() {
+    setDownloading(true);
+    setDownloadNote('');
+    try {
+      const { blob, filename } = await api.downloadSourceScript(id);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setDownloadNote(`已下载 ${filename}`);
+      window.setTimeout(() => setDownloadNote(''), 2200);
+    } catch (e) {
+      setDownloadNote(e instanceof ApiError ? e.message : '下载脚本失败');
+    } finally {
+      setDownloading(false);
     }
   }
 
@@ -218,6 +242,17 @@ export function SourceDetailPage() {
           <button type="button" className="primary-button" onClick={() => void copyLink()}>
             {copied || '复制导入链接'}
           </button>
+          {(source.origin === 'upload' || source.url.includes('/scripts/')) && (
+            <button
+              type="button"
+              className="ghost-button"
+              disabled={downloading}
+              onClick={() => void downloadScript()}
+            >
+              {downloading ? '下载中…' : '下载 JS'}
+            </button>
+          )}
+          {downloadNote && <span className="muted small">{downloadNote}</span>}
           {source.homepage && (
             <a className="ghost-button" href={source.homepage} target="_blank" rel="noreferrer">
               <Icon name="external" size={13} />

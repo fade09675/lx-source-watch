@@ -62,6 +62,12 @@ jobs:
         run: pnpm exec wrangler d1 execute lx-source-watch --remote --file=migrations/0022_task_reconcile.sql
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      - name: 应用上传脚本索引迁移
+        working-directory: apps/worker
+        run: pnpm exec wrangler d1 execute lx-source-watch --remote --file=migrations/0023_source_files.sql
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: 8e8c755370e9a2bf44146edf108f3e39
 
       - name: 部署

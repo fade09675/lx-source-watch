@@ -17,7 +17,7 @@
 
 Cloudflare 资源：
 
-- KV：`SNAPSHOT`，只存最新快照与运行日志。
+- KV：`SNAPSHOT`，存最新快照、运行日志，以及上传音源的脚本内容（`script:<sha256>`）。
 - D1：`lx-source-watch`，存历史、任务、代理、订阅、候选、设置。
 - Worker：`lx-source-watch`，静态资源来自 `apps/web/dist`。
 
@@ -169,7 +169,7 @@ corepack pnpm --filter @lx/worker exec wrangler deploy
 
 `apps/runner/**` 的改动不会触发 Worker 部署；测活/探测 workflow 每次运行都会检出最新代码。
 
-部署流程还会在 `wrangler deploy` 前执行幂等的 `migrations/0022_task_reconcile.sql`（任务对账索引），避免新代码上线但 D1 缺索引。新增迁移时要把文件加入 deploy workflow 的同一执行步骤。
+部署流程还会在 `wrangler deploy` 前执行幂等的 `migrations/0022_task_reconcile.sql`（任务对账索引）和 `migrations/0023_source_files.sql`（上传脚本归属表），避免新代码上线但 D1 缺表/缺索引。新增迁移时要把文件加入 deploy workflow 的同一执行步骤。
 
 自检：
 
@@ -229,6 +229,8 @@ curl.exe -s https://dash.example.com/api/health
 - [ ] 失败/取消任务可重试，重试任务带 `retryOf/retryCount`；partial 任务不出现重试按钮
 - [ ] 运行详情日志可切「结构化 / 文本」，JSONL 接口返回 `available=true`；旧 run 也能从文本转换
 - [ ] 移动端计划任务为卡片，无横向溢出；历史单源测试任务按运行明细显示单源统计
+- [ ] 音源管理上传 `.js` 后得到公开 `/scripts/<sha>.js` 地址；同内容重复上传返回 409；可下载 JS，中文文件名正常
+- [ ] 上传勾选「保存后立即测试」会在任务中心创建 `source-test` 任务，不是直接派发
 - [ ] `pnpm audit:ui` 通过（需 `E2E_PASSWORD`，可设 `E2E_BASE_URL`；桌面/移动无横向溢出、无控制台错误）
 - [ ] Cloudflare 控制台 KV 写约为每轮 1 次；D1 写未超过护栏
 

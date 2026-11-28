@@ -7,6 +7,8 @@ import { createAdminProxyRoutes, createRunnerProxyRoutes } from './proxyRoutes';
 import { createRunnerProxyTestReportRoutes } from './proxyTestReport';
 import { createRunnerSubscriptionRoutes } from './proxySubRoutes';
 import { createCnProbeRoutes } from './cnProbeRoutes';
+import { createScriptRoutes } from './scriptRoutes';
+import { createSourceUploadRoutes } from './sourceUploadRoutes';
 import { createRunnerConfigRoutes } from './runnerConfig';
 import { createRunnerProgressRoutes } from './runnerProgress';
 import { runScheduler } from './scheduler';
@@ -46,6 +48,7 @@ export function isPublicPath(pathname: string): boolean {
   return (
     PUBLIC_PATHS.has(pathname) ||
     pathname.startsWith('/assets/') ||
+    pathname.startsWith('/scripts/') ||
     pathname === '/api/runner' ||
     pathname.startsWith('/api/runner/')
   );
@@ -140,6 +143,8 @@ app.use('/api/*', async (c, next) => {
   }
 });
 
+app.route('/scripts', createScriptRoutes());
+app.route('/api/admin/sources', createSourceUploadRoutes());
 app.route('/api/admin/proxies', createAdminProxyRoutes());
 app.route('/api/runner/proxies', createRunnerProxyRoutes());
 app.route('/api/runner/config', createRunnerConfigRoutes());

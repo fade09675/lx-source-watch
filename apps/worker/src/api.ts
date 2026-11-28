@@ -68,6 +68,7 @@ import {
   updateSourceRegistry,
   type SourceInput,
 } from './sourceRegistry';
+import { deleteSourceFile } from './sourceFiles';
 import { getSchedulerStatus } from './scheduler';
 import { autoPromoteCandidates, promoteCandidate } from './candidatePromotion';
 import { loadSettings, resetSettings, saveSettings } from './settings';
@@ -1086,6 +1087,7 @@ export function createApi(): Hono<Ctx> {
       );
     }
     await deleteSourceRegistry(c.env.DB, id);
+    await deleteSourceFile(c.env, id);
     return Response.json({ ok: true, id }, { headers: { 'cache-control': CACHE_PRIVATE } });
   });
 
