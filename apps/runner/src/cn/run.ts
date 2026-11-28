@@ -10,8 +10,10 @@ import {
   isUdpOnly,
   reportProxyCheck,
   testRunnerProxy,
+  type ProxyCheck,
   type RunnerProxy,
 } from './proxyPool.js';
+import type { ChainHop } from './mihomo.js';
 import { selectHops } from './proxyTest.js';
 import { fetchRunnerConfig } from './runnerConfig.js';
 
@@ -53,10 +55,73 @@ function rankProxies(proxies: RunnerProxy[], preferredId?: string): RunnerProxy[
   });
 }
 
+interface PreflightedProxy {
+  proxy: RunnerProxy;
+  check: ProxyCheck;
+}
+
+async function preflightProxies(
+  proxies: RunnerProxy[],
+  options: { allowPrivate?: boolean; hops: ChainHop[]; maxHops: number; concurrency: number; preferredId?: string },
+): Promise<PreflightedProxy[]> {
+  const results: PreflightedProxy[] = [];
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(options.concurrency, proxies.length) }, async () => {
+    while (true) {
+      const index = cursor++;
+      const proxy = proxies[index];
+      if (!proxy) return;
+      try {
+        const check = await testRunnerProxy(proxy, {
+          allowPrivate: options.allowPrivate,
+          hops: options.hops,
+          maxHops: options.maxHops,
+        });
+        if (check.ok) results.push({ proxy, check });
+      } catch {
+        // A broken kernel process should not abort the whole preflight.
+      }
+    }
+  });
+  await Promise.all(workers);
+  results.sort((a, b) => a.check.latencyMs - b.check.latencyMs);
+  if (options.preferredId) {
+    const index = results.findIndex((item) => item.proxy.id === options.preferredId);
+    if (index > 0) {
+      const [preferred] = results.splice(index, 1);
+      if (preferred) results.unshift(preferred);
+    }
+  }
+  return results;
+}
+
+export function cnResultQuality(
+  file: CnFile,
+  platformRows: CnRow[],
+): { usable: boolean; reason: string; score: number } {
+  const urlRate = file.summary.tested ? file.summary.ok / file.summary.tested : 0;
+  const platformOk = platformRows.filter((row) => row.ok).length;
+  const platformRate = platformRows.length ? platformOk / platformRows.length : 0;
+  if (file.summary.tested >= 10 && urlRate < 0.05) {
+    return {
+      usable: false,
+      reason: `地址可达 ${file.summary.ok}/${file.summary.tested}，低于 5%`,
+      score: urlRate,
+    };
+  }
+  if (platformRows.length >= 20 && platformRate < 0.03) {
+    return {
+      usable: false,
+      reason: `平台可达 ${platformOk}/${platformRows.length}，低于 3%`,
+      score: platformRate,
+    };
+  }
+  return { usable: true, reason: '', score: Math.max(urlRate, platformRate) };
+}
+
 /**
- * 从 Worker 代理池依次挑可用节点（普通优先、内核兜底），
- * 通过它补测已解析的播放 URL。只测 URL，不执行音源脚本。
- * 一个节点测活/启动/补测失败，写回失败后自动换下一个，最多试 maxProxies 个。
+ * 从 Worker 代理池预检全部节点，按延迟从低到高依次补测；
+ * 预检或补测质量不达标就换下一个，最多试 maxProxies 个。
  */
 export async function cnRun(opts: CnRunOptions): Promise<CnFile> {
   const proxies = await fetchRunnerProxies(opts.endpoint, opts.token, { allowPrivate: opts.allowPrivate });
@@ -72,7 +137,6 @@ export async function cnRun(opts: CnRunOptions): Promise<CnFile> {
 
   const config = await fetchRunnerConfig(opts.endpoint, opts.token);
   const maxProxies = Math.max(1, opts.maxProxies ?? 8);
-  const candidates = rankProxies(usable, opts.preferredId).slice(0, maxProxies);
   const maxHops = Math.max(
     1,
     Math.min(5, opts.maxHops && opts.maxHops > 0 ? opts.maxHops : config.cnMaxHops),
@@ -80,28 +144,20 @@ export async function cnRun(opts: CnRunOptions): Promise<CnFile> {
   const autoSwitch = opts.autoSwitch ?? config.cnAutoSwitch;
   const hops = selectHops(proxies, maxHops);
   log.info(`补测运行参数：跳板 ${hops.length} 个，失败${autoSwitch ? '自动换节点' : '不换节点'}`);
+  const tested = await preflightProxies(usable, {
+    allowPrivate: opts.allowPrivate,
+    hops,
+    maxHops,
+    concurrency: 6,
+    preferredId: opts.preferredId,
+  });
+  log.info(`预检 ${usable.length} 个节点，${tested.length} 个可用，按延迟排序`);
+  const candidates = tested.slice(0, maxProxies);
   let lastError = '';
 
-  for (const proxy of candidates) {
+  for (const candidate of candidates) {
+    const { proxy, check } = candidate;
     const label = proxy.name || proxy.id;
-    const check = await testRunnerProxy(proxy, {
-      allowPrivate: opts.allowPrivate,
-      hops,
-      maxHops,
-    });
-    if (!check.ok) {
-      lastError = check.error ?? '测活失败';
-      await reportProxyCheck(
-        opts.endpoint,
-        opts.token,
-        proxy.id,
-        { ...check, ok: false, error: lastError.slice(0, 300) },
-        opts.allowPrivate,
-      ).catch(() => undefined);
-      log.warn(`节点不可用，换下一个：${label}（${lastError}）`);
-      if (!autoSwitch) throw new Error(`节点不可用且已关闭自动换节点：${label}（${lastError}）`);
-      continue;
-    }
 
     let active;
     try {
@@ -187,6 +243,21 @@ export async function cnRun(opts: CnRunOptions): Promise<CnFile> {
         file.mode = 'execute';
         await writeFile(opts.outPath, `${JSON.stringify(file, null, 2)}\n`, 'utf8');
       }
+      const quality = cnResultQuality(file, platformRows);
+      if (!quality.usable) {
+        lastError = quality.reason;
+        await reportProxyCheck(
+          opts.endpoint,
+          opts.token,
+          proxy.id,
+          { ...check, ok: false, error: quality.reason.slice(0, 300) },
+          opts.allowPrivate,
+        ).catch(() => undefined);
+        log.warn(`节点补测质量不达标，换下一个：${label}（${quality.reason}）`);
+        if (!autoSwitch) throw new Error(`补测质量不达标且已关闭自动换节点：${label}（${quality.reason}）`);
+        continue;
+      }
+
       await reportProxyCheck(
         opts.endpoint,
         opts.token,
