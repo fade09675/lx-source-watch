@@ -51,8 +51,12 @@
 
 - 单列概览页：渐变概览条显示标题、数据状态、上次/下轮/本轮耗时/候选数，右侧「立即探测 / 派发排队 / 刷新」。
 - 5 张指标卡：音源总数（含可用/部分/失效）、平台通过、接入点通过、国内可达、候选源。
-- 任务中心：正在运行/排队中双栏 → 定时计划横条（探测/发现/测活/国内补测/数据清理，含上次结果、下次时间；探测/发现/测活可立即执行，国内补测按探测后自动触发并可「立即补测」（全量，不提供批次上限），数据清理只由调度器自动创建）→「最近任务 / 操作记录」tab。
-- 最近任务按行展示：状态徽标、类型、触发、时间、摘要、统计（可用/部分/失效/未测、平台、接入点、国内）、耗时、运行/日志链接；失败明细收进折叠，默认每页 10 条。
+- 任务中心：正在运行/排队中双栏 → 定时计划横条（探测/发现/测活/国内补测/数据清理，含上次结果、下次时间；探测/发现/测活可立即执行，国内补测按探测后自动触发并可「立即补测」全量运行，数据清理只由调度器自动创建）→「最近任务 / 操作记录 / 计划任务」三 tab。
+- 最近任务按行展示：状态徽标、类型、触发、时间、摘要、统计（可用/部分/失效/未测、平台、接入点、国内）、耗时、运行/日志链接；失败明细收进折叠，默认每页 10 条。运行中的任务显示 progress 进度条，queued/paused 任务支持立即执行、暂停、恢复、取消；failed/cancelled 支持重试（partial 不自动重试）。
+- 计划任务 tab：真实任务行，列任务/触发/下次运行/上次运行/状态/操作；数据来自 scheduler 状态，首屏未加载显示「加载中…」，探测/发现/测活可立即执行，国内补测可「补测」，数据清理显示自动；移动端 760px 以下转卡片。
+- 队列状态与操作：queued → paused → queued（恢复），queued 可立即执行（priority=0）、取消；paused 可取消；retry 只创建新的 queued 任务，保留 `retryOf/retryCount`。
+- 任务与 run 对账：running 任务每 5 分钟与 GitHub 最近 run 对账；无 run 超 20 分钟、或 workflow 已结束超 60 秒未回写，自动收口为 failed/成功未回写，避免永久 running。
+- 结构化日志：`runs.log_key` 对应 KV 文本日志；`run:<id>:jsonl` 存 JSONL（14 天），运行详情「结构化 / 文本」切换，旧 run 从文本现场转换。
 - 操作记录：时间、操作、目标、结果、说明；按“事件”保留天数自动清理，也可在手动清理运行记录时一起清理。
 - 数据清理：由调度器每 24 小时最多创建一次「数据清理」任务，写入运行记录和 KV 日志；任务卡显示运行/接入点/日汇总/事件/操作记录删除数，可进运行详情与日志。
 - 指标下方：4 张额度卡（KV 写入/读取、D1 写入、Actions 本月）、轮次覆盖条、快捷入口，三者并排放在任务中心上方。
@@ -146,7 +150,7 @@
 - `endpointRows`：逐接入点下载结果与 cn。
 - `platform_results`：逐平台结果。
 - `source_daily/platform_daily`：日汇总，供趋势图。
-- `tasks/task_locks/task_state`：单并发任务队列、锁、调度的最近时间；`tasks.result` 存类型化结果摘要（源/平台/接入点、通过/部分/失效的源、通过/失败的平台、订阅统计、警告），超长时安全裁剪数组而不是截断 JSON。
+- `tasks/task_locks/task_state`：单并发任务队列、锁、调度的最近时间。`tasks` 含 type/source/status（queued/paused/running/succeeded/partial/failed/cancelled）/priority/payload/progress/message/run_id/github_run_id/retry_count/retry_of/last_heartbeat_at/result；`tasks.result` 存类型化结果摘要（源/平台/接入点、通过/部分/失效的源、通过/失败的平台、订阅统计、警告），超长时安全裁剪数组而不是截断 JSON。单源测试的 result 只统计本次 sourceId，不再复用整轮快照。
 - `admin_activity`：后台写操作记录（时间、方法、路径、操作名、目标、状态、说明）。
 - `proxy_test_runs/proxy_test_results`：测活轮次与逐节点结果。
 - `source_registry/source_aliases`：音源注册表（含 `author`、`origin` 来源仓库/路径）与重复源别名。
@@ -192,7 +196,17 @@
 | POST | `/api/runner/proxy-subscription-result` | Actions 回传订阅拉取结果（Bearer） |
 | POST | `/api/admin/runs/purge` | 运行记录清理预览/执行 |
 | GET | `/api/admin/snapshots` | 运行记录分页；支持 limit/offset/status/trigger/days/q |
-| GET | `/api/admin/tasks` | 任务列表；支持 status（含 finished）/type/source/q/limit/offset |
+| GET | `/api/admin/tasks` | 任务列表；支持 status（含 finished/queued/paused）/type/source/q/limit/offset |
+| POST | `/api/admin/tasks` | 创建任务并按队列派发；长任务统一入口 |
+| POST | `/api/admin/tasks/:id/cancel` | 取消 queued/paused/running 任务 |
+| POST | `/api/admin/tasks/:id/pause` | queued → paused |
+| POST | `/api/admin/tasks/:id/resume` | paused → queued，并尝试派发 |
+| POST | `/api/admin/tasks/:id/run-now` | queued 置顶（priority=0）并尝试派发 |
+| POST | `/api/admin/tasks/:id/retry` | failed/cancelled 创建重试任务 |
+| POST | `/api/admin/tasks/reconcile` | 手动触发 GitHub run 对账 |
+| POST | `/api/runner/progress` | Actions task-scoped 进度回写（不暴露业务密钥） |
+| GET | `/api/admin/snapshots/:runId/log?format=jsonl` | 结构化日志；旧 run 现场转换 |
+| GET | `/api/overview` | 工作台精简快照（sources=[]、endpoints/cn 聚合、CN pending） |
 | GET | `/api/admin/activity` | 后台操作记录；支持 limit/offset/ok |
 
 缓存：`/api/status` 允许短缓存；测活详情 `private, max-age=15`；上报不缓存。
@@ -209,6 +223,16 @@
 - 初始化失败扣 30 分。
 - 等级：`excellent` 需 available 且接入点通过率 ≥0.8；`good` 需平台/接入点通过率 ≥0.6 且已测平台 ≥2；`limited` 需平台通过率 ≥0.3；`untested` 为无已测平台；其余 `poor`。结果不新鲜或 CN 全失败时最高只能 `limited`。
 - 推荐：等级为 `excellent` 或 `good`，且初始化成功；同一批源里不做强制去重，同名多版本由 E4 的重复页处理。
+
+### 6.7 任务协议
+
+- 入口：`POST /api/admin/tasks` 创建任务，Worker 单并发 `dispatchNext`；探测/发现/单源/补测/测活/订阅/清理共用队列。
+- 派发：`createTask` 对 probe/source-test/discovery/cn-probe/proxy-test 生成 32 位 `progressToken`，仅随对应 workflow 输入下发；`POST /api/runner/progress` 校验 taskId/runId/token/type/status/runId 匹配后更新 progress/message/heartbeat。
+- 进度单位：探测按源、发现按仓库/候选、补测按地址、测活按节点；任务卡显示 done/total 与百分比。
+- 完成：runner 回传结果时 `completeTaskForRun` 更新最终状态、result、finishedAt；进度 total 保留任务累计值，不固定 1/1。
+- 对账：`reconcileTaskRuns` 每 5 分钟检查 running 任务；优先 `github_run_id`，否则取 startedAt-120s 后最早 run；无 run 超 20 分钟 failed，run 已结束超 60 秒未回写则 failed/「成功但未回写」。
+- 重试：仅 failed/cancelled 可手动重试；派发 429/502（非令牌/权限/未配置）自动重试最多 2 次；partial 不自动重试。
+- 操作记录：所有管理员写操作写 `admin_activity`；同步 CRUD 不建 task，但必须留操作记录。
 
 ---
 
@@ -294,6 +318,7 @@
 | E3 自动收录门槛 | 已完成并上线（2026-11-27） | initOk + 最少声明平台数 + 可选可测试平台要求，可配置；手动收录绕过 |
 | E4 同名多版本治理 | 已完成并上线（2026-11-27） | 同名不同 sha 不自动合并，列表展示与手动停用，保留版本对照 |
 | E5 发现扩容 | 已完成并上线（2026-11-27） | 每轮/每仓库上限可配，仓库上限 200，Actions 每批 4 仓库并发取树 |
+| 任务中心 1:1 | 已完成并上线（2026-11-28） | 全入口任务化、task→run→progress→log、暂停/恢复/立即执行/取消/重试、run 对账、计划任务真实行、JSONL 日志、移动端卡片 |
 
 ## 14. 已知边界
 
@@ -303,6 +328,6 @@
 - 少数内核节点因域名失效、仅 IPv6、跨境 80 端口受限而不可用；`CN-山东电信` 已软停用。
 - 定时任务已开启：探测每 4 小时、自动发现每 12 小时、代理测活每 6 小时；如额度紧张可在设置页关闭。
 - E5 扩容目前只在 6 个内置仓库上观察过：同秒开始、约 1.3 秒完成、21 个候选、无 403；几十个仓库或超大仓库的 GitHub 限流/耗时仍未压测。
-- E2 重试日志只记录“首次失败 + 将重试”，不记录重试成功/失败，无法直接统计救回率；需要看最终平台结果判断。
+- 重试日志已记录“将重试 / 重试成功 / 重试仍失败”，但“救回率”仍建议结合最终平台结果判断；重试不改变原始错误分类。
 - `source_registry` 没有版本列，E4「同名多版本」里正式源版本显示 `—`，候选才有版本；后续如要按版本比较，需要补迁移。
 - 自动收录门槛只做本地判断，不访问网络；候选的真实可用性仍以收录后的首轮探测为准。

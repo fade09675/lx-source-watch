@@ -84,6 +84,7 @@ import {
   getTask,
   getTaskState,
   listTasks,
+  newRunId,
   pauseTask,
   prioritizeTask,
   reapStaleTasks,
@@ -295,7 +296,23 @@ export function createApi(): Hono<Ctx> {
       payload: { limit: String(days) },
     });
     const startedAt = new Date().toISOString();
+    const startedMs = Date.now();
+    const runId = newRunId();
+    const logKey = `run:${runId}:log`;
+    const logLines = [
+      `[${startedAt}] 数据清理开始`,
+      `保留策略：删除 ${days} 天前的运行明细、日汇总与事件；始终保留最新一轮探测与测活`,
+    ];
     try {
+      await c.env.DB.prepare(
+        `INSERT INTO runs (run_id, task_id, trigger, status, message, log_key, generated_at, started_at, created_at,
+                           total, available, partial, unavailable, untested, platforms_ok, platforms_tested,
+                           runner, check_scope, duration_ms)
+         VALUES (?, ?, 'manual', 'running', '数据清理执行中', ?, ?, ?, ?, 0, 0, 0, 0, 0, 0, 0, 'worker', 'retention', 0)`,
+      )
+        .bind(runId, task.id, logKey, startedAt, startedAt, startedAt)
+        .run();
+      await c.env.DB.prepare('UPDATE tasks SET run_id = ? WHERE id = ?').bind(runId, task.id).run();
       await updateTask(c.env.DB, task.id, {
         status: 'running',
         startedAt,
@@ -312,29 +329,64 @@ export function createApi(): Hono<Ctx> {
         proxyTestRuns: plan.proxyTestRuns,
         activity: plan.activity,
       };
+      const summary = `清理完成：运行 ${plan.runs} 轮、接入点 ${plan.sourceRuns} 条、平台 ${plan.platformResults} 条`;
+      const finishedAt = new Date().toISOString();
+      const durationMs = Date.now() - startedMs;
+      logLines.push(
+        `删除运行 ${plan.runs} 轮、逐源 ${plan.sourceRuns} 条、平台 ${plan.platformResults} 条、代理测活 ${plan.proxyTestRuns} 条、操作记录 ${plan.activity} 条`,
+        `[${finishedAt}] 数据清理完成，用时 ${durationMs}ms`,
+      );
+      await c.env.DB.prepare(
+        `UPDATE runs SET status = 'success', message = ?, generated_at = ?, duration_ms = ?, log_key = ? WHERE run_id = ?`,
+      )
+        .bind(summary, finishedAt, durationMs, logKey, runId)
+        .run();
       await updateTask(c.env.DB, task.id, {
         status: 'succeeded',
-        finishedAt: new Date().toISOString(),
+        finishedAt,
         progressDone: 1,
         progressTotal: 1,
         progressUnit: '步',
-        message: `清理完成：运行 ${plan.runs} 轮、接入点 ${plan.sourceRuns} 条、平台 ${plan.platformResults} 条`,
+        message: summary,
         result: {
           kind: 'retention',
-          summary: `清理完成：运行 ${plan.runs} 轮、接入点 ${plan.sourceRuns} 条、平台 ${plan.platformResults} 条`,
+          summary,
           counts,
         },
       });
+      try {
+        await c.env.SNAPSHOT.put(logKey, logLines.join('\n'), { expirationTtl: 14 * 86_400 });
+        await recordKvPut(c.env);
+      } catch {
+        // 日志写失败不影响清理结果。
+      }
       return c.json(
-        { result: plan, taskId: task.id },
+        { result: plan, taskId: task.id, runId },
         200,
         { 'cache-control': CACHE_PRIVATE },
       );
     } catch (error) {
+      const message = error instanceof Error ? error.message : '清理失败';
+      const finishedAt = new Date().toISOString();
+      logLines.push(`[${finishedAt}] 数据清理失败：${message}`);
+      try {
+        await c.env.DB.prepare(
+          `UPDATE runs SET status = 'failed', message = ?, error = ?, generated_at = ?, duration_ms = ?, log_key = ? WHERE run_id = ?`,
+        )
+          .bind(`数据清理失败：${message}`, message, finishedAt, Date.now() - startedMs, logKey, runId)
+          .run();
+      } catch {
+        // 记录失败不覆盖原始错误。
+      }
+      try {
+        await c.env.SNAPSHOT.put(logKey, logLines.join('\n'), { expirationTtl: 14 * 86_400 });
+      } catch {
+        // 日志写失败不影响清理结果。
+      }
       await updateTask(c.env.DB, task.id, {
         status: 'failed',
-        finishedAt: new Date().toISOString(),
-        error: error instanceof Error ? error.message : '清理失败',
+        finishedAt,
+        error: message,
         message: '清理失败',
       });
       throw error;

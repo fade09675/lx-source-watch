@@ -169,6 +169,8 @@ corepack pnpm --filter @lx/worker exec wrangler deploy
 
 `apps/runner/**` 的改动不会触发 Worker 部署；测活/探测 workflow 每次运行都会检出最新代码。
 
+部署流程还会在 `wrangler deploy` 前执行幂等的 `migrations/0022_task_reconcile.sql`（任务对账索引），避免新代码上线但 D1 缺索引。新增迁移时要把文件加入 deploy workflow 的同一执行步骤。
+
 自检：
 
 ```powershell
@@ -222,6 +224,11 @@ curl.exe -s https://dash.example.com/api/health
 - [ ] 重复与别名页「同名多版本」可停用单个版本，停用后状态变为已停用/已拒绝
 - [ ] 设置页保存/重置额度护栏；`/api/runner/config` 无令牌 401
 - [ ] 设置页「清理运行记录」预览计数正确，执行后最新一轮仍可打开
+- [ ] 任务中心三个 tab 正常：最近任务（进度/失败明细/重试）、操作记录、计划任务；计划任务首屏先显示「加载中…」，接口返回后显示真实下次/上次时间
+- [ ] 队列任务可暂停/恢复/立即执行/取消；已暂停显示「已暂停」，恢复后回到 queued
+- [ ] 失败/取消任务可重试，重试任务带 `retryOf/retryCount`；partial 任务不出现重试按钮
+- [ ] 运行详情日志可切「结构化 / 文本」，JSONL 接口返回 `available=true`；旧 run 也能从文本转换
+- [ ] 移动端计划任务为卡片，无横向溢出；历史单源测试任务按运行明细显示单源统计
 - [ ] `pnpm audit:ui` 通过（需 `E2E_PASSWORD`，可设 `E2E_BASE_URL`；桌面/移动无横向溢出、无控制台错误）
 - [ ] Cloudflare 控制台 KV 写约为每轮 1 次；D1 写未超过护栏
 
