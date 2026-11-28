@@ -235,11 +235,20 @@ export const IngestUrlSchema = z.object({
 });
 export type IngestUrl = z.infer<typeof IngestUrlSchema>;
 
+export const CnPlatformTargetSchema = z.object({
+  sourceId: z.string().min(1).max(80),
+  title: z.string().min(1).max(160),
+  scriptUrl: z.string().url().max(2048),
+  platforms: z.array(z.string().min(1).max(32)).min(1).max(16),
+});
+export type CnPlatformTarget = z.infer<typeof CnPlatformTargetSchema>;
+
 export const CnProbeRowSchema = z.object({
   sourceId: z.string().min(1).max(80),
   platform: z.string().min(1).max(32),
   quality: z.string().max(32).optional(),
-  url: z.string().url(),
+  // 国内平台补测的失败行没有播放地址，允许空 URL。
+  url: z.union([z.string().url(), z.literal('')]),
   proxy: z.string().max(160).optional(),
   ok: z.boolean(),
   status: z.number().int().optional(),
@@ -274,7 +283,7 @@ export const CnProbeResultSchema = z.object({
     generatedAt: z.string().optional(),
     proxy: z.string().max(160).optional(),
     summary: z.object({ tested: z.number().int().nonnegative(), ok: z.number().int().nonnegative() }),
-    rows: z.array(CnProbeRowSchema).max(500),
+    rows: z.array(CnProbeRowSchema).max(1000),
     endpoints: z.array(CnProbeEndpointSchema).max(500).optional(),
   }),
   log: z.string().max(200_000).optional(),

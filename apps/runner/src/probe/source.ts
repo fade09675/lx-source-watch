@@ -23,6 +23,8 @@ export interface SourceProbeOptions {
   platformConcurrency: number;
   proxy?: ProxyConfig;
   allowPrivate?: boolean;
+  /** 只测这些平台 key；国内平台补测用，避免重复测已通过平台。 */
+  onlyPlatforms?: string[];
   onPlatform?: (key: string, outcome: PlatformOutcome) => void;
 }
 
@@ -126,7 +128,8 @@ export async function probeSource(
 
     const declared = Object.keys(loaded.sources).filter((k) => KEY_RE.test(k));
     const support = loaded.meta.support.filter((k) => KEY_RE.test(k) && !declared.includes(k));
-    const keys = sortPlatformKeys([...declared, ...support]);
+    const only = opts.onlyPlatforms?.length ? new Set(opts.onlyPlatforms) : undefined;
+    const keys = sortPlatformKeys([...declared, ...support]).filter((key) => !only || only.has(key));
 
     const outcomes = await mapLimit(keys, opts.platformConcurrency, async (key) => {
       const outcome = await testPlatform(key, loaded?.sources[key], loaded as LoadedSource, {

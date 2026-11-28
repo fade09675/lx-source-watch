@@ -1,4 +1,4 @@
-import type { IngestUrl } from '@lx/shared';
+import type { CnPlatformTarget, IngestUrl, Snapshot } from '@lx/shared';
 import type { Env } from './env';
 import { loadSettings } from './settings';
 import { createTask, dispatchNext, updateTask, type TaskResult } from './tasks';
@@ -13,6 +13,30 @@ export interface CnInput {
   createdAt: string;
   snapshot: unknown;
   urls: IngestUrl[];
+  platformTargets: CnPlatformTarget[];
+}
+
+/**
+ * 海外取链失败/未测的平台，需要国内重新执行脚本取链。
+ * 已通过的平台不再重复测，避免把本可用的结果覆盖掉。
+ */
+export function selectPlatformTargets(snapshot: unknown): CnPlatformTarget[] {
+  const sources = (snapshot as Snapshot | undefined)?.sources ?? [];
+  const targets: CnPlatformTarget[] = [];
+  for (const source of sources) {
+    if (!source.url) continue;
+    const platforms = source.platforms
+      .filter((platform) => platform.declared && (!platform.tested || !platform.ok))
+      .map((platform) => platform.key);
+    if (!platforms.length) continue;
+    targets.push({
+      sourceId: source.id,
+      title: source.title,
+      scriptUrl: source.url,
+      platforms: [...new Set(platforms)],
+    });
+  }
+  return targets;
 }
 
 function dedupe(urls: IngestUrl[]): IngestUrl[] {
@@ -119,7 +143,8 @@ export async function enqueueCnProbe(
   }
 
   const selected = selectCnUrls(input.urls);
-  if (!selected.length) {
+  const platformTargets = selectPlatformTargets(input.snapshot);
+  if (!selected.length && !platformTargets.length) {
     await recordEmptyRun(env, input.probeRunId);
     return { created: true, reason: 'no-input', selected: 0 };
   }
@@ -135,6 +160,7 @@ export async function enqueueCnProbe(
     createdAt: new Date().toISOString(),
     snapshot: input.snapshot,
     urls: selected,
+    platformTargets,
   };
   await env.SNAPSHOT.put(`${CN_INPUT_PREFIX}${input.probeRunId}`, JSON.stringify(body), {
     expirationTtl: CN_INPUT_TTL_SECONDS,

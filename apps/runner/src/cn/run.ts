@@ -1,6 +1,9 @@
-import { cnVerify, type CnFile, type CnProgressEvent, type CnScope } from '../cn.js';
+import { cnVerify, type CnFile, type CnProgressEvent, type CnRow, type CnScope } from '../cn.js';
 import { log } from '../logger.js';
 import { errorMessage } from '../util.js';
+import type { CnPlatformTarget } from '@lx/shared';
+import { probeCnPlatforms } from './platformProbe.js';
+import { readFile, writeFile } from 'node:fs/promises';
 import {
   activateProxy,
   fetchRunnerProxies,
@@ -32,6 +35,8 @@ export interface CnRunOptions {
   statusPath?: string;
   skipEndpoints?: boolean;
   allowPrivate?: boolean;
+  /** 海外失败/未测平台，先在国内重跑取链。 */
+  platformTargets?: CnPlatformTarget[];
   onProgress?: (event: CnProgressEvent) => void | Promise<void>;
 }
 
@@ -116,6 +121,46 @@ export async function cnRun(opts: CnRunOptions): Promise<CnFile> {
     }
 
     try {
+      // 阶段 1：国内重跑海外失败/未测平台的取链。
+      // 只有拿到地址后，阶段 2 才会对这些地址做国内拉流校验。
+      let platformRows: CnRow[] = [];
+      const targets = opts.platformTargets ?? [];
+      if (targets.length) {
+        try {
+          const probe = await probeCnPlatforms({
+            statusPath: opts.statusPath ?? 'out/status.json',
+            targets,
+            proxy: active.client,
+            proxyLabel: active.label,
+            concurrency: 1,
+            timeoutMs: opts.timeoutMs ?? 20_000,
+            allowPrivate: opts.allowPrivate,
+            onProgress: opts.onProgress,
+          });
+          platformRows = probe.rows;
+          if (probe.urls.length) {
+            const raw = JSON.parse(await readFile(opts.urlsPath, 'utf8')) as {
+              version: 1;
+              generatedAt: string;
+              urls: unknown[];
+            };
+            const seen = new Set(
+              raw.urls.map((item) => (item as { url?: string }).url).filter((url): url is string => Boolean(url)),
+            );
+            for (const url of probe.urls) {
+              if (seen.has(url.url)) continue;
+              seen.add(url.url);
+              raw.urls.push(url);
+            }
+            await writeFile(opts.urlsPath, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+            log.info(`国内平台补测新增 ${probe.urls.length} 个地址，进入地址补测`);
+          }
+        } catch (error) {
+          // 平台阶段失败不应阻断已有的 URL 补测。
+          log.warn(`国内平台补测失败，继续地址补测：${errorMessage(error)}`);
+        }
+      }
+
       const file = await cnVerify({
         urlsPath: opts.urlsPath,
         outPath: opts.outPath,
@@ -130,6 +175,18 @@ export async function cnRun(opts: CnRunOptions): Promise<CnFile> {
         skipEndpoints: opts.skipEndpoints,
         onProgress: opts.onProgress,
       });
+      if (platformRows.length) {
+        // 平台阶段的结果优先；URL 阶段补上其余平台的记录。
+        const merged = new Map<string, CnRow>();
+        for (const row of platformRows) merged.set(`${row.sourceId}\u0000${row.platform}`, row);
+        for (const row of file.rows) {
+          const key = `${row.sourceId}\u0000${row.platform}`;
+          if (!merged.has(key)) merged.set(key, row);
+        }
+        file.rows = [...merged.values()];
+        file.mode = 'execute';
+        await writeFile(opts.outPath, `${JSON.stringify(file, null, 2)}\n`, 'utf8');
+      }
       await reportProxyCheck(
         opts.endpoint,
         opts.token,
