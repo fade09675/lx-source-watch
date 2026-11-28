@@ -95,6 +95,14 @@ async function preflightProxies(
   return results;
 }
 
+export function cnPlatformStageQuality(rows: CnRow[]): { usable: boolean; reason: string } {
+  const ok = rows.filter((row) => row.ok).length;
+  if (rows.length >= 10 && ok / rows.length < 0.1) {
+    return { usable: false, reason: `平台可达 ${ok}/${rows.length}，低于 10%` };
+  }
+  return { usable: true, reason: '' };
+}
+
 export function cnResultQuality(
   file: CnFile,
   platformRows: CnRow[],
@@ -136,7 +144,11 @@ export async function cnRun(opts: CnRunOptions): Promise<CnFile> {
   if (!usable.length) throw new Error('代理池里只有 UDP 节点（hy2/tuic），当前环境不可测');
 
   const config = await fetchRunnerConfig(opts.endpoint, opts.token);
-  const maxProxies = Math.max(1, opts.maxProxies ?? 8);
+  // 60 分钟 workflow 内完成：先预检一小批候选，再最多跑 3 个节点。
+  const maxProxies = Math.max(1, opts.maxProxies ?? 3);
+  const preflightLimit = Math.max(maxProxies, 12);
+  const startedAt = Date.now();
+  const budgetMs = 45 * 60 * 1000;
   const maxHops = Math.max(
     1,
     Math.min(5, opts.maxHops && opts.maxHops > 0 ? opts.maxHops : config.cnMaxHops),
@@ -144,18 +156,26 @@ export async function cnRun(opts: CnRunOptions): Promise<CnFile> {
   const autoSwitch = opts.autoSwitch ?? config.cnAutoSwitch;
   const hops = selectHops(proxies, maxHops);
   log.info(`补测运行参数：跳板 ${hops.length} 个，失败${autoSwitch ? '自动换节点' : '不换节点'}`);
-  const tested = await preflightProxies(usable, {
+  const preflightPool = rankProxies(usable, opts.preferredId).slice(0, preflightLimit);
+  const tested = await preflightProxies(preflightPool, {
     allowPrivate: opts.allowPrivate,
     hops,
     maxHops,
     concurrency: 6,
     preferredId: opts.preferredId,
   });
-  log.info(`预检 ${usable.length} 个节点，${tested.length} 个可用，按延迟排序`);
+  log.info(
+    `预检 ${preflightPool.length}/${usable.length} 个节点，${tested.length} 个可用，按延迟排序`,
+  );
   const candidates = tested.slice(0, maxProxies);
   let lastError = '';
 
   for (const candidate of candidates) {
+    if (Date.now() - startedAt > budgetMs) {
+      lastError = '补测时间预算用尽（45 分钟），停止继续换节点';
+      log.warn(lastError);
+      break;
+    }
     const { proxy, check } = candidate;
     const label = proxy.name || proxy.id;
 
@@ -194,6 +214,22 @@ export async function cnRun(opts: CnRunOptions): Promise<CnFile> {
             onProgress: opts.onProgress,
           });
           platformRows = probe.rows;
+          const stageQuality = cnPlatformStageQuality(platformRows);
+          if (!stageQuality.usable) {
+            lastError = stageQuality.reason;
+            await reportProxyCheck(
+              opts.endpoint,
+              opts.token,
+              proxy.id,
+              { ...check, ok: false, error: stageQuality.reason.slice(0, 300) },
+              opts.allowPrivate,
+            ).catch(() => undefined);
+            log.warn(`平台补测质量不达标，跳过地址补测并换节点：${label}（${stageQuality.reason}）`);
+            if (!autoSwitch) {
+              throw new Error(`平台补测质量不达标且已关闭自动换节点：${label}（${stageQuality.reason}）`);
+            }
+            continue;
+          }
           if (probe.urls.length) {
             const raw = JSON.parse(await readFile(opts.urlsPath, 'utf8')) as {
               version: 1;

@@ -89,7 +89,7 @@ describe('cn-probe.yml', () => {
     expect(dispatch?.inputs?.run_id).toBeDefined();
     const job = doc.jobs['cn-probe'];
     expect(job).toBeDefined();
-    expect(job['timeout-minutes']).toBeLessThanOrEqual(20);
+    expect(job['timeout-minutes']).toBe(60);
     expect(JSON.stringify(job)).not.toContain('pnpm probe');
     expect(JSON.stringify(job)).not.toContain('secrets.INGEST_SECRET');
     expect(JSON.stringify(job)).toContain('secrets.RUNNER_TOKEN');

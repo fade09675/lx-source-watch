@@ -269,6 +269,7 @@
 - 阶段 1（平台取链）：只对 `declared && (!tested || !ok)` 的平台，用国内代理重新加载源脚本并执行 `lx.musicUrl`，独立写 `platform.cn`；新取到的播放地址去重后进入阶段 2。
 - 阶段 2（地址拉流）：本轮全部播放地址按 URL 去重后全部复测，不以海外成败筛选，也不复用历史通过；不设批次上限和时间冷却，写 `platform.cn` 的国内拉流结果；源接入点（主地址/镜像）另写 `endpoint.cn`。
 - 两阶段在同一个 cn-probe 任务/运行/日志里完成，阶段 1 失败只告警，不阻断阶段 2；两阶段都不改变音源 `available` 总状态。
+- CN 运行预算 45 分钟、workflow 上限 60 分钟；代理不预检全部节点，先按最近成功排序取 12 个并发预检延迟，按延迟优先、最多试 3 个；阶段 1 平台可达率低于 10% 立即换节点，不再进入阶段 2。
 - 代理池：支持 HTTP/SOCKS、mihomo 内核（ss/vmess/vless/trojan/hysteria2/tuic）；内核节点可用普通节点做 `dialer-proxy` 跳板，失败自动换下一个节点；hy2/tuic 等 UDP 节点标记跳过。
 - 订阅：Worker 直连拉取失败 401/403 时返回 `fetch_forbidden` + `needsRunner`，前端引导用 Actions 拉取；订阅支持自定义 headers（禁止 Host/Content-Length/Connection/Transfer-Encoding）。
 - 凭据只存 Worker secret 与加密后的 D1；`proxy` 字段只记 host:port。

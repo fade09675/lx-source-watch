@@ -90,15 +90,12 @@ export async function runCnProbeTask(options: CnProbeTaskOptions): Promise<CnFil
     taskId: options.taskId,
     runId: options.runId,
   });
-  let lastDone = 0;
   let lastTotal = 0;
   const report = async (event: CnProgressEvent) => {
-    // 换代理会从 0 重新测；任务进度只允许前进，避免进度条倒退。
-    const done = Math.max(lastDone, event.done);
-    const total = Math.max(lastTotal, event.total, done);
-    lastDone = done;
-    lastTotal = total;
-    await reporter?.report({ ...event, done, total });
+    // 换代理会从 0/30 重新开始；这里必须允许进度回退，否则任务卡会停在
+    // 上一个节点的 71/71，看起来已经完成但实际还在跑。
+    lastTotal = event.total;
+    await reporter?.report(event);
   };
 
   try {

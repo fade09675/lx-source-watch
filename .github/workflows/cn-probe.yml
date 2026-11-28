@@ -43,7 +43,7 @@ jobs:
   cn-probe:
     name: 国内补测（不执行音源脚本）
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     env:
       INGEST_URL: ${{ secrets.INGEST_URL }}
       RUNNER_TOKEN: ${{ secrets.RUNNER_TOKEN }}
