@@ -6,6 +6,7 @@ import {
   api,
   type ActivityListResult,
   type CreateTaskResult,
+  type RunDetailResult,
   type SystemView,
   type TaskListResult,
   type TaskResult,
@@ -300,6 +301,65 @@ function taskHasDetail(result: TaskResult): boolean {
   );
 }
 
+const SOURCE_STATUS_LABEL: Record<string, string> = {
+  available: '可用',
+  partial: '部分可用',
+  unavailable: '不可用',
+  untested: '未测试',
+};
+
+/**
+ * 修复前创建的单源测试任务，result 里存的是整轮快照统计。
+ * 用该 run 的明细按 sourceId 重建单源结果，只在展示层修正，不改历史数据。
+ */
+function legacySourceTestResult(task: TaskView, detail: RunDetailResult): TaskResult | null {
+  const sourceId = task.payload.sourceId;
+  if (!sourceId) return null;
+  const source = detail.sources.find((item) => item.sourceId === sourceId);
+  if (!source) return null;
+  const platforms = detail.platforms.filter((item) => item.sourceId === sourceId);
+  const tested = platforms.filter((item) => item.tested);
+  const ok = tested.filter((item) => item.ok);
+  const failed = tested.filter((item) => !item.ok);
+  const endpoints = detail.endpoints.find((item) => item.sourceId === sourceId);
+  const cnTested = platforms.filter((item) => item.cnTested).length;
+  const cnOk = platforms.filter((item) => item.cnOk).length;
+  const endpointOk = endpoints?.ok ?? 0;
+  const endpointTotal = endpoints?.total ?? 0;
+  const statusLabel = SOURCE_STATUS_LABEL[source.status] ?? source.status;
+  const sourceEntry = { id: source.sourceId, title: source.title, status: source.status };
+  const failedPlatforms = failed.map((item) => ({
+    sourceId: item.sourceId,
+    name: item.name,
+    errorKind: item.errorKind ?? undefined,
+    error: item.error ?? undefined,
+  }));
+  const okPlatforms = ok.map((item) => ({ sourceId: item.sourceId, name: item.name }));
+  return {
+    kind: 'source-test',
+    summary: `单源测试：${source.title} ${statusLabel}，平台 ${ok.length}/${tested.length}，接入点 ${endpointOk}/${endpointTotal}`,
+    counts: {
+      total: 1,
+      available: source.status === 'available' ? 1 : 0,
+      partial: source.status === 'partial' ? 1 : 0,
+      unavailable: source.status === 'unavailable' ? 1 : 0,
+      untested: source.status === 'untested' ? 1 : 0,
+      platformsOk: ok.length,
+      platformsTested: tested.length,
+      endpointsOk: endpointOk,
+      endpointsTotal: endpointTotal,
+      cnOk,
+      cnTested,
+    },
+    failedSources: source.status === 'unavailable' ? [sourceEntry] : [],
+    partialSources: source.status === 'partial' ? [sourceEntry] : [],
+    okSources: source.status === 'available' ? [sourceEntry] : [],
+    failedPlatforms,
+    okPlatforms,
+    warnings: ['历史任务按运行明细重建单源统计'],
+  };
+}
+
 function TaskRow({
   task,
   busy,
@@ -309,7 +369,32 @@ function TaskRow({
   busy: boolean;
   onRetry: (task: TaskView) => void;
 }) {
-  const result = task.result;
+  const taskResult = task.result;
+  const legacy = task.type === 'source-test' && (taskResult?.counts.total ?? 0) > 1 && task.runId && task.payload.sourceId
+    ? { runId: task.runId, sourceId: task.payload.sourceId }
+    : null;
+  const [repaired, setRepaired] = useState<TaskResult | null>(null);
+  useEffect(() => {
+    if (!legacy) {
+      setRepaired(null);
+      return;
+    }
+    let cancelled = false;
+    api
+      .snapshot(legacy.runId)
+      .then((detail) => {
+        const next = legacySourceTestResult(task, detail);
+        if (!cancelled && next) setRepaired(next);
+      })
+      .catch(() => {
+        /* 读取失败时保留旧结果，不阻断任务卡 */
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [legacy?.runId, legacy?.sourceId, task.id]);
+  const result = repaired ?? taskResult;
   const retryable = task.status === 'failed' || task.status === 'cancelled';
   return (
     <li className="task-row">
